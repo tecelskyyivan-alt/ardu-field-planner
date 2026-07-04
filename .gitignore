@@ -31,3 +31,5 @@ Thumbs.db
 node_modules/
 *.apk
 .DS_Store
+sitl/ArduCopter.exe
+*.exe

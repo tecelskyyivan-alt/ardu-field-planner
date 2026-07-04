@@ -20,7 +20,7 @@ from backend.mavlink_link import MavLink, build_mission_items, CMD_DO_CHANGE_SPE
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SITL_DIR = os.path.join(ROOT, "sitl")
-SITL_EXE = os.path.join(SITL_DIR, "ArduCopter.exe")
+SITL_EXE = os.path.join(SITL_DIR, "ArduCopter.exe" if os.name=="nt" else "arducopter")
 PORT = 5760
 HOME = (49.5275, 24.004, 200.0)        # matches the --home below (lat,lon,alt AMSL)
 
@@ -60,7 +60,7 @@ def connect_persistent(link, host, port, timeout):
 def kill_sitl():
     """Belt-and-suspenders cleanup of any ArduCopter SITL on this machine."""
     try:
-        subprocess.run(["taskkill", "/IM", "ArduCopter.exe", "/F"],
+        subprocess.run((["taskkill","/IM","ArduCopter.exe","/F"] if os.name=="nt" else ["pkill","-f","ardu"]),
                        capture_output=True)
     except Exception:
         pass

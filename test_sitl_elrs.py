@@ -35,7 +35,7 @@ from backend.mavlink_link import MavLink, build_mission_items
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SITL_DIR = os.path.join(ROOT, "sitl")
-SITL_EXE = os.path.join(SITL_DIR, "ArduCopter.exe")
+SITL_EXE = os.path.join(SITL_DIR, "ArduCopter.exe" if os.name=="nt" else "arducopter")
 SITL_PORT = 5760
 PROXY_PORT = 5764            # the GCS connects here; proxy relays to SITL :5760
 HOME = (49.5275, 24.004, 200.0)
@@ -181,7 +181,7 @@ class ElrsProxy:
 
 def kill_sitl():
     try:
-        subprocess.run(["taskkill", "/IM", "ArduCopter.exe", "/F"], capture_output=True)
+        subprocess.run((["taskkill","/IM","ArduCopter.exe","/F"] if os.name=="nt" else ["pkill","-f","ardu"]), capture_output=True)
     except Exception:
         pass
 

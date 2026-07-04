@@ -16,7 +16,7 @@ from multiprocessing import Pool
 import shapefile  # pyshp
 from shapely.geometry import Polygon
 
-SEVENZIP = r"C:\Program Files\7-Zip\7z.exe"   # handles Deflate64 zips
+SEVENZIP = "7z"   # handles Deflate64 zips
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_FINAL = os.path.join(DATA, "fields.sqlite")
 WORKERS = 6
