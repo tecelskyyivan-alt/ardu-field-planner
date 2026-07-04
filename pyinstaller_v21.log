@@ -1,0 +1,174 @@
+136 INFO: PyInstaller: 6.21.0, contrib hooks: 2026.6
+136 INFO: Python: 3.14.5
+166 INFO: Platform: Windows-11-10.0.26300-SP0
+167 INFO: Python environment: C:\Users\tecel\ardu-field-planner\.venv
+467 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\tecel\\ardu-field-planner',
+ 'C:\\Users\\tecel\\AppData\\Local\\Programs\\Python\\Python314\\python314.zip',
+ 'C:\\Users\\tecel\\AppData\\Local\\Programs\\Python\\Python314\\DLLs',
+ 'C:\\Users\\tecel\\AppData\\Local\\Programs\\Python\\Python314\\Lib',
+ 'C:\\Users\\tecel\\AppData\\Local\\Programs\\Python\\Python314',
+ 'C:\\Users\\tecel\\ardu-field-planner\\.venv',
+ 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages',
+ 'C:\\Users\\tecel\\ardu-field-planner']
+907 INFO: Appending 'datas' from .spec
+910 INFO: checking Analysis
+910 INFO: Building Analysis because Analysis-00.toc is non existent
+910 INFO: Looking for Python shared library...
+910 INFO: Using Python shared library: C:\Users\tecel\AppData\Local\Programs\Python\Python314\python314.dll
+910 INFO: Running Analysis Analysis-00.toc
+910 INFO: Target bytecode optimization level: 0
+910 INFO: Initializing module dependency graph...
+913 INFO: Initializing module graph hook caches...
+927 INFO: Analyzing modules for base_library.zip ...
+1742 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+2415 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+2848 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3043 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3150 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5350 INFO: Caching module dependency graph...
+5373 INFO: Analyzing C:\Users\tecel\ardu-field-planner\app_qt.py
+5407 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5452 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5457 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5608 INFO: Processing standard module hook 'hook-webview.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\webview\\__pyinstaller'
+5680 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6111 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6196 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6810 INFO: Processing standard module hook 'hook-jinja2.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+6821 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+6822 INFO: SetuptoolsInfo: initializing cached setuptools info...
+7966 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8091 INFO: Processing standard module hook 'hook-clr.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\pythonnet\\_pyinstaller'
+8142 INFO: Processing standard module hook 'hook-clr_loader.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+8235 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+8384 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+8390 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8643 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8813 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9407 INFO: Processing standard module hook 'hook-pkg_resources.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11237 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11321 INFO: Processing standard module hook 'hook-shapely.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+11353 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+12322 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+13373 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+14365 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15990 INFO: Processing standard module hook 'hook-lxml.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+16283 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+16560 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+16623 INFO: Processing standard module hook 'hook-PySide6.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+16792 INFO: Processing standard module hook 'hook-shiboken6.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+17036 INFO: Processing standard module hook 'hook-PySide6.QtNetwork.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+20740 INFO: Processing standard module hook 'hook-PySide6.QtCore.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+24099 WARNING: QtLibraryInfo(PySide6): could not find translations with base name 'qtbase'! These translations will not be collected.
+24099 WARNING: QtLibraryInfo(PySide6): could not find translations with base name 'qt'! These translations will not be collected.
+25253 INFO: Processing standard module hook 'hook-PySide6.QtGui.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+45343 INFO: Processing standard module hook 'hook-PySide6.QtWidgets.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+49127 INFO: Processing standard module hook 'hook-PySide6.QtWebEngineWidgets.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+49835 INFO: Processing standard module hook 'hook-PySide6.QtPrintSupport.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+50679 INFO: Processing standard module hook 'hook-PySide6.QtWebEngineCore.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+52889 WARNING: QtLibraryInfo(PySide6): could not find translations with base name 'qtwebengine'! These translations will not be collected.
+52896 INFO: Processing standard module hook 'hook-PySide6.QtWebChannel.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+53601 INFO: Analyzing hidden import 'pymavlink.dialects.v10.ASLUAV'
+54332 INFO: Analyzing hidden import 'pymavlink.dialects.v10.AVSSUAS'
+55083 INFO: Analyzing hidden import 'pymavlink.dialects.v10.all'
+56082 INFO: Analyzing hidden import 'pymavlink.dialects.v10.common'
+56823 INFO: Analyzing hidden import 'pymavlink.dialects.v10.csAirLink'
+56858 INFO: Analyzing hidden import 'pymavlink.dialects.v10.cubepilot'
+57602 INFO: Analyzing hidden import 'pymavlink.dialects.v10.development'
+58373 INFO: Analyzing hidden import 'pymavlink.dialects.v10.icarous'
+58405 INFO: Analyzing hidden import 'pymavlink.dialects.v10.loweheiser'
+58459 INFO: Analyzing hidden import 'pymavlink.dialects.v10.matrixpilot'
+59297 INFO: Analyzing hidden import 'pymavlink.dialects.v10.minimal'
+59349 INFO: Analyzing hidden import 'pymavlink.dialects.v10.paparazzi'
+60107 INFO: Analyzing hidden import 'pymavlink.dialects.v10.python_array_test'
+60860 INFO: Analyzing hidden import 'pymavlink.dialects.v10.standard'
+60912 INFO: Analyzing hidden import 'pymavlink.dialects.v10.storm32'
+61886 INFO: Analyzing hidden import 'pymavlink.dialects.v10.test'
+61918 INFO: Analyzing hidden import 'pymavlink.dialects.v10.uAvionix'
+62710 INFO: Analyzing hidden import 'pymavlink.dialects.v10.ualberta'
+63478 INFO: Analyzing hidden import 'pymavlink.dialects.v20'
+63479 INFO: Analyzing hidden import 'pymavlink.dialects.v20.ASLUAV'
+64563 INFO: Analyzing hidden import 'pymavlink.dialects.v20.AVSSUAS'
+65603 INFO: Analyzing hidden import 'pymavlink.dialects.v20.all'
+67353 INFO: Analyzing hidden import 'pymavlink.dialects.v20.ardupilotmega'
+68733 INFO: Analyzing hidden import 'pymavlink.dialects.v20.common'
+69748 INFO: Analyzing hidden import 'pymavlink.dialects.v20.csAirLink'
+69783 INFO: Analyzing hidden import 'pymavlink.dialects.v20.cubepilot'
+70817 INFO: Analyzing hidden import 'pymavlink.dialects.v20.development'
+71882 INFO: Analyzing hidden import 'pymavlink.dialects.v20.icarous'
+71918 INFO: Analyzing hidden import 'pymavlink.dialects.v20.loweheiser'
+71977 INFO: Analyzing hidden import 'pymavlink.dialects.v20.matrixpilot'
+73129 INFO: Analyzing hidden import 'pymavlink.dialects.v20.minimal'
+73184 INFO: Analyzing hidden import 'pymavlink.dialects.v20.paparazzi'
+74285 INFO: Analyzing hidden import 'pymavlink.dialects.v20.python_array_test'
+75418 INFO: Analyzing hidden import 'pymavlink.dialects.v20.standard'
+75484 INFO: Analyzing hidden import 'pymavlink.dialects.v20.storm32'
+76974 INFO: Analyzing hidden import 'pymavlink.dialects.v20.test'
+77009 INFO: Analyzing hidden import 'pymavlink.dialects.v20.uAvionix'
+78184 INFO: Analyzing hidden import 'pymavlink.dialects.v20.ualberta'
+79233 INFO: Analyzing hidden import 'pymavlink.fgFDM'
+79241 INFO: Analyzing hidden import 'pymavlink.mavftp'
+79302 INFO: Analyzing hidden import 'pymavlink.mavftpfs'
+79313 INFO: Analyzing hidden import 'pymavlink.mavparm'
+79320 INFO: Analyzing hidden import 'pymavlink.mavtestgen'
+79325 INFO: Analyzing hidden import 'pymavlink.mavwp'
+79352 INFO: Analyzing hidden import 'pymavlink.setup'
+79380 INFO: Processing module hooks (post-graph stage)...
+79606 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+79665 WARNING: Hidden import "pycparser.lextab" not found!
+79665 WARNING: Hidden import "pycparser.yacctab" not found!
+80044 INFO: Processing pre-safe-import-module hook 'hook-platformdirs.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+80302 INFO: Processing standard module hook 'hook-PySide6.QtQuick.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+84168 INFO: Processing standard module hook 'hook-PySide6.QtOpenGL.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+88743 INFO: Processing standard module hook 'hook-PySide6.QtQml.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+93346 WARNING: QtLibraryInfo(PySide6): could not find translations with base name 'qtdeclarative'! These translations will not be collected.
+93346 WARNING: QtLibraryInfo(PySide6): QML directory 'C:/Users/tecel/ardu-field-planner/.venv/Lib/site-packages/PySide6/qml' does not exist. QML files not packaged.
+93415 INFO: Processing standard module hook 'hook-PySide6.QtPositioning.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+94930 WARNING: QtLibraryInfo(PySide6): could not find translations with base name 'qtlocation'! These translations will not be collected.
+94940 INFO: Processing standard module hook 'hook-PySide6.QtQuickWidgets.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+95765 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+95841 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+96007 INFO: Performing binary vs. data reclassification (218 entries)
+96086 INFO: Looking for ctypes DLLs
+96134 WARNING: Ignoring /System/Library/Frameworks/CoreFoundation.framework/CoreFoundation imported from C:\Users\tecel\ardu-field-planner\.venv\Lib\site-packages\serial\tools\list_ports_osx.py - only basenames are supported with ctypes imports!
+96134 WARNING: Ignoring /System/Library/Frameworks/IOKit.framework/IOKit imported from C:\Users\tecel\ardu-field-planner\.venv\Lib\site-packages\serial\tools\list_ports_osx.py - only basenames are supported with ctypes imports!
+96155 INFO: Analyzing run-time hooks ...
+96159 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+96161 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+96163 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+96164 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+96166 INFO: Including run-time hook 'pyi_rth_pkgres.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+96170 INFO: Including run-time hook 'pyi_rth_pyside6.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+96172 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+96173 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+96187 INFO: Creating base_library.zip...
+96201 INFO: Looking for dynamic libraries
+97252 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\shiboken6', 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\numpy.libs', 'C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\shapely.libs']
+97252 INFO: Extra DLL search directories (PATH): ['C:\\Users\\tecel\\ardu-field-planner\\.venv\\Lib\\site-packages\\PySide6']
+99258 INFO: Warnings written to C:\Users\tecel\ardu-field-planner\build\FieldMissionPlanner\warn-FieldMissionPlanner.txt
+99316 INFO: Graph cross-reference written to C:\Users\tecel\ardu-field-planner\build\FieldMissionPlanner\xref-FieldMissionPlanner.html
+99349 INFO: checking PYZ
+99349 INFO: Building PYZ because PYZ-00.toc is non existent
+99349 INFO: Building PYZ (ZlibArchive) C:\Users\tecel\ardu-field-planner\build\FieldMissionPlanner\PYZ-00.pyz
+100527 INFO: Building PYZ (ZlibArchive) C:\Users\tecel\ardu-field-planner\build\FieldMissionPlanner\PYZ-00.pyz completed successfully.
+100544 INFO: checking PKG
+100544 INFO: Building PKG because PKG-00.toc is non existent
+100544 INFO: Building PKG (CArchive) FieldMissionPlanner.pkg
+100568 INFO: Building PKG (CArchive) FieldMissionPlanner.pkg completed successfully.
+100570 INFO: Bootloader C:\Users\tecel\ardu-field-planner\.venv\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+100570 INFO: checking EXE
+100570 INFO: Building EXE because EXE-00.toc is non existent
+100570 INFO: Building EXE from EXE-00.toc
+100570 INFO: Copying bootloader EXE to C:\Users\tecel\ardu-field-planner\build\FieldMissionPlanner\FieldMissionPlanner.exe
+100588 INFO: Copying icon to EXE
+100597 INFO: Copying 0 resources to EXE
+100597 INFO: Embedding manifest in EXE
+100605 INFO: Appending PKG archive to EXE
+100830 INFO: Fixing EXE headers
+101380 INFO: Building EXE from EXE-00.toc completed successfully.
+101384 INFO: checking COLLECT
+101384 INFO: Building COLLECT because COLLECT-00.toc is non existent
+101385 INFO: Building COLLECT COLLECT-00.toc
+105943 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+105949 INFO: Build complete! The results are available in: C:\Users\tecel\ardu-field-planner\dist

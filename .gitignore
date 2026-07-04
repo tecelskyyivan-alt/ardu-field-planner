@@ -1,0 +1,33 @@
+# Secrets — MUST never be committed/pushed (security audit S1/S2).
+# The Android signing keystore + its password, and any local machine paths.
+android/keystore.properties
+android/local.properties
+android/**/keystore.properties
+*.keystore
+*.jks
+release.keystore
+
+# Build output / caches
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/*/_beta_web_bak/
+__pycache__/
+*.pyc
+.venv/
+tiles_cache/
+logs/
+
+# Large runtime assets (pulled/synced, not source)
+android/app/src/main/assets/web/pyodide/
+ios/App/web/
+web/pyodide/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# --- додано автоматично ---
+node_modules/
+*.apk
+.DS_Store

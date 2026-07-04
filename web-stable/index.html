@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- Content-Security-Policy (security audit S8, defence-in-depth): blocks injected
+       inline <script>, object/embed, and <base> hijack. 'unsafe-eval'/'wasm-unsafe-eval'
+       + blob: are REQUIRED by the Pyodide planning engine and its Web Worker; img/connect
+       allow map tiles + the elevation API + the VPS over https. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'" />
+  <title>Field Mission Planner</title>
+
+  <!-- PWA: installable on PC + Android, updates delivered from the server. -->
+  <link rel="manifest" href="manifest.json" crossorigin="use-credentials" />
+  <meta name="theme-color" content="#0a0f14" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+
+  <!-- Self-hosted (no CDN) so the map works fully offline and there's no
+       third-party supply-chain risk. -->
+  <link rel="stylesheet" href="lib/leaflet.css" />
+  <link rel="stylesheet" href="lib/leaflet.draw.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- GPS-threat alarm: a full-width red overlay shown on jamming/spoofing. -->
+  <div id="gps-alarm" class="gps-alarm" style="display:none">
+    <div id="gps-alarm-title">ЗАГРОЗА GPS</div>
+    <div id="gps-alarm-reason"></div>
+    <button id="gps-alarm-ack" class="primary">Зрозумів — заглушити сигнал</button>
+  </div>
+  <div id="app">
+    <aside id="panel">
+      <h1>Field Mission Planner</h1>
+      <p class="sub">ArduCopter · обприскування поля <span id="plan-ver" class="ver-chip" title="Перевірити оновлення"></span></p>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="plan">План</button>
+        <button class="tab" data-tab="fly">Політ</button>
+        <button class="tab" data-tab="app" id="tab-btn-app">Додаток</button>
+      </div>
+
+      <div id="tab-plan" class="tab-pane active">
+      <!-- Малювання поля / вирізів + редагування вузлів + видалення — на ТУЛБАРІ
+           зверху-зліва НА КАРТІ (пятикутник → Контур/Виріз; олівець; кошик).
+           Ці кнопки лишені ПРИХОВАНИМИ — їхні обробники ще потрібні коду. -->
+      <div hidden>
+        <button id="edit-contour" class="ghost" disabled>Редагувати вершини контуру</button>
+        <button id="add-exclusion" class="ghost">Додати виріз</button>
+        <button id="edit-exclusions" class="ghost">Редагувати вирізи</button>
+        <button id="clear-exclusions" class="ghost">Очистити вирізи</button>
+        <button id="save-exclusions" class="ghost">Зберегти вирізи</button>
+      </div>
+      <button id="dl-map" class="ghost">Зберегти карту району офлайн</button>
+
+      <div class="step">
+        <span class="badge">1</span> Параметри маршруту
+      </div>
+
+      <label>Висота польоту (над точкою зльоту), м
+        <input id="alt" type="number" value="50" min="1" step="1" />
+      </label>
+      <label>Ширина внесення (крок проходів), м
+        <input id="spacing" type="number" value="20" min="1" step="1" />
+      </label>
+      <label>Кут проходів, ° <span id="angle-val" class="angle-val">0°</span>
+        <input id="angle" type="number" value="0" min="0" max="179" step="1" />
+      </label>
+      <input id="angle-range" class="angle-range" type="range" value="0" min="0" max="179" step="1"
+             aria-label="Кут проходів" />
+      <label class="row">
+        <input id="auto_angle" type="checkbox" checked />
+        Автокут — мінімальний час польоту
+      </label>
+      <label>Відступ від країв, м
+        <input id="margin" type="number" value="0" min="0" step="1" />
+      </label>
+      <label>Швидкість, м/с
+        <input id="speed" type="number" value="12" min="1" step="0.5" />
+      </label>
+      <label class="row">
+        <input id="rtl" type="checkbox" checked />
+        Повернення (RTL) в кінці місії
+      </label>
+
+      <div class="step">
+        <span class="badge">2</span> Побудова та експорт
+      </div>
+
+      <label class="row">
+        <input id="viz-coverage" type="checkbox" checked />
+        Показувати покриття та накладання
+      </label>
+      <button id="build" class="primary">Побудувати маршрут</button>
+      <button id="cancel-build" class="ghost" disabled>Скасувати побудову маршруту</button>
+      <details class="io-group">
+        <summary>Експорт / Імпорт</summary>
+        <p class="hint">Експорт маршруту:</p>
+        <div class="export-row">
+          <button id="exp-wp" disabled>.waypoints</button>
+          <button id="exp-plan" disabled>.plan</button>
+        </div>
+        <p class="hint">Геозона (контур):</p>
+        <div class="export-row">
+          <button id="exp-fence" disabled>Геозона .plan</button>
+          <button id="exp-fencemp" disabled>.fence (MP)</button>
+        </div>
+        <button id="exp-geojson" class="ghost" disabled>Контур .geojson</button>
+        <div class="export-row">
+          <button id="exp-kml" class="ghost">Контур .kml</button>
+          <button id="import-kml" class="ghost">Імпорт .kml</button>
+        </div>
+        <input id="kml-file" type="file" accept=".kml,.xml" style="display:none" />
+        <p class="hint">Проєкт (поле + параметри):</p>
+        <div class="export-row">
+          <button id="save-project" class="ghost">Зберегти проєкт</button>
+          <button id="load-project" class="ghost">Завантажити проєкт</button>
+        </div>
+        <input id="load-file" type="file" accept=".json,.fmproj" style="display:none" />
+      </details>
+
+      <button id="clear" class="ghost">Очистити</button>
+      <button id="show-saved" class="primary">Усі поля на карті</button>
+
+      <div id="stats" class="stats hidden"></div>
+      </div><!-- /tab-plan -->
+
+      <div id="tab-fly" class="tab-pane">
+      <div class="step">
+        Підключення до дрона
+        <span id="app-ver"></span>
+        <p class="hint">Кабель (USB) / радіо / мережа. Маршрут — у вкладці «План».</p>
+      </div>
+      <label>Тип зʼєднання
+        <select id="mav-conn-type">
+          <option value="cable">Кабель / радіо (COM-порт)</option>
+          <option value="udp">UDP (мережа / SITL)</option>
+          <option value="tcp">TCP (SITL)</option>
+        </select>
+      </label>
+      <div id="mav-cable-row">
+        <label>COM-порт
+          <select id="mav-port"><option value="">— оновити список —</option></select>
+        </label>
+        <button id="mav-pick-device" class="ghost" style="display:none">Вибрати пристрій (USB)</button>
+        <button id="mav-refresh-ports" class="ghost">Оновити список портів</button>
+        <label>Швидкість (baud)
+          <select id="mav-baud">
+            <option value="auto" selected>Авто (підібрати)</option>
+            <option value="115200">115200 (USB-кабель)</option>
+            <option value="57600">57600 (радіо SiK)</option>
+            <option value="921600">921600</option>
+            <option value="460800">460800</option>
+            <option value="230400">230400</option>
+            <option value="38400">38400</option>
+            <option value="19200">19200</option>
+            <option value="9600">9600</option>
+          </select>
+        </label>
+      </div>
+      <div id="mav-net-row" style="display:none">
+        <label>Адреса (host:port) — авто
+          <input id="mav-address" type="text" value="" placeholder="авто: 0.0.0.0:14550" />
+        </label>
+        <p class="hint">Порожнє = слухати всі мережі на 14550.</p>
+      </div>
+      <div class="export-row">
+        <button id="mav-connect" class="primary">Підключити</button>
+        <button id="mav-disconnect" class="ghost" disabled>Відключити</button>
+      </div>
+      <button id="mav-upload" disabled>Завантажити місію в дрон</button>
+      <div id="mission-status" class="mission-status">Маршрут не побудовано.</div>
+      <button id="mav-check" class="ghost" disabled>Місія в дроні</button>
+      <label class="row"><input id="mav-follow" type="checkbox" />
+        Стежити за дроном (центрувати карту)</label>
+      <div id="mav-hud" class="stats hidden"></div>
+
+      <div class="step" style="margin-top:14px">Захист GPS (глушіння / спуфінг)
+        <label class="row" style="font-weight:400;margin:4px 0 0">
+          <input id="gps-guard-on" type="checkbox" checked /> Увімкнено
+        </label>
+      </div>
+      <div id="gps-guard" class="gps-guard">
+        <span id="gps-guard-dot" class="gg-dot"></span>
+        <span id="gps-guard-text">—</span>
+      </div>
+      <p id="gps-guard-detail" class="hint" style="margin-top:2px"></p>
+      <p class="hint">Контроль супутників / HDOP і стрибків позиції. При глушінні чи спуфінгу — звуковий сигнал і вібрація. Рішення (посадка / зміна режиму) — за оператором.</p>
+
+      <div class="step" style="margin-top:14px">Керування польотом</div>
+      <p class="hint">Послідовність: ARM → «Старт місії» (AUTO). Тримайте готовність до перехоплення керування.</p>
+      <div class="export-row">
+        <button id="mav-arm" class="ghost" disabled>ARM</button>
+        <button id="mav-disarm" class="ghost" disabled>DISARM</button>
+      </div>
+      <label>Режим польоту
+        <select id="mav-mode" disabled>
+          <option value="AUTO">AUTO (місія)</option>
+          <option value="GUIDED">GUIDED</option>
+          <option value="LOITER">LOITER (пауза)</option>
+          <option value="BRAKE">BRAKE (стоп)</option>
+          <option value="RTL">RTL (додому)</option>
+          <option value="LAND">LAND (посадка)</option>
+        </select>
+      </label>
+      <button id="mav-set-mode" class="ghost" disabled>Встановити режим</button>
+      <div class="export-row">
+        <button id="mav-start" class="primary" disabled>Старт місії (AUTO)</button>
+        <button id="mav-rtl" class="ghost" disabled>RTL</button>
+      </div>
+      <button id="mav-log" class="ghost" style="margin-top:10px">Лог для аналізу (надіслати/зберегти)</button>
+      <button id="export-flights" class="ghost">Журнал польотів (JSON)</button>
+      <button id="export-flights-csv" class="ghost">Записи робіт (CSV)</button>
+      <p class="hint">Кожен виліт логується офлайн і калібрує оцінку часу / заряду.</p>
+      </div><!-- /tab-fly -->
+
+      <div id="tab-app" class="tab-pane">
+      <div class="step">
+        Встановити додаток
+        <p class="hint">Офлайн-додаток. Тут завжди актуальна версія — встановив раз, далі працює без інтернету.</p>
+      </div>
+
+      <button id="check-update" class="primary">Перевірити / оновити додаток</button>
+      <p class="hint">Перевіряє сервер на нову версію й оновлює прямо тут: веб-версія — миттєво, APK — завантажить новий і запропонує встановити.</p>
+
+      <p class="hint"><b>Android — нативний (APK):</b> прямий зв'язок з польотником (STM32 / Pixhawk) по USB-кабелю.
+        Завантаж → дозволь встановлення з невідомих джерел → відкрий.</p>
+      <div class="export-row">
+        <a id="dl-android" class="dl-btn" href="downloads/FieldMissionPlanner.apk" download>Android APK</a>
+      </div>
+      <p class="hint" style="margin-top:2px">Версія стабільного APK: <b>v2.5.36</b>.</p>
+
+      <p class="hint"><b>Бета (тестова збірка):</b> нові функції на перевірку. Ставиться
+        <b>ОКРЕМО</b> від стабільної — інша іконка «<b>FMP BETA</b>», стабільну не замінює й не видаляє.
+        Зараз у беті: <b>НОВИЙ польовий інтерфейс</b> — карта на весь екран + великі кнопки по кроках
+        Поле→Маршрут→Дрон→Політ (видно, що тиснути далі); керування <b>ARM/СТАРТ/RTL «протягни-щоб-підтвердити»</b>
+        (захист від випадкових дотиків у полі); фікс пропуску вузьких ділянок поля.</p>
+      <div class="export-row">
+        <a id="dl-android-beta" class="dl-btn" href="downloads/FieldMissionPlanner-beta.apk" download>Завантажити Android APK — БЕТА v2.6.6-beta</a>
+      </div>
+      <p class="hint">З версії 2.6.5 бета <b>оновлюється з середини додатку</b> (тапни версію вгорі → «Оновити») — далі не треба качати вручну.</p>
+
+      <p class="hint"><b>ПК (Windows / Mac):</b> просто відкрий цей додаток у <b>Chrome / Edge</b> —
+        повний функціонал: планування + <b>дрон по USB-кабелю</b> (WebSerial). Тисни «Встановити»
+        нижче, щоб був як окремий застосунок і працював офлайн.</p>
+      <div class="export-row">
+        <button id="install-pwa" class="ghost">Встановити як додаток (ПК / Android-веб)</button>
+      </div>
+      <p class="hint" id="install-pwa-hint" style="display:none">У Chrome: меню (⋮) → «Встановити додаток» / «Додати на головний екран».</p>
+      <p class="hint">На <b>Android у браузері</b> — лише ПЛАНУВАННЯ (браузер Android не має доступу до USB).
+        Для дрона на телефоні — <b>APK вище</b>.</p>
+      </div><!-- /tab-app -->
+
+      <div id="msg" class="msg"></div>
+    </aside>
+
+    <main id="map"></main>
+    <!-- Transient popup: shows the running process + its result at the top of the map,
+         then AUTO-HIDES; dismiss early by tap or swipe. The persistent status line
+         stays at the bottom of the panel (#msg above). -->
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- Mobile: a floating button toggles the panel over a full-screen map. -->
+    <div id="panel-scrim" aria-hidden="true"></div>
+    <button id="panel-toggle" type="button" aria-label="Меню / параметри"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <button id="panel-close" type="button" aria-label="Закрити панель"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+
+  <script src="lib/leaflet.js"></script>
+  <script src="lib/leaflet.draw.js"></script>
+  <script src="engine.js"></script>
+  <script src="mav/mavlink.js"></script>
+  <script src="mav/transport.js"></script>
+  <script src="mav/link.js"></script>
+  <script src="app.js"></script>
+  <script src="sw-register.js"></script>
+</body>
+</html>

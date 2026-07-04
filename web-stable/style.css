@@ -1,0 +1,363 @@
+/* Field Mission Planner — UI theme.
+   Minimalist field-ops dark UI: calm neutral surfaces, one restrained accent,
+   flat controls (no glow/gradients), high contrast for sunlight, generous tap
+   targets, and steps grouped into quiet, readable sections. */
+:root {
+  --bg: #0b0e12;
+  --panel: #10151b;
+  --panel-2: #151b22;       /* raised surfaces (stats / HUD / bands) */
+  --inset: #0c1116;         /* recessed surfaces (inputs) */
+  --line: #1e2831;
+  --line-soft: #171f27;
+  --text: #e8edf2;
+  --text-dim: #93a1ad;
+  --text-faint: #64717d;
+  --accent: #3f80ff;
+  --accent-hi: #5c93ff;
+  --accent-dim: rgba(63, 128, 255, 0.14);
+  --ok: #56c596;
+  --warn: #e5b567;
+  --danger: #ec6a63;
+  --radius: 8px;
+  --radius-sm: 6px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+#app { display: flex; height: 100vh; }
+
+#panel {
+  width: 340px;
+  flex: 0 0 340px;
+  padding: 20px 18px 30px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3742 transparent;
+}
+#panel::-webkit-scrollbar { width: 8px; }
+#panel::-webkit-scrollbar-thumb { background: #232f3a; border-radius: 6px; border: 2px solid var(--panel); }
+#panel::-webkit-scrollbar-thumb:hover { background: #2e3d49; }
+
+#map { flex: 1; background: var(--bg); }
+
+/* Small inline icons (SVG) used inside buttons/controls in place of emoji. */
+.ic { width: 18px; height: 18px; flex: 0 0 auto; stroke: currentColor; fill: none;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- Header ---------------------------------------------------------------- */
+h1 {
+  font-size: 19px; font-weight: 700; letter-spacing: -0.2px;
+  margin: 0 0 3px; color: var(--text);
+}
+.sub {
+  margin: 0 0 16px; padding-bottom: 14px;
+  color: var(--text-faint); font-size: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* ---- Plan / Fly / App tabs ------------------------------------------------- */
+.tabs { display: flex; gap: 4px; margin: 0 0 18px; }
+.tab {
+  flex: 1; width: auto; margin: 0;
+  padding: 10px 6px;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px; font-weight: 600;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.tab:hover:not(.active) { color: var(--text-dim); background: #141b22; }
+.tab.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* ---- Section headers (steps) ---------------------------------------------- */
+.step {
+  display: flex; align-items: center; flex-wrap: wrap;
+  margin: 22px 0 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 13px; font-weight: 700; color: var(--text);
+  letter-spacing: 0.2px;
+}
+.tab-pane > .step:first-child { margin-top: 2px; padding-top: 0; border-top: none; }
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin-right: 10px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent); font-size: 11px; font-weight: 700;
+  letter-spacing: 0;
+}
+.hint {
+  flex-basis: 100%;
+  margin: 6px 0 0; padding-left: 0;
+  font-size: 11.5px; line-height: 1.5; color: var(--text-faint); font-weight: 400;
+}
+
+/* ---- Form controls --------------------------------------------------------- */
+label { display: block; margin: 12px 0; font-size: 12px; color: var(--text-dim); }
+label.row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+input[type=number], input[type=text], select {
+  width: 100%; margin-top: 6px;
+  padding: 9px 11px;
+  background: var(--inset);
+  border: 1px solid #223039;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  transition: border-color .15s, box-shadow .15s;
+}
+input[type=number]:focus, input[type=text]:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); flex: 0 0 auto; }
+input[type=range].angle-range { width: 100%; margin: 9px 0 0; accent-color: var(--accent); cursor: pointer; }
+input[type=range].angle-range:disabled { opacity: 0.4; cursor: not-allowed; }
+.angle-val { margin-left: auto; color: var(--ok); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---- Buttons --------------------------------------------------------------- */
+button, .dl-btn {
+  width: 100%; padding: 11px 12px; margin-top: 9px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid transparent; border-radius: var(--radius);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  background: #19212a; color: #d4dee8;
+  transition: background .15s, border-color .15s, color .15s, transform .05s;
+  user-select: none;
+}
+button:hover:not(:disabled) { background: #202b35; }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:focus-visible, a.dl-btn:focus-visible, select:focus-visible, .tab:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px var(--accent-dim);
+}
+button.primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+button.primary:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
+button.ghost { background: transparent; border-color: #253440; color: var(--text-dim); }
+button.ghost:hover:not(:disabled) { background: #161f27; color: var(--text); border-color: #2f4150; }
+button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.export-row { display: flex; gap: 8px; }
+.export-row > * { margin-top: 9px; }
+.dl-btn {
+  flex: 1; text-decoration: none; background: transparent; border-color: #253440; color: var(--text-dim);
+}
+.dl-btn:hover { background: #161f27; color: var(--text); }
+
+/* ---- Stats / HUD card ------------------------------------------------------ */
+.stats {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.stats .row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); }
+.stats .row:last-child { border-bottom: none; }
+.stats .row span:first-child { color: var(--text-dim); }
+.stats .row span:last-child { color: var(--ok); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.hidden { display: none; }
+
+/* ---- Mission status banner ------------------------------------------------- */
+.mission-status {
+  margin-top: 10px; padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600;
+  border: 1px solid #253440; background: var(--inset); color: var(--text-dim);
+}
+.mission-status.ok { color: var(--ok); border-color: #285644; background: #0e1a15; }
+.mission-status.warn { color: var(--warn); border-color: #574a28; background: #1a1710; }
+.mission-status.stale { color: var(--danger); border-color: #572a2a; background: #1a1010; }
+
+/* Persistent status line — at the bottom of the panel (scroll to see history). */
+.msg { margin-top: 14px; font-size: 12.5px; line-height: 1.45; min-height: 16px; color: var(--text-dim); }
+.msg.error { color: var(--danger); }
+.msg.ok { color: var(--ok); }
+
+/* Transient popup toast at the top of the map: shows the running process + result,
+   then AUTO-HIDES; dismiss early by tap or swipe. Slides + fades. Hidden by default. */
+.toast {
+  position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%; z-index: 1400;
+  max-width: min(560px, 92vw);
+  padding: 9px 15px; border-radius: 10px; text-align: center;
+  font-size: 12.5px; line-height: 1.4; color: var(--text);
+  background: rgba(13, 18, 24, .97); border: 1px solid #253440;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .5);
+  font-variant-numeric: tabular-nums; cursor: pointer;
+  touch-action: pan-y; user-select: none;
+  opacity: 0; transform: translate(-50%, -16px); pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.toast.error { color: var(--danger); border-color: #572a2a; }
+.toast.ok { color: var(--ok); border-color: #285644; }
+
+#app-ver { margin-left: auto; opacity: .5; font-size: .8em; font-weight: 400; }
+
+/* ---- Mobile: panel becomes a full-screen drawer over the map --------------- */
+#panel-toggle {
+  display: none;
+  position: fixed; left: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 1300;
+  width: 54px; height: 54px; padding: 0; margin: 0;
+  align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent); color: #fff; border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+#panel-toggle .ic { width: 24px; height: 24px; stroke-width: 2; }
+#panel-close, #panel-scrim { display: none; }
+
+@media (max-width: 760px) {
+  #panel {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 100%; max-width: 100%;
+    padding: max(20px, env(safe-area-inset-top)) 18px 30px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 1200;
+  }
+  body.panel-open #panel { transform: translateX(0); }
+  #panel.panel-dragging { transition: none; }   /* follow the finger 1:1 while swiping */
+  #panel-toggle { display: flex; }
+  body.panel-open #panel-toggle { display: none; }
+  body.panel-open .leaflet-control-container { display: none; }
+  /* Android 15 (targetSdk 35) draws the app edge-to-edge, and installed PWAs / iOS
+     have a notch — keep the map's top-right controls clear of the status bar. */
+  .leaflet-top { margin-top: env(safe-area-inset-top); }
+  .leaflet-right { margin-right: env(safe-area-inset-right); }
+  body.panel-open #panel-close {
+    display: flex; align-items: center; justify-content: center;
+    position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 14px; z-index: 1300;
+    width: 42px; height: 42px; padding: 0; margin: 0;
+    border-radius: 50%;
+    background: rgba(16, 21, 27, 0.95); color: var(--text);
+    border: 1px solid #253440;
+  }
+  #panel-close .ic { width: 20px; height: 20px; }
+  /* Bigger tap targets on touch screens. */
+  button, .dl-btn { padding: 13px; }
+  input[type=number], input[type=text], select { padding: 12px 12px; font-size: 16px; }
+}
+
+/* Highest / lowest contour-point markers on the «Карта висот» layer:
+   a small coloured pill (warm = highest, cool = lowest, green = my position). */
+.elev-marker {
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 800; line-height: 1; white-space: nowrap;
+  font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0, 0, 0, .9);
+  padding: 3px 8px; border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .85);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .5);
+}
+.elev-marker.hi { background: #e8552a; }   /* highest = warm */
+.elev-marker.lo { background: #2d6fe0; }   /* lowest  = cool */
+.elev-marker.me { background: #2db37a; }   /* my pos = green */
+
+/* Persistent relief badge (bottom-left of the map): high · low · Δ.
+   Clean 2-row card (label + value). */
+.elev-badge {
+  position: absolute; left: 12px; bottom: 24px; z-index: 1000;
+  display: none; flex-direction: column; gap: 3px;
+  padding: 8px 12px; border-radius: 10px;
+  background: rgba(13, 18, 24, .95); border: 1px solid #253440;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, .45);
+  font-size: 13px; font-weight: 700; color: #eaf2ff;
+  font-variant-numeric: tabular-nums; pointer-events: auto;
+}
+.elev-badge .eb-row { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.elev-badge .hi { color: #ff9b6b; }
+.elev-badge .lo { color: #7fb4ff; }
+.elev-badge .me { color: #7ff0c0; }
+.elev-badge .dz { color: #cfe0f0; }
+.elev-badge .dz b { color: var(--ok); }
+.elev-badge .eb-k { color: var(--text-faint); font-weight: 600; }
+
+/* «Моє місце» locate button on the map toolbar (inherits Leaflet's .leaflet-bar look). */
+.locate-ctl a { display: flex; align-items: center; justify-content: center;
+  text-decoration: none; cursor: pointer; color: #33383d; }
+.locate-ctl a .ic { width: 18px; height: 18px; }
+.locate-ctl a.active { background: var(--accent); color: #fff; }
+
+/* Collapsible «Експорт / Імпорт» group (one hide/show section). */
+.io-group { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel-2); padding: 0 12px; }
+.io-group > summary { list-style: none; cursor: pointer; user-select: none;
+  margin: 0 -12px; padding: 10px 12px; font-size: 12.5px; font-weight: 700; color: var(--text-dim); }
+.io-group > summary::-webkit-details-marker { display: none; }
+.io-group > summary::after { content: "+"; float: right; opacity: .7; font-weight: 700; }
+.io-group[open] > summary::after { content: "\2212"; }   /* minus */
+.io-group > summary:hover { color: var(--text); }
+.io-group[open] { padding-bottom: 10px; }
+.hint b { color: var(--text-dim); font-weight: 700; }
+/* Phone: lift the elevation badge ABOVE the ☰ menu button (both were bottom-left and
+   overlapped), and clear the home-indicator safe area. */
+@media (max-width: 760px) { .elev-badge {
+  font-size: 12px; gap: 7px; padding: 7px 10px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+} }
+
+/* Start/finish anchor marker — a clean framed marker, no box background. */
+.anchor-marker { background: none !important; border: 0 !important; text-align: center;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .85)); }
+.home-marker { background: none !important; border: 0 !important; }
+.home-marker .ic { width: 24px; height: 24px; color: #fff; fill: var(--accent); stroke: #fff;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .8)); }
+
+/* Контур / Виріз chooser injected INTO the Leaflet.draw action bar (beside Finish),
+   so it inherits the toolbar style. Only the highlight + a separator are added. */
+.leaflet-draw-actions .dc-a { font-weight: 700; }
+.leaflet-draw-actions .dc-a.dc-on { background-color: var(--accent) !important; color: #fff !important; }
+.leaflet-draw-actions li.dc-li:last-of-type { border-right: 2px solid rgba(0, 0, 0, .25); }
+
+/* Field name + area label (used by «Показати всі поля на карті»). */
+.area-label { background: none !important; border: 0 !important; pointer-events: none; }
+.area-label span {
+  display: inline-block; padding: 2px 7px; border-radius: 9px; text-align: center;
+  background: rgba(13, 18, 24, .78); color: #eaf2ff; font-weight: 700;
+  font-size: 12px; line-height: 1.3; white-space: nowrap;
+  border: 1px solid rgba(63, 128, 255, .5); box-shadow: 0 1px 5px rgba(0, 0, 0, .45);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+}
+.area-label.field span { font-size: 12.5px; border-color: rgba(63, 128, 255, .65); }
+
+.ver-chip { opacity: 0.65; font-size: 0.82em; cursor: pointer; }
+
+/* ---- GPS protection (anti-jamming / anti-spoofing) ---- */
+.gps-guard { display:flex; align-items:center; gap:8px; padding:7px 9px;
+  border-radius:var(--radius-sm); background:rgba(255,255,255,0.04); border:1px solid var(--line-soft); }
+.gg-dot { width:11px; height:11px; border-radius:50%; background:#6b7280;
+  flex:0 0 auto; box-shadow:0 0 7px currentColor; }
+#gps-guard-text { font-weight:600; }
+.gps-alarm { position:fixed; top:0; left:0; right:0; z-index:99999;
+  background:#c1121f; color:#fff; text-align:center;
+  padding:calc(14px + env(safe-area-inset-top)) 12px 14px;
+  box-shadow:0 4px 20px rgba(0,0,0,0.55); animation:gpsAlarmFlash 0.7s steps(1) infinite; }
+#gps-alarm-title { font-size:1.3em; font-weight:800; letter-spacing:0.5px; }
+#gps-alarm-reason { margin:6px auto 10px; max-width:640px; font-size:0.95em; line-height:1.35; }
+#gps-alarm .primary { background:#fff; color:#c1121f; font-weight:700; }
+@keyframes gpsAlarmFlash { 0%{background:#c1121f;} 50%{background:#820b15;} }
+
+/* ---- live «my location» blue dot (operator's own GPS, tracked) ---- */
+.myloc-dot { position:absolute; left:15px; top:15px; width:14px; height:14px;
+  margin:-7px 0 0 -7px; border-radius:50%; background:var(--accent); border:3px solid #fff;
+  box-shadow:0 1px 5px rgba(0,0,0,0.5); }
+.myloc-beam { position:absolute; left:15px; top:15px; width:0; height:0;
+  border-left:7px solid transparent; border-right:7px solid transparent;
+  border-bottom:14px solid rgba(63,128,255,0.85); transform-origin:50% 100%; }

@@ -1,0 +1,17 @@
+[Unit]
+Description=Field Mission Planner AI server (SAM field detection)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/fmp-ai
+Environment=FMP_PORT=8731
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+ExecStart=/opt/fmp-ai/.venv/bin/python serve.py
+Restart=on-failure
+RestartSec=5
+MemoryHigh=2000M
+MemoryMax=3200M
+
+[Install]
+WantedBy=multi-user.target

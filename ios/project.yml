@@ -1,0 +1,47 @@
+# XcodeGen project spec for the Field Mission Planner iOS app.
+#   Build on a Mac:  brew install xcodegen  &&  cd ios  &&  ./sync_web.sh  &&  xcodegen generate  &&  open *.xcodeproj
+# See README.md for the full step-by-step (Apple account, signing, TestFlight).
+#
+# The app is a thin native shell — identical design to android/:
+#   • a local HTTP server (Swifter) serves the bundled web/ over http://127.0.0.1
+#     so the existing PWA (Pyodide engine, Leaflet, jsMav) runs offline, on a real
+#     origin (secure context) exactly like the desktop serve.py;
+#   • a Swift UDP bridge (Network.framework) gives the WiFi / ELRS-backpack link
+#     that iOS Safari cannot do (no WebSerial/WebUSB/raw-UDP in the browser).
+name: FieldMissionPlanner
+options:
+  bundleIdPrefix: com.fmp
+  deploymentTarget:
+    iOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  Swifter:
+    url: https://github.com/httpswift/swifter.git
+    from: "1.5.0"
+
+targets:
+  FieldMissionPlanner:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - web              # the web bundle is added below as a folder reference
+      - path: App/web
+        type: folder         # blue folder: copied into the .app preserving structure
+    dependencies:
+      - package: Swifter
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fmp.planner
+        MARKETING_VERSION: "2.5.34"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: App/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"          # iPhone + iPad
+        IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        ENABLE_BITCODE: NO
+        # Fill DEVELOPMENT_TEAM with your Apple Team ID (or set it in Xcode > Signing).
+        # DEVELOPMENT_TEAM: XXXXXXXXXX
+        CODE_SIGN_STYLE: Automatic
