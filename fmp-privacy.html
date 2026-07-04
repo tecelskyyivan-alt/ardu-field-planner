@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Field Mission Planner — Політика конфіденційності / Privacy Policy</title>
+  <style>
+    body { max-width: 760px; margin: 24px auto; padding: 0 16px; font: 15px/1.6 -apple-system, Segoe UI, Roboto, sans-serif; color: #16212c; background: #fff; }
+    h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 26px; }
+    code { background: #f0f3f6; padding: 1px 5px; border-radius: 4px; }
+    .en { color: #566; }
+    footer { margin-top: 32px; color: #7a8a99; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Field Mission Planner — Політика конфіденційності</h1>
+  <p>Останнє оновлення: 2026-07-01. Застосунок <b>Field Mission Planner</b> (com.fmp.planner) — офлайн-планувальник місій обприскування для дронів ArduCopter.</p>
+
+  <h2>1. Які дані обробляються</h2>
+  <ul>
+    <li><b>Місцезнаходження пристрою (GPS)</b> — лише коли ви вмикаєте кнопку «Моє місце», щоб показати вашу позицію на карті. Ця позиція <b>залишається на пристрої</b> і не передається на наш сервер.</li>
+    <li><b>Дані карти</b> — коли є інтернет, координати ділянки карти надсилаються постачальникам карт (Google, Esri, CARTO, OpenTopoMap) і сервісу висот (Open-Meteo) для завантаження тайлів/висот. Офлайн — не надсилаються.</li>
+    <li><b>Діагностичний лог</b> — лише коли ви самі натискаєте «Лог для аналізу». Містить версію застосунку, знеособлений ідентифікатор пристрою, модель/екран, і <b>статус</b> телеметрії (режим, фікс, супутники, батарея, точка маршруту). <b>Координат (вашого місця / GPS дрона / треку) лог НЕ містить.</b> Надсилається на сервер оператора для усунення несправностей.</li>
+    <li><b>Збережені поля/маршрути</b> — зберігаються <b>лише локально</b> на пристрої (у сховищі застосунку).</li>
+  </ul>
+
+  <h2>2. Навіщо</h2>
+  <p>Виключно для роботи застосунку (карта, планування, зв'язок із дроном) і діагностики за вашим запитом. Ми <b>не</b> продаємо дані, не показуємо рекламу, не відстежуємо вас між застосунками.</p>
+
+  <h2>3. Передача третім сторонам</h2>
+  <p>Тільки постачальники карт/висот (див. п.1), і лише коли ви онлайн. Діагностичний лог іде тільки на сервер оператора.</p>
+
+  <h2>4. Зберігання й видалення</h2>
+  <p>Локальні дані видаляються при видаленні застосунку або кнопкою «Очистити». Щоб видалити надіслані діагностичні логи з сервера — напишіть на контакт нижче.</p>
+
+  <h2>5. Дозволи</h2>
+  <ul>
+    <li><code>ACCESS_FINE/COARSE_LOCATION</code> — кнопка «Моє місце» (показ вас на карті).</li>
+    <li><code>INTERNET</code> — карти, висоти, надсилання логу за запитом.</li>
+    <li>USB (host) — кабельний зв'язок із польотним контролером.</li>
+  </ul>
+
+  <h2>6. Контакт</h2>
+  <p>Питання/видалення даних: <a href="mailto:tecelskyyivan@gmail.com">tecelskyyivan@gmail.com</a>.</p>
+
+  <hr />
+  <h2 class="en">English summary</h2>
+  <p class="en">Field Mission Planner is an offline ArduCopter spray-mission planner. Device <b>location</b> is used only for the on-map "My location" button and stays on the device. Map/elevation providers (Google, Esri, CARTO, OpenTopoMap, Open-Meteo) receive map-area coordinates only while online. A <b>diagnostic log</b> is uploaded only when you tap "Log for analysis"; it contains the app version, an anonymous device id, and telemetry <b>status</b> (mode/fix/sats/battery) — <b>no coordinates</b> (your location, drone GPS, or track are never uploaded). Saved fields are stored locally only. No ads, no data selling, no cross-app tracking. Deletion requests: tecelskyyivan@gmail.com.</p>
+
+  <footer>Field Mission Planner · com.fmp.planner</footer>
+</body>
+</html>
