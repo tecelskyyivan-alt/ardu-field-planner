@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.44";
+  const APP_VERSION = "2.5.45";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2234,55 +2234,6 @@
     list.addEventListener("change", () => {
       try { if (list.value) localStorage.setItem(LAST_KEY, list.value); } catch (e) {}
     });
-
-    // One-tap BT-UART activation, NO PC: while connected over any WORKING link
-    // (USB-OTG / WiFi), write SERIALx_PROTOCOL=2 + SERIALx_BAUD=115 with read-back
-    // confirmation, then reboot the FC so the change takes effect. After the
-    // reboot the drone talks MAVLink on its Bluetooth bridge.
-    const enableBtn = $("ble-uart-enable"), uartSel = $("ble-uart-sel");
-    if (enableBtn) enableBtn.addEventListener("click", async () => {
-      const a = mavApi();
-      if (!mavConnected || !a.mav_set_param) {
-        setMsg("Спершу підключись до дрона робочим каналом (USB-OTG кабель до телефона або WiFi) — саме він і налаштує Bluetooth.", "error");
-        return;
-      }
-      const st = await a.mav_status();
-      if (st && st.armed) { setMsg("Мотори увімкнені — спершу вимкни (disarm), тоді налаштовуй.", "error"); return; }
-      const u = uartSel ? uartSel.value : "SERIAL4";
-      enableBtn.disabled = true;
-      setMsg("Вмикаю MAVLink на " + u + "…", null);
-      appLog("ble-uart enable: " + u);
-      try {
-        const r1 = await a.mav_set_param({ name: u + "_PROTOCOL", value: 2 });
-        if (!r1.ok) {
-          setMsg("Не вдалося виставити " + u + "_PROTOCOL: " + (r1.error || "без відповіді") +
-                 ". Можливо, BT-модуль на іншому UART — спробуй інший у списку.", "error");
-          appLog("ble-uart FAIL protocol: " + (r1.error || "")); return;
-        }
-        const r2 = await a.mav_set_param({ name: u + "_BAUD", value: 115 });
-        if (!r2.ok) {
-          setMsg(u + "_PROTOCOL записано, але " + u + "_BAUD не підтвердився: " + (r2.error || "") +
-                 ". Переткни батарею і спробуй підключитись по Bluetooth.", null);
-          appLog("ble-uart baud unconfirmed: " + (r2.error || "")); return;
-        }
-        const rb = await a.mav_reboot();
-        if (rb.ok) {
-          setMsg("Готово: MAVLink увімкнено на " + u + ". Плата перезавантажується (~10 с) — далі вибери «Bluetooth (BLE)», просканюй і підключайся.", "ok");
-          appLog("ble-uart enabled on " + u + " + reboot ack");
-          try { mavDisconnect(); } catch (e) {}
-          let mac = "";
-          try { mac = localStorage.getItem(LAST_KEY) || list.value || ""; } catch (e) {}
-          if (mac && window.__fmpBleAutoReconnect) window.__fmpBleAutoReconnect(mac, 13000);
-        } else {
-          setMsg("Параметри на " + u + " записані й підтверджені, але ребут не відповів (" + (rb.error || "таймаут") +
-                 ") — переткни батарею вручну, далі підключайся по Bluetooth.", null);
-          appLog("ble-uart params ok, reboot no-ack");
-        }
-      } finally {
-        enableBtn.disabled = false;
-      }
-    });
-
     // ---- FULLY AUTOMATIC BT-UART setup (no buttons) ----
     // A silent BLE attempt records a pending setup (24 h TTL). The next
     // successful USB-OTG/WiFi connection reads the UART's current protocol,
@@ -2292,7 +2243,6 @@
     window.__fmpBleMarkPending = (mac) => {
       try {
         localStorage.setItem(PEND_KEY, JSON.stringify({
-          uart: (uartSel && uartSel.value) || "SERIAL4",
           mac: mac || (list && list.value) || "", ts: Date.now() }));
         appLog("[auto-ble] відкладене налаштування записано");
       } catch (e) {}
@@ -2343,7 +2293,13 @@
       }, waitMs || 13000);
     };
 
-    // The pending setup itself: read -> safe-gate -> write -> reboot -> reconnect.
+    // The pending setup itself, fully hands-free: PROBE the UARTs SpeedyBee
+    // boards route their BT bridge to (SERIAL4 V3/V4, SERIAL6 WING, SERIAL1 AIO,
+    // SERIAL3 misc), pick the one that looks like the bridge, rewrite, reboot,
+    // reconnect. Selection is deliberately conservative:
+    //   • protocol 32 (MSP) — the factory state of a SpeedyBee BT UART → best match;
+    //   • else protocol -1 (None) — unclaimed;
+    //   • anything else (GPS/RC/OSD/DisplayPort/…) is NEVER touched.
     window.__fmpAutoBleSetup = async () => {
       const p = blePendingGet();
       if (!p) return;
@@ -2351,37 +2307,38 @@
       if (!mavConnected || !a.mav_get_param) return;
       const st = await a.mav_status();
       if (st && st.armed) { appLog("[auto-ble] мотори увімкнені — відкладаю налаштування"); return; }
-      appLog("[auto-ble] авто-налаштування BT-UART: " + p.uart);
-      setMsg("Автоналаштування Bluetooth (" + p.uart + ")…", null);
-      const SAFE = [-1, 32, 42];        // None / MSP / MSP-DisplayPort — вільні до перезапису
-      const rp = await a.mav_get_param({ name: p.uart + "_PROTOCOL" });
-      if (!rp.ok) { appLog("[auto-ble] читання " + p.uart + "_PROTOCOL не вдалось: " + (rp.error || "")); return; }
-      let changed = false;
-      const cur = Math.round(rp.value);
-      if (cur !== 2) {
-        if (SAFE.indexOf(cur) === -1) {
-          appLog("[auto-ble] " + p.uart + "_PROTOCOL=" + cur + " — UART зайнятий, автоматично НЕ чіпаю");
-          setMsg("BT-UART (" + p.uart + ") зайнятий іншим протоколом (" + cur + ") — не перезаписую автоматично. Вибери інший UART у блоці активації.", "error");
-          blePendingClear();
-          return;
+      appLog("[auto-ble] шукаю Bluetooth-UART автоматично…");
+      setMsg("Автоналаштування Bluetooth…", null);
+      const ORDER = ["SERIAL4", "SERIAL6", "SERIAL1", "SERIAL3"];
+      const states = {};
+      for (const u of ORDER) {
+        const r = await a.mav_get_param({ name: u + "_PROTOCOL" });
+        if (r.ok) states[u] = Math.round(r.value);
+      }
+      appLog("[auto-ble] протоколи UART: " + JSON.stringify(states));
+      const target = ORDER.find((u) => states[u] === 32)
+                  || ORDER.find((u) => states[u] === -1);
+      if (!target) {
+        blePendingClear();
+        const already = ORDER.filter((u) => states[u] === 2);
+        if (already.length) {
+          appLog("[auto-ble] вже MAVLink: " + already.join(",") + ", але BLE мовчав — надішли лог");
+          setMsg("Bluetooth-UART уже виглядає налаштованим (" + already.join(", ") + "), але звʼязку не було — надішли лог кнопкою «Лог».", "error");
+        } else {
+          appLog("[auto-ble] вільного UART не знайдено — автоматично нічого не чіпаю");
+          setMsg("Не знайшов UART для Bluetooth (усі зайняті іншим обладнанням) — надішли лог кнопкою «Лог».", "error");
         }
-        const w = await a.mav_set_param({ name: p.uart + "_PROTOCOL", value: 2 });
-        if (!w.ok) { appLog("[auto-ble] запис PROTOCOL не вдався: " + (w.error || "")); return; }
-        changed = true;
-      }
-      const rb2 = await a.mav_get_param({ name: p.uart + "_BAUD" });
-      if (rb2.ok && Math.round(rb2.value) !== 115) {
-        const w2 = await a.mav_set_param({ name: p.uart + "_BAUD", value: 115 });
-        if (w2.ok) changed = true;
-      }
-      blePendingClear();
-      if (!changed) {
-        appLog("[auto-ble] " + p.uart + " вже MAVLink@115200, але BLE мовчав — ймовірно, модуль на іншому UART");
-        setMsg("BT-UART уже налаштований, але Bluetooth мовчав — можливо, модуль на іншому UART. Спробуй інший у блоці активації і надішли лог.", "error");
         return;
       }
-      appLog("[auto-ble] " + p.uart + " → MAVLink@115200, перезавантажую плату");
-      setMsg("Bluetooth налаштовано (" + p.uart + " → MAVLink). Перезавантажую плату і перепідключусь сам…", "ok");
+      appLog("[auto-ble] ціль: " + target + " (протокол був " + states[target] + ")");
+      const w = await a.mav_set_param({ name: target + "_PROTOCOL", value: 2 });
+      if (!w.ok) { appLog("[auto-ble] запис PROTOCOL не вдався: " + (w.error || "")); return; }
+      const rb2 = await a.mav_get_param({ name: target + "_BAUD" });
+      if (!rb2.ok || Math.round(rb2.value) !== 115)
+        await a.mav_set_param({ name: target + "_BAUD", value: 115 });
+      blePendingClear();
+      appLog("[auto-ble] " + target + " → MAVLink@115200, перезавантажую плату");
+      setMsg("Bluetooth налаштовано (" + target + "). Перезавантажую плату і перепідключусь сам…", "ok");
       const rr = await a.mav_reboot();
       if (!rr.ok) appLog("[auto-ble] reboot без ACK (" + (rr.error || "таймаут") + ") — чекаю довше");
       try { mavDisconnect(); } catch (e) {}
@@ -3088,7 +3045,12 @@
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
       });
-      appLog("upload result: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error, warning: r.warning, verify: r.verify && r.verify.verified }));
+      // Log the FULL verify verdict — a red "не збігається" without the actual
+      // mismatch list in the log is undebuggable from the field.
+      appLog("upload result: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error, warning: r.warning,
+        verify: r.verify && { ok: r.verify.ok, verified: r.verify.verified, err: r.verify.error,
+                              n_exp: r.verify.count_expected, n_act: r.verify.count_actual,
+                              diff: r.verify.mismatches } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
         // Snapshot exactly what we uploaded — progress is computed off this, so
