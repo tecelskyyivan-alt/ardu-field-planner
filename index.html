@@ -85,13 +85,20 @@
         <input id="rtl" type="checkbox" checked />
         Повернення (RTL) в кінці місії
       </label>
+      <label class="row">
+        <input id="round-turn" type="checkbox" />
+        Круглий розворот (діаметр = крок гонів)
+      </label>
+      <p class="hint" id="round-turn-hint" style="display:none">Дрон робить круглий розворот
+        вкінці кожного гону радіусом «крок / 2» — виставляється автопілоту при заливці по кабелю
+        (WP_RADIUS_M). Точки маршруту не додаються; на більшому радіусі дрон трохи зрізає торці гонів.</p>
 
       <div class="step">
         <span class="badge">2</span> Побудова та експорт
       </div>
 
       <label class="row">
-        <input id="viz-coverage" type="checkbox" checked />
+        <input id="viz-coverage" type="checkbox" />
         Показувати покриття та накладання
       </label>
       <button id="build" class="primary">Побудувати маршрут</button>
@@ -242,6 +249,17 @@
         <a id="dl-android-beta" class="dl-btn" href="downloads/FieldMissionPlanner-beta.apk" download>Завантажити Android APK — БЕТА v2.6.6-beta</a>
       </div>
       <p class="hint">З версії 2.6.5 бета <b>оновлюється з середини додатку</b> (тапни версію вгорі → «Оновити») — далі не треба качати вручну.</p>
+
+      <p class="hint"><b>iPhone / iPad (iOS):</b> Apple <b>не дозволяє</b> ставити додатки із сайту, як APK —
+        тому «завантажити й відкрити» на iOS неможливо. Нативний застосунок ставиться лише через:
+        <b>(1)</b> Mac + Xcode по кабелю (безкоштовний Apple ID, сертифікат діє 7 днів) — шлях розробника; або
+        <b>(2)</b> <b>TestFlight</b> (потрібен Apple Developer Program, $99/рік) — тоді тут з'явиться посилання-запрошення.
+        Поки iOS-збірка готова й перевірена, але не опублікована. Зв'язок з дроном на iOS — лише
+        <b>WiFi / ELRS-бекпак</b> (USB Apple забороняє).</p>
+      <div class="export-row">
+        <a id="dl-ios" class="dl-btn" href="#" aria-disabled="true"
+           style="opacity:.55;pointer-events:none;cursor:default">iOS — TestFlight (скоро)</a>
+      </div>
 
       <p class="hint"><b>ПК (Windows / Mac):</b> просто відкрий цей додаток у <b>Chrome / Edge</b> —
         повний функціонал: планування + <b>дрон по USB-кабелю</b> (WebSerial). Тисни «Встановити»
