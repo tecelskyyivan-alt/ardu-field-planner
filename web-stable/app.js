@@ -23,6 +23,70 @@
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
 
+  // ---- i18n (UA / EN) -------------------------------------------------------
+  // Ukrainian is the SOURCE language; `window.FMP_TR` (i18n.js) maps each UA string
+  // to English. Static HTML is translated by walking the DOM on a language switch
+  // (no per-element markup needed); dynamic strings are wrapped in t() at build time.
+  const TR = (typeof window !== "undefined" && window.FMP_TR) ? window.FMP_TR : {};
+  let LANG = "uk";
+  try {
+    const saved = localStorage.getItem("fmp_lang");
+    LANG = saved === "en" || saved === "uk" ? saved
+         : ((navigator.language || "").toLowerCase().startsWith("uk") ? "uk" : "uk");
+  } catch (e) {}
+  // Translate a dynamic (JS-built) user-facing string. UA in → EN out when LANG=en.
+  function t(s) {
+    if (LANG !== "en" || s == null) return s;
+    const k = String(s);
+    return Object.prototype.hasOwnProperty.call(TR, k) ? TR[k] : s;
+  }
+  // Walk the static DOM and swap UA↔EN by matching text/att/value against TR. The UA
+  // original is cached on the node the first time so switching back restores exactly.
+  function applyLangToDom(root) {
+    const en = LANG === "en";
+    const scope = root || document.getElementById("app") || document.body;
+    if (!scope) return;
+    // 1) text nodes
+    const tw = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
+    const texts = []; let node;
+    while ((node = tw.nextNode())) texts.push(node);
+    for (const n of texts) {
+      const el = n.parentElement;
+      if (!el || el.closest("script,style,textarea")) continue;
+      const src = n.__ua !== undefined ? n.__ua : n.nodeValue;
+      const m = src.match(/^(\s*)([\s\S]*?)(\s*)$/);          // lead, core, trail
+      const core = m[2].replace(/\s+/g, " ").trim();          // collapse to match TR keys
+      if (!core || !Object.prototype.hasOwnProperty.call(TR, core)) continue;
+      if (n.__ua === undefined) n.__ua = src;                 // cache original once
+      n.nodeValue = en ? m[1] + TR[core] + m[3] : n.__ua;
+    }
+    // 2) attributes: placeholder, title, aria-label, value (buttons)
+    const ATTRS = ["placeholder", "title", "aria-label"];
+    scope.querySelectorAll("[placeholder],[title],[aria-label]").forEach((el) => {
+      for (const a of ATTRS) {
+        if (!el.hasAttribute(a)) continue;
+        const cacheKey = "__ua_" + a;
+        if (el[cacheKey] === undefined) {
+          const v = el.getAttribute(a).trim();
+          if (!Object.prototype.hasOwnProperty.call(TR, v)) continue;
+          el[cacheKey] = el.getAttribute(a);
+        }
+        const orig = el[cacheKey], key = orig.trim();
+        if (Object.prototype.hasOwnProperty.call(TR, key))
+          el.setAttribute(a, en ? orig.replace(key, TR[key]) : orig);
+      }
+    });
+  }
+  function setLang(lang, opts) {
+    LANG = lang === "en" ? "en" : "uk";
+    try { localStorage.setItem("fmp_lang", LANG); } catch (e) {}
+    document.documentElement.setAttribute("lang", LANG);
+    applyLangToDom();
+    const btn = document.getElementById("lang-toggle");
+    if (btn) btn.textContent = LANG === "en" ? "UA" : "EN";   // shows the OTHER language
+    if (!(opts && opts.silent) && typeof rerenderDynamic === "function") { try { rerenderDynamic(); } catch (e) {} }
+  }
+
   // ---- diagnostic log -------------------------------------------------------
   // A rolling in-memory log of connection / telemetry / mission / error events,
   // persisted to localStorage so a crash or a bad field session can still be
@@ -130,6 +194,10 @@
       _pv.style.cursor = "pointer";
       _pv.addEventListener("click", () => checkUpdate());
     } }
+  // Language toggle (UA / EN) — see i18n.js. The button shows the OTHER language.
+  { const _lt = document.getElementById("lang-toggle");
+    if (_lt) _lt.addEventListener("click", () => setLang(LANG === "en" ? "uk" : "en")); }
+  setLang(LANG, { silent: true });   // apply saved/default language + set the button label
 
   // Base layers --------------------------------------------------------------
   // maxNativeZoom = last zoom with real tiles; beyond it Leaflet upscales them
@@ -730,6 +798,7 @@
   const $ = (id) => document.getElementById(id);
 
   function setMsg(text, kind) {
+    text = t(text);                            // i18n: translate whole-string messages (EN)
     const el = $("msg");
     if (el) {                                  // persistent status line (bottom of panel)
       el.textContent = text || "";
