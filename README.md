@@ -78,8 +78,6 @@ MAVLink** (кабель / WiFi-ELRS) + жива телеметрія.
   the native desktop window (`python app_qt.py`) or the browser UI (`python serve.py`).
 - **iOS:** build from `ios/` with Xcode (Apple does not allow installing apps from a website).
 
-> The public build never “phones home” (log upload / self-update are disabled by default).
-
 ## Build from source / Встановлення з коду
 
 Requires **Python 3.11+** (desktop / browser modes).
@@ -110,8 +108,7 @@ python serve.py      # then open the printed http://127.0.0.1:<port>/
 ```
 
 **Android / iOS** — build the native app from `android/` (Gradle, JDK 17, Android SDK)
-or `ios/` (Xcode). See `THIRD_PARTY.md`; keep any server URL/credentials out of the
-source (see *Self-hosting* below).
+or `ios/` (Xcode). See `THIRD_PARTY.md`.
 
 ## How to use / Як користуватись
 
@@ -162,14 +159,6 @@ python test_sitl.py        # E2E against a real ArduCopter SITL (upload -> verif
 ## License / Ліцензія
 
 **GPLv3** — see [LICENSE](LICENSE). Third-party components & attribution: [THIRD_PARTY.md](THIRD_PARTY.md).
-
-## Self-hosting the optional server / Свій сервер (необов'язково)
-
-Diagnostic-log upload and APK self-update are **disabled by default** (empty server URL) —
-a public build **never phones home**. To enable them for your own deployment, set your
-server URL (+ optional basic-auth) in: web `VPS_BASE` (`app.js`), iOS `LOG_URL`
-(`ViewController.swift`), Android `LogBridge.URL_STR` / `UpdateBridge.BASE` + `AUTH`.
-**Never commit real credentials** — keep them in a gitignored config / build property.
 
 ## Security / Безпека
 
