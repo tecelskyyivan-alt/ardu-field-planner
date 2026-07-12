@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Opt OUT of the Android 15/16 FORCED edge-to-edge for a targetSdk-35 app (the
+         official escape hatch). With this the framework insets the content BELOW the
+         status + navigation bars, so the app's top controls no longer overlap the status
+         bar. Ignored on API < 35 (unknown attribute). Honoured until we target SDK 36. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
+    </style>
+</resources>

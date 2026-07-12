@@ -1,5 +1,17 @@
 # Field Mission Planner — ArduCopter (агрообприскування)
 
+> ⚠️ **SAFETY / БЕЗПЕКА — read before use.** This software plans and uploads flight
+> missions for **real spraying drones**. A mistake can crash the aircraft, spray the
+> wrong area, or cause injury and crop/property damage. It is provided **WITH NO
+> WARRANTY** (see [LICENSE](LICENSE)). **You are the pilot-in-command:** review every
+> mission in Mission Planner / QGroundControl, keep visual line-of-sight and a manual
+> override, and obey your local drone **and pesticide** regulations. Use at your own risk.
+>
+> Цей софт планує й заливає польотні місії для **реальних дронів-обприскувачів**.
+> Помилка = розбитий дрон / не те поле / шкода людям чи посівам. Надається **БЕЗ ЖОДНИХ
+> ГАРАНТІЙ**. Ти — командир екіпажу: перевіряй кожну місію, тримай візуальний контакт і
+> ручний override, дотримуйся законів про дрони й пестициди. Використання на власний ризик.
+
 Десктоп-додаток для побудови маршрутів покриття поля для ArduCopter.
 Малюєш контур реального поля на супутниковій карті → програма генерує
 маршрут «змійкою» (boustrophedon / lawnmower) → експорт офлайн-файлів місії
@@ -33,7 +45,7 @@
 ## Встановлення
 
 ```powershell
-cd C:\Users\tecel\ardu-field-planner
+cd ardu-field-planner
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -185,3 +197,22 @@ Obsidian-нотатці `FieldMissionPlanner.md`.
 - 🌍 **KML імпорт/експорт** контурів (поле + вирізи як дірки).
 - ⚙️ **Автозбереження налаштувань крайньої місії** (`fmp_last_settings`) — відкрив додаток і
   параметри вже стоять.
+
+---
+
+## Ліцензія / License
+
+**GPLv3** — див. [LICENSE](LICENSE). Сторонні компоненти й атрибуція: [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Свій сервер (необов'язково) / Self-hosting the optional server
+
+Завантаження діагностичного логу та самооновлення APK **вимкнені за замовчуванням**
+(порожній URL) — публічна збірка **нікуди не «дзвонить додому»**. Щоб увімкнути для
+власного розгортання, впиши свій URL (+ за потреби basic-auth) у:
+`VPS_BASE` (web `app.js`), `LOG_URL` (iOS `ViewController.swift`),
+`LogBridge.URL_STR` / `UpdateBridge.BASE` + `AUTH` (Android). **Ніколи не коміт реальні креди** —
+тримай їх у gitignored-конфізі / build-property.
+
+## Безпека / Security
+
+Політика вразливостей і безпеки — [SECURITY.md](SECURITY.md).

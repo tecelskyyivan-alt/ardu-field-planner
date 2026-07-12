@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google Play build overlay (buildType `play`, `assemblePlay`). Google Play forbids
+     apps that download+install APKs themselves, so strip the self-install permission
+     here; the AndroidUpdate JS bridge is also compiled out (BuildConfig.SELF_UPDATE=false
+     in build.gradle). Updates for the Play build come from Play. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+</manifest>

@@ -33,3 +33,25 @@ node_modules/
 .DS_Store
 sitl/ArduCopter.exe
 *.exe
+
+# --- open-source prep ---
+# Build/run logs and generated outputs (not source)
+*.log
+exports/
+# SITL third-party runtime (Cygwin DLLs) + local server config — download/build separately
+sitl/*.dll
+sitl/_vps_Caddyfile
+# iOS build artifacts + Xcode user state
+ios/build/
+ios/**/xcuserdata/
+*.xcuserstate
+# Android: keep native source only — the web bundle + Pyodide are synced from web-stable/
+# at build time (not source), and the gradle build output is generated.
+android/app/src/main/assets/web/
+android/app/src/main/assets/engine/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+# Local, gitignored runtime config (real server URL etc.) — see *.example
+config.local.js

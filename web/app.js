@@ -16,7 +16,7 @@
   const APP_VERSION = "2.6.6-beta";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
-  const VPS_BASE = "https://178.105.166.29.sslip.io/ai";
+  const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
 
   // ---- diagnostic log -------------------------------------------------------
   // A rolling in-memory log of connection / telemetry / mission / error events,

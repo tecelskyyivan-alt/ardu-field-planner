@@ -1,0 +1,95 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.fmp.planner'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.fmp.planner"
+        minSdk 24
+        targetSdk 35
+        versionCode 56
+        versionName "2.5.40"
+        // In-app APK self-update: ON for the self-distributed builds, OFF for Play
+        // (Google Play forbids apps installing APKs themselves). Gates the AndroidUpdate
+        // bridge in MainActivity; the `play` build also strips REQUEST_INSTALL_PACKAGES.
+        buildConfigField "boolean", "SELF_UPDATE", "true"
+    }
+
+    buildFeatures { buildConfig true }   // BuildConfig.DEBUG → gate WebView debugging
+
+    // Release is signed with a PRIVATE keystore (not the public debug key), so a
+    // MITM/compromised-server APK can't silently over-install the real app — Android
+    // rejects a signature mismatch. Keystore + password live in keystore.properties
+    // (local, never deployed); if it's absent the release build falls back to debug
+    // signing so the project still builds.
+    signingConfigs {
+        release {
+            def kp = rootProject.file("keystore.properties")
+            if (kp.exists()) {
+                def p = new Properties(); p.load(new FileInputStream(kp))
+                storeFile rootProject.file(p['storeFile'])
+                storePassword p['storePassword']
+                keyAlias p['keyAlias']
+                keyPassword p['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // ships as-is; debuggable so the user can chrome://inspect if needed
+        }
+        release {
+            minifyEnabled false
+            signingConfig rootProject.file("keystore.properties").exists()
+                ? signingConfigs.release : signingConfigs.debug
+        }
+        // A side-by-side BETA: its own applicationId (.beta) + label so it installs
+        // ALONGSIDE the stable app without replacing it. Same release signing.
+        beta {
+            initWith release
+            applicationIdSuffix ".beta"
+            versionNameSuffix "-beta"
+            resValue "string", "app_name", "FMP BETA"
+        }
+        // GOOGLE PLAY build (assemblePlay): identical app, but NO in-app self-update
+        // (Play policy). REQUEST_INSTALL_PACKAGES is removed via src/play/AndroidManifest.xml
+        // and the AndroidUpdate JS bridge is compiled out (SELF_UPDATE=false). Updates
+        // come from Play. Sign this with the Play upload key (Play App Signing).
+        play {
+            initWith release
+            buildConfigField "boolean", "SELF_UPDATE", "false"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    // Pyodide payload (wasm/wheels/zip) must not be re-compressed: WebView/Pyodide
+    // read them as-is and double-compression only bloats the APK + slows reads.
+    androidResources {
+        noCompress 'wasm', 'whl', 'zip'
+        // Never bundle transient backup dirs into the APK. The stable build makes a
+        // `web.beta.bak` copy of the beta web (to restore afterwards); if it sits in
+        // assets/ during the build, aapt packs it too — a SECOND 28 MB Pyodide copy
+        // that doubled the APK to ~56 MB. Excluding it keeps the APK ~29 MB.
+        ignoreAssetsPattern '!.git:!.svn:!.DS_Store:!*.bak:!web.beta.bak:!*~'
+    }
+
+    packagingOptions {
+        resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}'] }
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'              // WebViewAssetLoader
+    implementation 'androidx.core:core-ktx:1.13.1'              // WindowInsets (Android 15 edge-to-edge)
+    implementation 'com.github.mik3y:usb-serial-for-android:3.7.0'  // CDC-ACM/FTDI/CP210x/CH340/PL2303
+}

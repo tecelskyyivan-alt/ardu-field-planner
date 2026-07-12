@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common FPV flight-controller / radio USB vendors (decimal vendor-id). -->
+    <usb-device vendor-id="1155" />   <!-- 0x0483 STMicroelectronics VCP — most STM32 FCs (BF/INAV/ArduPilot) -->
+    <usb-device vendor-id="1027" />   <!-- 0x0403 FTDI -->
+    <usb-device vendor-id="4292" />   <!-- 0x10C4 Silicon Labs CP210x -->
+    <usb-device vendor-id="6790" />   <!-- 0x1A86 QinHeng CH340/CH341 -->
+    <usb-device vendor-id="1659" />   <!-- 0x067B Prolific PL2303 -->
+    <usb-device vendor-id="9900" />   <!-- 0x26AC 3DR (Pixhawk classic) -->
+    <usb-device vendor-id="11694" />  <!-- 0x2DAE Hex/ProfiCNC Cube -->
+</resources>

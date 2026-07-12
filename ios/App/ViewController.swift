@@ -17,7 +17,7 @@ final class ViewController: UIViewController, WKScriptMessageHandler, WKNavigati
     // Remote diagnostic-log sink on the VPS. A dedicated token-guarded route
     // (Caddy /fmplog/* → serve.py /api/log) so we never touch the /ai/ basic-auth
     // the PWA/APK use. The token only lets a client PUSH logs — nothing readable.
-    private static let LOG_URL = "https://178.105.166.29.sslip.io/fmplog/api/log"
+    private static let LOG_URL = ""  // self-host: set your log-collector URL to enable; empty = disabled
     private static let LOG_TOKEN = "fmp_ios_log_7Qk2mVb8xR4tLn0aZ3wY"
 
     override func viewDidLoad() {
