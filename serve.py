@@ -67,6 +67,37 @@ TILE_PROVIDERS = {
 TILES_DIR = os.path.join(HERE, "tiles_cache")
 
 
+def _photo_debug_keep(payload, res, keep=20):
+    """Retain each photo-import request (image + response summary) under
+    logs/photo/ so a field report («контури зʼїхали») is reproducible: without
+    the operator's exact screenshot the georef pipeline can't be debugged.
+    Off with FMP_PHOTO_KEEP=0. Keeps the newest `keep` pairs."""
+    if os.environ.get("FMP_PHOTO_KEEP", "1") == "0":
+        return
+    try:
+        import base64 as _b64, json as _json, time as _time
+        d = os.path.join(HERE, "logs", "photo")
+        os.makedirs(d, exist_ok=True)
+        ts = _time.strftime("%Y%m%d-%H%M%S", _time.gmtime())
+        b64 = (payload or {}).get("image_b64") or ""
+        if "," in b64[:80]:                      # data:-URL prefix
+            b64 = b64.split(",", 1)[1]
+        with open(os.path.join(d, ts + ".jpg"), "wb") as f:
+            f.write(_b64.b64decode(b64))
+        summary = {k: res.get(k) for k in ("ok", "band", "confidence", "error",
+                                           "labels", "georef", "diag")}
+        summary["region_hint"] = (payload or {}).get("region_hint")
+        summary["n_contours"] = len(res.get("contours") or [])
+        with open(os.path.join(d, ts + ".json"), "w", encoding="utf-8") as f:
+            _json.dump(summary, f, ensure_ascii=False, indent=1, default=str)
+        old = sorted(os.listdir(d))
+        for name in old[:-keep * 2]:             # .jpg + .json per request
+            try: os.remove(os.path.join(d, name))
+            except OSError: pass
+    except Exception:
+        pass                                     # діагностика ніколи не валить запит
+
+
 def _img_ctype(b):
     """Sniff an image MIME from magic bytes (tiles are JPEG from Esri/Google, PNG
     from Carto). Avoids trusting/guessing the upstream's declared type."""
@@ -319,7 +350,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/mav_command":
             return api.mav_command(payload)
         if path == "/api/import_photo":
-            return api.import_photo(payload)
+            res = api.import_photo(payload)
+            _photo_debug_keep(payload, res)
+            return res
         return {"ok": False, "error": "unknown endpoint"}
 
     MAV_PATHS = frozenset({
