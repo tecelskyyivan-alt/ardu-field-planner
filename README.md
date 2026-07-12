@@ -1,5 +1,14 @@
 # Field Mission Planner — ArduCopter (agricultural spraying)
 
+![Field Mission Planner](docs/banner.svg)
+
+[![tests](https://github.com/tecelskyyivan-alt/ardu-field-planner/actions/workflows/tests.yml/badge.svg)](https://github.com/tecelskyyivan-alt/ardu-field-planner/actions/workflows/tests.yml)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Download APK](https://img.shields.io/github/v/release/tecelskyyivan-alt/ardu-field-planner?label=download)](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/latest)
+
+<!-- Tip: drop a real app screenshot at docs/screenshot.png and uncomment:
+![Screenshot](docs/screenshot.png) -->
+
 > ⚠️ **SAFETY / БЕЗПЕКА — read before use.** This software plans and uploads flight
 > missions for **real spraying drones**. A mistake can crash the aircraft, spray the
 > wrong area, or cause injury and crop/property damage. It is provided **WITH NO

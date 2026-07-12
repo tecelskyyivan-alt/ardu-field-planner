@@ -22,14 +22,13 @@ else:
 sys.path.insert(0, HERE)
 from backend.api import Api  # noqa: E402
 
-# Which frontend to serve. Defaults to the live (beta) web/ folder, but the
-# desktop "stable" launcher sets FMP_WEB_DIR=web-stable so Ivan's Desktop app
-# always runs the released 2.5.4 build while redesign work continues in web/.
+# Which frontend to serve. Defaults to web-stable/ (the canonical, released
+# frontend). Override with FMP_WEB_DIR to serve a different folder.
 _web_override = os.environ.get("FMP_WEB_DIR")
 if _web_override:
     WEB = _web_override if os.path.isabs(_web_override) else os.path.join(HERE, _web_override)
 else:
-    WEB = os.path.join(HERE, "web")
+    WEB = os.path.join(HERE, "web-stable")
 api = Api()                  # window stays None -> export writes to exports/
 _lock = threading.Lock()
 

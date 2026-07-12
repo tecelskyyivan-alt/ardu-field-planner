@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 300" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" role="img" aria-label="Field Mission Planner — boustrophedon coverage route over a field">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1520"/>
+      <stop offset="1" stop-color="#0a0f14"/>
+    </linearGradient>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16351f"/>
+      <stop offset="1" stop-color="#0f2417"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="820" height="300" fill="url(#bg)"/>
+
+  <!-- field polygon -->
+  <polygon points="70,215 120,70 470,55 520,235 250,255"
+           fill="url(#field)" stroke="#3fbf6a" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- boustrophedon ("lawnmower") coverage route -->
+  <polyline fill="none" stroke="#5fd3a3" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
+    points="105,205 480,190 480,168 108,182 111,160 482,148 483,126 114,138 117,116 485,104 486,83 122,93"/>
+  <!-- rounded U-turns hint -->
+  <path d="M480,190 q16,-11 0,-22 M482,148 q16,-11 0,-22 M485,104 q16,-11 0,-21" fill="none" stroke="#5fd3a3" stroke-width="2.4" opacity="0.55"/>
+
+  <!-- drone / start marker -->
+  <circle cx="105" cy="205" r="8.5" fill="#0a0f14" stroke="#7bd0ff" stroke-width="2.5"/>
+  <circle cx="105" cy="205" r="3" fill="#7bd0ff"/>
+
+  <!-- title -->
+  <text x="560" y="120" fill="#eaf2fb" font-size="30" font-weight="700">Field Mission</text>
+  <text x="560" y="156" fill="#eaf2fb" font-size="30" font-weight="700">Planner</text>
+  <text x="561" y="184" fill="#8fb4d8" font-size="15">ArduCopter · agricultural spraying</text>
+  <text x="561" y="212" fill="#5fd3a3" font-size="13.5">draw a field → coverage route → fly it (MAVLink)</text>
+  <text x="561" y="236" fill="#6f8aa8" font-size="12.5">offline · Українська / English</text>
+</svg>

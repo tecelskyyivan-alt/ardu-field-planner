@@ -6,7 +6,7 @@ import os
 from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WEB = os.path.join(HERE, "web")
+WEB = os.path.join(HERE, "web-stable")
 
 # Draw the art on a 256 transparent tile (reused from make_icon.py).
 art = Image.new("RGBA", (256, 256), (0, 0, 0, 0))

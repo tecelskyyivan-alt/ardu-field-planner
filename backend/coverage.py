@@ -590,7 +590,7 @@ def split_route_by_time(waypoints, speed_mps, max_seconds, reserve=0.2):
 
 
 # Default vehicle dynamics — ArduCopter WPNAV factory defaults (m/s, m/s²). These
-# MUST stay in sync with the JS mirror in web/app.js (estimateMissionTime); a
+# MUST stay in sync with the JS mirror in web-stable/app.js (estimateMissionTime); a
 # cross-check test asserts the two agree.
 TAKEOFF_CLIMB_RATE = 2.5     # WPNAV_SPEED_UP 250 cm/s
 LAND_DESCENT_RATE = 1.5      # WPNAV_SPEED_DN 150 cm/s

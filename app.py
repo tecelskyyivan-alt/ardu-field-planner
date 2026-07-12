@@ -12,7 +12,7 @@ import webview
 from backend.api import Api
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-INDEX = os.path.join(HERE, "web", "index.html")
+INDEX = os.path.join(HERE, "web-stable", "index.html")
 
 
 def main():
