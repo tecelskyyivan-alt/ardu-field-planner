@@ -199,6 +199,42 @@
     return t;
   }
 
+  // ---- Android native Bluetooth LE (window.AndroidBle) ----
+  // A SpeedyBee-style FC (or any NUS/HM-10 BLE-UART module) bridges an FC UART to
+  // BLE GATT. Web Bluetooth doesn't exist in the Android WebView, so the native
+  // shell scans/connects and shovels raw MAVLink bytes across, base64-encoded —
+  // same contract as AndroidUdp. Scanning is driven from app.js (AndroidBle.startScan
+  // + window.__androidBleScan); this factory only opens a picked device.
+  async function openAndroidBle(addr) {
+    const A = window.AndroidBle;
+    if (!A) throw new Error("AndroidBle недоступний (потрібен APK).");
+    const t = {
+      ondata: null,
+      _closed: false,
+      write(bytes) { if (!this._closed) { try { A.write(_b64enc(bytes)); } catch (e) {} } },
+      close() {
+        this._closed = true;
+        try { A.close(); } catch (e) {}
+        if (window.__androidBleData === onData) window.__androidBleData = null;
+      },
+    };
+    const onData = (b64) => { if (t.ondata && !t._closed) { try { t.ondata(_b64dec(b64)); } catch (e) {} } };
+    window.__androidBleData = onData;
+    await new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (fn, arg) => { if (done) return; done = true; window.__androidBleEvent = null; clearTimeout(to); fn(arg); };
+      // BLE connect + MTU + discovery + retries is slower than a UDP bind — give it 20 s.
+      const to = setTimeout(() => finish(reject, new Error("Тайм-аут BLE-підключення. Дрон увімкнений і поруч?")), 20000);
+      window.__androidBleEvent = (type, ok, detail) => {
+        if (type === "open") finish(ok ? resolve : reject, ok ? undefined : new Error(detail || "BLE помилка."));
+      };
+      let r;
+      try { r = A.connect(String(addr || "")); } catch (e) { return finish(reject, e); }
+      try { const j = JSON.parse(r); if (j && j.ok === false) finish(reject, new Error(j.error || "BLE недоступний.")); } catch (e) {}
+    });
+    return t;
+  }
+
   // ---- iOS native UDP (window.webkit.messageHandlers.fmpUdp) ----
   // Same job as openAndroidUdp, for the native iOS shell (ios/). iOS Safari has no
   // WebSerial/WebUSB/raw-UDP, so the WKWebView host opens the UDP socket and bridges
@@ -231,7 +267,7 @@
   }
 
   root.MAV_TRANSPORT = {
-    openWebSocket, openSerial, openWebUSB, openAndroidSerial, openAndroidUdp, openIosUdp,
+    openWebSocket, openSerial, openWebUSB, openAndroidSerial, openAndroidUdp, openAndroidBle, openIosUdp,
     serialSupported, serialRequestPort, serialGetPorts,
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);

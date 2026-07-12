@@ -55,3 +55,8 @@ android/.gradle/
 android/local.properties
 # Local, gitignored runtime config (real server URL etc.) — see *.example
 config.local.js
+
+# Local test fixtures (personal screenshots) + photo-import local artifacts — not for the public repo
+tests/fixtures/
+.venv-photo/
+data/gazetteer.sqlite

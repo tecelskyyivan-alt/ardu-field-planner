@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.40";
+  const APP_VERSION = "2.5.41";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1943,7 +1943,16 @@
       // consumes the user gesture, and Chrome then silently refuses to show the
       // picker → "не бачить порт". So request the device, THEN load specs.
       try {
-        if (conn.startsWith("udp:") && IS_ANDROID && window.AndroidUdp) {
+        if (conn.startsWith("ble:")) {
+          // Bluetooth LE to a SpeedyBee-style FC / BLE-UART module. slice(4), NOT
+          // split(":") — the address is a MAC and is full of colons.
+          if (!window.AndroidBle)
+            return { ok: false, error: "Bluetooth доступний лише в Android-застосунку (APK)." };
+          const addr = conn.slice(4);
+          if (!addr)
+            return { ok: false, error: "BLE-пристрій не вибрано — натисни «Сканувати» і вибери зі списку." };
+          transport = await MAV_TRANSPORT.openAndroidBle(addr);
+        } else if (conn.startsWith("udp:") && IS_ANDROID && window.AndroidUdp) {
           // Native UDP for the ELRS backpack over WiFi. Bind the given port on
           // the phone (host is ignored — we listen on all interfaces).
           const port = parseInt(conn.split(":").pop(), 10) || 14550;
@@ -2061,10 +2070,12 @@
   function mavSyncRows() {
     const t = $("mav-conn-type").value;
     $("mav-cable-row").style.display = t === "cable" ? "" : "none";
-    $("mav-net-row").style.display = t === "cable" ? "none" : "";
+    $("mav-net-row").style.display = (t === "cable" || t === "ble") ? "none" : "";
+    const bleRow = $("mav-ble-row");
+    if (bleRow) bleRow.style.display = t === "ble" ? "" : "none";
     // Seed the default address only if the field is empty or still holds the
     // OTHER type's default — never clobber an address the user typed.
-    if (t !== "cable") {
+    if (t !== "cable" && t !== "ble") {
       const cur = ($("mav-address").value || "").trim();
       if (!cur || cur === MAV_DEFAULT_ADDR.tcp || cur === MAV_DEFAULT_ADDR.udp) {
         $("mav-address").value = MAV_DEFAULT_ADDR[t];
@@ -2118,6 +2129,95 @@
   }
   mavRefreshPorts();   // populate on load
 
+  // ---- Bluetooth LE (SpeedyBee-style FC / BLE-UART module; APK only) ----
+  // The native shell exposes window.AndroidBle; without it (browser / Qt / PWA)
+  // the option is removed so the UI never dangles a dead transport.
+  (function bleUi() {
+    const typeSel = $("mav-conn-type");
+    const bleOpt = typeSel && typeSel.querySelector('option[value="ble"]');
+    if (!window.AndroidBle) { if (bleOpt) bleOpt.remove(); return; }
+    const list = $("mav-ble-list"), scanBtn = $("mav-ble-scan");
+    if (!list || !scanBtn) return;
+    const found = {};                       // addr -> {name, rssi}
+    let scanning = false;
+    const LAST_KEY = "fmp_ble_last";
+    function label(d, addr) {
+      const rssi = d.rssi != null ? " " + d.rssi + " дБм" : "";
+      return (d.name || "(без імені)") + rssi + " — " + addr;
+    }
+    function render() {
+      const cur = list.value;
+      list.innerHTML = "";
+      const addrs = Object.keys(found);
+      if (!addrs.length) {
+        list.innerHTML = scanning
+          ? '<option value="">— шукаю пристрої… —</option>'
+          : '<option value="">— натисни «Сканувати» —</option>';
+        return;
+      }
+      // Strongest signal first — the drone on the bench is usually the top row.
+      addrs.sort((a, b) => (found[b].rssi || -999) - (found[a].rssi || -999));
+      let last = null;
+      try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
+      for (const a of addrs) {
+        const o = document.createElement("option");
+        o.value = a; o.textContent = label(found[a], a);
+        list.appendChild(o);
+      }
+      if (cur && found[cur]) list.value = cur;
+      else if (last && found[last]) list.value = last;
+    }
+    window.__androidBleScan = (json) => {
+      try {
+        const d = JSON.parse(json);
+        if (!d.addr) return;
+        found[d.addr] = { name: d.name || (found[d.addr] && found[d.addr].name) || "", rssi: d.rssi };
+        render();
+      } catch (e) {}
+    };
+    function setScanning(on) {
+      scanning = on;
+      scanBtn.textContent = on ? "Стоп" : "Сканувати";
+      if (!on) render();
+    }
+    // Native fires window.__androidBleEvent for BOTH scan and open events, and
+    // transport.js claims/releases that same handler around each connect. Make the
+    // visible property a stable dispatcher: scan events are handled here, everything
+    // is also forwarded to whatever handler a consumer (transport.js) has set.
+    (function hookScanEvents() {
+      let inner = null;
+      const dispatch = (type, ok, detail) => {
+        if (type === "scan") {
+          setScanning(false);
+          if (detail && detail !== "stopped") setMsg(detail, "error");
+        }
+        if (inner) { try { inner(type, ok, detail); } catch (e) {} }
+      };
+      Object.defineProperty(window, "__androidBleEvent", {
+        configurable: true,
+        get() { return dispatch; },
+        set(fn) { inner = fn; },
+      });
+    })();
+    scanBtn.addEventListener("click", () => {
+      if (scanning) { try { window.AndroidBle.stopScan(); } catch (e) {} setScanning(false); return; }
+      for (const k of Object.keys(found)) delete found[k];
+      render();
+      let r = null;
+      try { r = window.AndroidBle.startScan(); } catch (e) { setMsg("BLE-скан недоступний: " + e, "error"); return; }
+      try {
+        const j = JSON.parse(r);
+        if (j && j.ok === false) { setMsg(j.error || "Скан не запустився.", "error"); return; }
+      } catch (e) {}
+      setScanning(true);
+      appLog("ble scan start");
+    });
+    // Remember the chosen device for next time (field routine: same drone daily).
+    list.addEventListener("change", () => {
+      try { if (list.value) localStorage.setItem(LAST_KEY, list.value); } catch (e) {}
+    });
+  })();
+
   // Follow-drone toggle (centers the map on the drone in flight).
   const _ff = $("mav-follow");
   if (_ff) { mavFollow = _ff.checked; _ff.addEventListener("change", () => { mavFollow = _ff.checked; }); }
@@ -2126,6 +2226,7 @@
   function mavConnString() {
     const t = $("mav-conn-type").value;
     if (t === "cable") return $("mav-port").value;
+    if (t === "ble") return "ble:" + ($("mav-ble-list") ? $("mav-ble-list").value : "");
     const addr = ($("mav-address").value || "").trim();
     // Empty address → sensible auto-default (UDP listens on all interfaces).
     if (t === "tcp") return "tcp:" + (addr || MAV_DEFAULT_ADDR.tcp);
