@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.43";
+  const APP_VERSION = "2.5.44";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2057,6 +2057,12 @@
       if (action === "start") return _mavLink.missionStart();
       return { ok: false, error: "Невідома дія: " + action };
     },
+    // Param read — the automatic BT-UART activation checks what currently owns
+    // the UART before daring to overwrite it.
+    async mav_get_param(p) {
+      if (!_mavLink) return { ok: false, error: "Немає звʼязку." };
+      return _mavLink.getParam(p.name);
+    },
     // Generic param write (PARAM_SET + read-back confirm) — used by the one-tap
     // BT-UART activation (set SERIALx_PROTOCOL/BAUD over USB-OTG/WiFi, no PC).
     async mav_set_param(p) {
@@ -2264,6 +2270,9 @@
           setMsg("Готово: MAVLink увімкнено на " + u + ". Плата перезавантажується (~10 с) — далі вибери «Bluetooth (BLE)», просканюй і підключайся.", "ok");
           appLog("ble-uart enabled on " + u + " + reboot ack");
           try { mavDisconnect(); } catch (e) {}
+          let mac = "";
+          try { mac = localStorage.getItem(LAST_KEY) || list.value || ""; } catch (e) {}
+          if (mac && window.__fmpBleAutoReconnect) window.__fmpBleAutoReconnect(mac, 13000);
         } else {
           setMsg("Параметри на " + u + " записані й підтверджені, але ребут не відповів (" + (rb.error || "таймаут") +
                  ") — переткни батарею вручну, далі підключайся по Bluetooth.", null);
@@ -2273,6 +2282,111 @@
         enableBtn.disabled = false;
       }
     });
+
+    // ---- FULLY AUTOMATIC BT-UART setup (no buttons) ----
+    // A silent BLE attempt records a pending setup (24 h TTL). The next
+    // successful USB-OTG/WiFi connection reads the UART's current protocol,
+    // rewrites it ONLY if the UART is unclaimed (None/MSP — never GPS/RC),
+    // reboots the FC and re-connects over BLE by itself. Every step -> appLog.
+    const PEND_KEY = "fmp_ble_pending_setup";
+    window.__fmpBleMarkPending = (mac) => {
+      try {
+        localStorage.setItem(PEND_KEY, JSON.stringify({
+          uart: (uartSel && uartSel.value) || "SERIAL4",
+          mac: mac || (list && list.value) || "", ts: Date.now() }));
+        appLog("[auto-ble] відкладене налаштування записано");
+      } catch (e) {}
+    };
+    function blePendingGet() {
+      try {
+        const p = JSON.parse(localStorage.getItem(PEND_KEY) || "null");
+        if (p && p.uart && Date.now() - p.ts < 24 * 3600 * 1000) return p;
+      } catch (e) {}
+      return null;
+    }
+    function blePendingClear() { try { localStorage.removeItem(PEND_KEY); } catch (e) {} }
+
+    // Switch to BLE, scan until the remembered MAC re-appears after the FC
+    // reboot, connect. Falls back to a manual hint if the drone never shows.
+    window.__fmpBleAutoReconnect = (mac, waitMs) => {
+      if (!mac) return;
+      setTimeout(() => {
+        try { $("mav-conn-type").value = "ble"; mavSyncRows(); } catch (e) {}
+        appLog("[auto-ble] чекаю плату після ребуту, сканую " + mac + "…");
+        setMsg("Автоматично перепідключаюсь по Bluetooth…", null);
+        for (const k of Object.keys(found)) delete found[k];
+        let done = false;
+        const prevCb = window.__androidBleScan;
+        window.__androidBleScan = (json) => {
+          try { prevCb(json); } catch (e) {}
+          if (done) return;
+          try {
+            const d = JSON.parse(json);
+            if (d.addr === mac) {
+              done = true;
+              try { window.AndroidBle.stopScan(); } catch (e) {}
+              setScanning(false);
+              window.__androidBleScan = prevCb;
+              list.value = mac;
+              appLog("[auto-ble] плата в ефірі — підключаюсь по BLE");
+              mavConnect();
+            }
+          } catch (e) {}
+        };
+        try { window.AndroidBle.startScan(); setScanning(true); } catch (e) {}
+        setTimeout(() => {
+          if (done) return;
+          window.__androidBleScan = prevCb;
+          appLog("[auto-ble] " + mac + " не зʼявився за 25 с");
+          setMsg("Плата не зʼявилась по Bluetooth за 25 с — натисни «Сканувати» і підключись вручну.", "error");
+        }, 25000);
+      }, waitMs || 13000);
+    };
+
+    // The pending setup itself: read -> safe-gate -> write -> reboot -> reconnect.
+    window.__fmpAutoBleSetup = async () => {
+      const p = blePendingGet();
+      if (!p) return;
+      const a = mavApi();
+      if (!mavConnected || !a.mav_get_param) return;
+      const st = await a.mav_status();
+      if (st && st.armed) { appLog("[auto-ble] мотори увімкнені — відкладаю налаштування"); return; }
+      appLog("[auto-ble] авто-налаштування BT-UART: " + p.uart);
+      setMsg("Автоналаштування Bluetooth (" + p.uart + ")…", null);
+      const SAFE = [-1, 32, 42];        // None / MSP / MSP-DisplayPort — вільні до перезапису
+      const rp = await a.mav_get_param({ name: p.uart + "_PROTOCOL" });
+      if (!rp.ok) { appLog("[auto-ble] читання " + p.uart + "_PROTOCOL не вдалось: " + (rp.error || "")); return; }
+      let changed = false;
+      const cur = Math.round(rp.value);
+      if (cur !== 2) {
+        if (SAFE.indexOf(cur) === -1) {
+          appLog("[auto-ble] " + p.uart + "_PROTOCOL=" + cur + " — UART зайнятий, автоматично НЕ чіпаю");
+          setMsg("BT-UART (" + p.uart + ") зайнятий іншим протоколом (" + cur + ") — не перезаписую автоматично. Вибери інший UART у блоці активації.", "error");
+          blePendingClear();
+          return;
+        }
+        const w = await a.mav_set_param({ name: p.uart + "_PROTOCOL", value: 2 });
+        if (!w.ok) { appLog("[auto-ble] запис PROTOCOL не вдався: " + (w.error || "")); return; }
+        changed = true;
+      }
+      const rb2 = await a.mav_get_param({ name: p.uart + "_BAUD" });
+      if (rb2.ok && Math.round(rb2.value) !== 115) {
+        const w2 = await a.mav_set_param({ name: p.uart + "_BAUD", value: 115 });
+        if (w2.ok) changed = true;
+      }
+      blePendingClear();
+      if (!changed) {
+        appLog("[auto-ble] " + p.uart + " вже MAVLink@115200, але BLE мовчав — ймовірно, модуль на іншому UART");
+        setMsg("BT-UART уже налаштований, але Bluetooth мовчав — можливо, модуль на іншому UART. Спробуй інший у блоці активації і надішли лог.", "error");
+        return;
+      }
+      appLog("[auto-ble] " + p.uart + " → MAVLink@115200, перезавантажую плату");
+      setMsg("Bluetooth налаштовано (" + p.uart + " → MAVLink). Перезавантажую плату і перепідключусь сам…", "ok");
+      const rr = await a.mav_reboot();
+      if (!rr.ok) appLog("[auto-ble] reboot без ACK (" + (rr.error || "таймаут") + ") — чекаю довше");
+      try { mavDisconnect(); } catch (e) {}
+      window.__fmpBleAutoReconnect(p.mac, rr.ok ? 13000 : 17000);
+    };
   })();
 
   // Follow-drone toggle (centers the map on the drone in flight).
@@ -2311,12 +2425,18 @@
         $("mav-hud").classList.remove("hidden");
         const bnote = r.baud ? ` (baud ${r.baud})` : "";
         let wmsg = r.warning || "Підключено до дрона.";
-        // A silent BLE link = the FC's BT-UART is not on MAVLink yet — point the
-        // operator STRAIGHT at the one-tap activation instead of a vague warning.
-        if (r.warning && conn.startsWith("ble:"))
-          wmsg += " Якщо політник мовчить: відключись, підключись по USB-OTG або WiFi і натисни «Увімкнути BT-MAVLink» у рядку Bluetooth (разово).";
+        // A silent BLE link = the FC's BT-UART is not on MAVLink yet. Remember it:
+        // the NEXT connection over a working link (USB-OTG/WiFi) configures the
+        // UART automatically and re-connects over BLE — zero buttons.
+        if (r.warning && conn.startsWith("ble:")) {
+          if (window.__fmpBleMarkPending) window.__fmpBleMarkPending(conn.slice(4));
+          wmsg += " Політник мовчить — запамʼятав: підключись по USB-OTG або WiFi, і я налаштую Bluetooth сам і перепідключусь автоматично.";
+        }
         setMsg(wmsg + bnote, r.warning ? null : "ok");
         mavStartPolling();
+        // Working non-BLE link + a pending BLE setup -> run it, hands-free.
+        if (!conn.startsWith("ble:") && window.__fmpAutoBleSetup)
+          setTimeout(() => { try { window.__fmpAutoBleSetup(); } catch (e) {} }, 1500);
       } else {
         $("mav-connect").disabled = false;
         setMsg((r && r.error) || "Не вдалося підключитись.", "error");

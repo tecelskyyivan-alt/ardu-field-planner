@@ -610,6 +610,30 @@
         return { ok: false, error: "Параметр не підтверджено (таймаут)." };
       });
     }
+
+    // ---- param read (PARAM_REQUEST_READ → PARAM_VALUE) ----
+    // Needed by the automatic BT-UART activation: BEFORE overwriting a
+    // SERIALx_PROTOCOL we must know what currently owns that UART (stealing a
+    // GPS/RC UART would be far worse than a silent Bluetooth link).
+    async getParam(name, timeout) {
+      if (!this._t) return { ok: false, error: "Немає звʼязку." };
+      timeout = timeout || 4000;
+      return this._withBusy(async () => {
+        const { ts } = this._targets();
+        for (const comp of [this._tcomp || 1, 0]) {
+          this._send("PARAM_REQUEST_READ", { target_system: ts, target_component: comp, param_id: name, param_index: -1 });
+          const deadline = Date.now() + timeout;
+          while (Date.now() < deadline) {
+            const m = await this._recv(["PARAM_VALUE"], deadline - Date.now());
+            if (!m) break;
+            const pid = (m.fields.param_id || "").replace(/ +$/, "");
+            if (pid !== name) continue;
+            return { ok: true, value: Number(m.fields.param_value) };
+          }
+        }
+        return { ok: false, error: "Параметр не прочитано (таймаут)." };
+      });
+    }
   }
 
   root.MAV_LINK = { MavLink, buildMissionItems, humanize };
