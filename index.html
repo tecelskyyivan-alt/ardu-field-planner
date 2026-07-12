@@ -144,6 +144,7 @@
       <label>Тип зʼєднання
         <select id="mav-conn-type">
           <option value="cable">Кабель / радіо (COM-порт)</option>
+          <option value="ble">Bluetooth (BLE)</option>
           <option value="udp">UDP (мережа / SITL)</option>
           <option value="tcp">TCP (SITL)</option>
         </select>
@@ -173,6 +174,14 @@
           <input id="mav-address" type="text" value="" placeholder="авто: 0.0.0.0:14550" />
         </label>
         <p class="hint">Порожнє = слухати всі мережі на 14550.</p>
+      </div>
+      <div id="mav-ble-row" style="display:none">
+        <label>BLE-пристрій
+          <select id="mav-ble-list"><option value="">— натисни «Сканувати» —</option></select>
+        </label>
+        <button id="mav-ble-scan" class="ghost">Сканувати</button>
+        <p class="hint">Польотник зі SpeedyBee-Bluetooth або BLE-UART модуль. На BT-UART
+          польотника має бути MAVLink (SERIALx_PROTOCOL=2), не MSP.</p>
       </div>
       <div class="export-row">
         <button id="mav-connect" class="primary">Підключити</button>
