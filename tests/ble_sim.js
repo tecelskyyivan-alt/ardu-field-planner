@@ -97,13 +97,20 @@ async function testUpload() {
     write(bytes) { for (const m of fcParser.push(bytes)) fcHandle(m); },
     close() { this._closed = true; },
   };
-  // FC → GCS: encode, split into ≤20-byte chunks, deliver each with 5-25 ms jitter.
+  // FC → GCS: encode, split into ≤20-byte chunks. BLE preserves GLOBAL byte
+  // order, so chunks are scheduled on a shared clock — chunks of back-to-back
+  // frames must never interleave (that would garble the stream, which real BLE
+  // cannot do; an early version of this sim did exactly that and "found" a
+  // phantom bug).
+  let fcClock = 0;
   function fcSend(name, fields) {
     const frame = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: fcSeq++ & 0xff });
+    fcClock = Math.max(fcClock, Date.now());
     for (let off = 0; off < frame.length; off += 20) {
       const chunk = frame.slice(off, Math.min(off + 20, frame.length));
-      const delay = 5 + rnd(20) + off; // off keeps chunk order (BLE preserves ordering)
-      setTimeout(() => { if (t.ondata && !t._closed) t.ondata(chunk); }, delay);
+      fcClock += 2 + rnd(12);
+      const at = fcClock - Date.now();
+      setTimeout(() => { if (t.ondata && !t._closed) t.ondata(chunk); }, Math.max(1, at));
     }
   }
   function fcHandle(m) {
@@ -177,9 +184,73 @@ async function testOpenAndroidBle() {
   check("відмова нативного мосту → reject з помилкою", !!err && /Bluetooth/.test(err.message));
 }
 
+/* ------------------------------------------------------------------ Test D --
+ * The automatic BT-UART activation message flow at link level: read the current
+ * SERIAL4_PROTOCOL (getParam is NEW in link.js), rewrite it, confirm read-back,
+ * reboot with COMMAND_ACK — against a simulated ArduPilot param store. */
+async function testAutoUartFlow() {
+  console.log("D. авто-активація BT-UART: getParam → setParam → reboot");
+  let s = 777;
+  const rnd = (n) => (s = (s * 1103515245 + 12345) & 0x7fffffff) % n;
+  const fcParams = { SERIAL4_PROTOCOL: 32, SERIAL4_BAUD: 57 };   // MSP@57600 — типовий стан
+  const fcParser = MAVLINK.createParser();
+  let fcSeq = 0, rebooted = false;
+  const t = {
+    ondata: null, _closed: false,
+    write(bytes) { for (const m of fcParser.push(bytes)) fcHandle(m); },
+    close() { this._closed = true; },
+  };
+  let fcClock = 0;   // shared clock: BLE preserves global byte order (see test B)
+  function fcSend(name, fields) {
+    const frame = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: fcSeq++ & 0xff });
+    fcClock = Math.max(fcClock, Date.now());
+    for (let off = 0; off < frame.length; off += 20) {
+      const chunk = frame.slice(off, Math.min(off + 20, frame.length));
+      fcClock += 2 + rnd(10);
+      setTimeout(() => { if (t.ondata && !t._closed) t.ondata(chunk); }, Math.max(1, fcClock - Date.now()));
+    }
+  }
+  function pv(name) {
+    fcSend("PARAM_VALUE", { param_id: name, param_value: fcParams[name], param_type: 9, param_count: 2, param_index: 0 });
+  }
+  function fcHandle(m) {
+    // MAVLink char[16] ids arrive NUL-padded — trim both NULs and spaces,
+    // else 12-char names ("SERIAL4_BAUD") never match while 16-char ones do.
+    const trimId = (x) => (x || "").replace(/[\s\u0000]+$/g, "");
+    if (m.name === "PARAM_REQUEST_READ") {
+      const id = trimId(m.fields.param_id);
+      if (id in fcParams) pv(id);
+    } else if (m.name === "PARAM_SET") {
+      const id = trimId(m.fields.param_id);
+      fcParams[id] = m.fields.param_value;
+      pv(id);
+    } else if (m.name === "COMMAND_LONG" && m.fields.command === 246) {
+      rebooted = true;
+      fcSend("COMMAND_ACK", { command: 246, result: 0 });
+    }
+  }
+  const hb = setInterval(() => fcSend("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 81, custom_mode: 0, system_status: 4, mavlink_version: 3 }), 700);
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+
+  const g1 = await link.getParam("SERIAL4_PROTOCOL");
+  check("getParam читає поточний протокол (MSP=32)", g1.ok && Math.round(g1.value) === 32, JSON.stringify(g1));
+  const w1 = await link.setParam("SERIAL4_PROTOCOL", 2);
+  check("setParam PROTOCOL→2 з read-back", w1.ok, w1.error);
+  const w2 = await link.setParam("SERIAL4_BAUD", 115);
+  check("setParam BAUD→115 з read-back", w2.ok, w2.error);
+  const g2 = await link.getParam("SERIAL4_PROTOCOL");
+  check("повторне читання підтверджує 2", g2.ok && Math.round(g2.value) === 2);
+  const rb = await link.command(246, [1]);
+  check("reboot (CMD 246) отримує ACK", rb.ok && rebooted, rb.error);
+  clearInterval(hb);
+  link.disconnect();
+}
+
 (async () => {
   await testUpload();
   await testOpenAndroidBle();
+  await testAutoUartFlow();
   console.log(failures === 0 ? "\nУСІ BLE-СИМУЛЯЦІЇ ЗЕЛЕНІ" : `\nПРОВАЛІВ: ${failures}`);
   process.exit(failures === 0 ? 0 : 1);
 })();
