@@ -637,7 +637,7 @@
     const btn = $("edit-exclusions");
     if (btn) {
       btn.classList.toggle("active", on);
-      btn.textContent = on ? "ГОТОВО — зберегти вузли" : "Редагувати вирізи";
+      btn.textContent = on ? t("ГОТОВО — зберегти вузли") : t("Редагувати вирізи");
     }
     let n = 0;
     exclusionItems.eachLayer((layer) => {
@@ -1096,7 +1096,23 @@
   }
 
   function row(label, value) {
+    label = t(label);
+    if (LANG === "en") value = enUnits(value);
     return `<div class="row"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
+  }
+  // Translate trailing UA measurement units inside a rendered VALUE string (EN mode).
+  function enUnits(v) {
+    if (v == null) return v;
+    return String(v)
+      .replace(/ га/g, " ha").replace(/ км/g, " km").replace(/ л(?![а-яіїєґ'А-ЯІЇЄҐ])/g, " l")
+      .replace(/ хв/g, " min").replace(/ с(?![а-яіїєґ'А-ЯІЇЄҐ])/g, " s")
+      .replace(/ м(?![а-яіїєґ'А-ЯІЇЄҐ])/g, " m").replace(/ \(авто\)/g, " (auto)");
+  }
+  // Translate a template with {0},{1}… placeholders, then substitute args (EN mode).
+  function tf(tmpl, ...args) {
+    let s = t(tmpl);
+    args.forEach((a, i) => { s = s.split("{" + i + "}").join(String(a)); });
+    return s;
   }
 
   // Escape HTML before putting any untrusted string into innerHTML. The drone's
@@ -1665,7 +1681,7 @@
       });
     });
     if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
-    setMsg(recs.length + " збережених полів на карті — натисни на поле, щоб обрати для роботи.", "ok");
+    setMsg(tf("{0} збережених полів на карті — натисни на поле, щоб обрати для роботи.", recs.length), "ok");
   }
   if ($("show-saved")) $("show-saved").addEventListener("click", showSavedFields);
 
@@ -1841,15 +1857,15 @@
     if (!el) return;
     const plan = routeSig(lastRoute), flown = routeSig(flownRoute);
     if (!plan) {
-      el.textContent = "Маршрут не побудовано."; el.className = "mission-status";
+      el.textContent = t("Маршрут не побудовано."); el.className = "mission-status";
     } else if (!flown) {
-      el.textContent = "Маршрут НЕ залито в дрон. Натисни «Залити місію».";
+      el.textContent = t("Маршрут НЕ залито в дрон. Натисни «Залити місію».");
       el.className = "mission-status warn";
     } else if (plan === flown) {
-      el.textContent = `У дроні поточна місія: ${lastRoute.length} точок.`;
+      el.textContent = tf("У дроні поточна місія: {0} точок.", lastRoute.length);
       el.className = "mission-status ok";
     } else {
-      el.textContent = "План ЗМІНЕНО після заливки — у дроні СТАРА місія. Залий заново!";
+      el.textContent = t("План ЗМІНЕНО після заливки — у дроні СТАРА місія. Залий заново!");
       el.className = "mission-status stale";
     }
   }
@@ -2786,7 +2802,7 @@
       const _sp = parseFloat($("spacing").value) || 20;
       const turnRadiusM = _rt ? Math.max(1, Math.min(10, _sp / 2)) : 0;
       const r = await a.mav_upload_mission({
-        onProgress: (s, t) => setMsg(`Заливаю місію в дрон… ${s}/${t} точок`, null),
+        onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
       });
       appLog("upload result: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error, warning: r.warning, verify: r.verify && r.verify.verified }));
@@ -2806,20 +2822,20 @@
         }
         flownHasRtl = lastRtl;
         updateMissionStatus();        // now "uploaded, matches plan"
-        let m = `Місію залито в дрон (${r.count} пунктів).`;
+        let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
         const v = r.verify;
         if (v && v.ok && v.verified) {
-          m += " Перевірено зчитуванням — збігається.";
+          m += " " + t("Перевірено зчитуванням — збігається.");
           setMsg(m, "ok");
         } else if (v && v.ok && !v.verified) {
-          m += ` Зчитана місія НЕ збігається (${(v.mismatches || []).join("; ") || "розбіжності"}).`;
+          m += " " + tf("Зчитана місія НЕ збігається ({0}).", (v.mismatches || []).join("; ") || t("розбіжності"));
           setMsg(m, "error");
         } else {
           if (r.warning) m += " " + r.warning;
           setMsg(m, "ok");
         }
       } else {
-        setMsg((r && r.error) || "Не вдалося залити місію.", "error");
+        setMsg((r && r.error) || t("Не вдалося залити місію."), "error");
       }
     } catch (e) {
       setMsg("Помилка заливки: " + e, "error");
@@ -2861,7 +2877,7 @@
     if (!confirm("Увімкнути мотори (ARM)? Тримай апарат під контролем.")) return;
     const m = (lastStatus && lastStatus.mode) || "";
     if (NON_ARMABLE.includes(m)) {
-      setMsg(`Режим ${m} не дозволяє ARM — перемикаю на GUIDED…`, null);
+      setMsg(tf("Режим {0} не дозволяє ARM — перемикаю на GUIDED…", m), null);
       await mavCommand({ action: "mode", mode: "GUIDED" }, "Режим GUIDED");
     }
     mavCommand({ action: "arm" }, "ARM");
@@ -3054,7 +3070,7 @@
     if (!latest) { setMsg("Не вдалося перевірити оновлення (немає інтернету / сервер недоступний).", "error"); return; }
     appLog("update check: server=" + latest + " app=" + APP_VERSION);
     // 2) Up to date?
-    if (!_isNewer(latest, APP_VERSION)) { setMsg(`У вас остання версія (v${APP_VERSION}).`, "ok"); return; }
+    if (!_isNewer(latest, APP_VERSION)) { setMsg(tf("У вас остання версія (v{0}).", APP_VERSION), "ok"); return; }
     // 3) Update, per platform.
     if (IS_ANDROID && window.AndroidUpdate && window.AndroidUpdate.download) {
       setMsg(`Доступна v${latest}. Завантажую APK — встановлення почнеться автоматично, лише підтверди.`, "ok");
