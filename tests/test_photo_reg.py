@@ -202,12 +202,13 @@ def test_yellow_on_bad_coarse(shot):
 
 
 def test_yellow_on_label_crosscheck_failure(shot):
-    """Якорі зсунуті на ~2 км: навіть ідеальний матч має стати yellow."""
+    """Якорі зсунуті далеко за поріг (5 км > MAX_LABEL_DIST_M=2 км — реальний
+    промах «не те село»): навіть ідеальний матч має стати yellow."""
     cv2.setRNGSeed(1234)
     world, _ = make_world(shot, degrade="mild")
     coarse = make_coarse(shot)
     for a in coarse["anchors"]:
-        a["merc"] = (a["merc"][0] + 2000.0, a["merc"][1])
+        a["merc"] = (a["merc"][0] + 5000.0, a["merc"][1])
     res = reg.refine(shot, coarse, make_fetch_tile(world))
     assert res["band"] == "yellow"
     assert "підпис" in res["reason"]

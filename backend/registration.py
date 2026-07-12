@@ -36,11 +36,22 @@ TILE_PX = 256                          # standard tile size
 # Ворота впевненості (усі мають пройти для band="green")
 MIN_INLIERS = 30
 MIN_INLIER_RATIO = 0.35
+# Частка інлаєрів падає з віддаленням дат зйомки (більше кандидатів-збігів по
+# змінених полях), навіть коли лок бездоганний. ДУЖЕ велика АБСОЛЮТНА кількість
+# інлаєрів із малим RMSE — самодостатній доказ лока (виміряно: 672 інлаєри,
+# rmse 1.38 px, ratio 0.31 на живих даних) — тож ratio-гейт пропускає і її.
+STRONG_INLIERS = 300
 MAX_RMSE_PX = 2.5                      # у пікселях скріншота
 SCALE_RATIO_RANGE = (0.8, 1.25)        # refined м/px відносно coarse
 MAX_ROT_DEG = 5.0
 MIN_HULL_FRAC = 0.30                   # частка кадру під опуклою оболонкою інлаєрів
-MAX_LABEL_DIST_M = 500.0               # крос-чек: підпис має лягти в 500 м від геокоду
+# Крос-чек по підписах ловить лок «не на те село» (промах на кілометри), а не
+# дрібний зсув: GeoNames-центроїд села і точка, де ГІС малює підпис, розходяться
+# на 0.5–1.2 км У НОРМІ (виміряно на живих даних: 595/867 м при бездоганному
+# SIFT-локу — 925 інлаєрів, rmse 1.4 px, hull 0.93). 500 м забороняв green
+# назавжди; 2 км пропускає шум якоря і далі валить справжній промах.
+# Безпека не залежить від цього порога: needs_confirm=true завжди.
+MAX_LABEL_DIST_M = 2000.0              # крос-чек: підпис має лягти в 2 км від геокоду
 
 MAX_TILES = 120                        # стеля на розмір мозаїки (захист від сміттєвого coarse)
 MAX_MISSING_FRAC = 0.5                 # частка недоотриманих тайлів, після якої не намагаємось
@@ -465,8 +476,9 @@ def refine(bgr_image, coarse, fetch_tile=None):
     reasons = []
     if n_inl < MIN_INLIERS:
         reasons.append("замало інлаєрів: %d < %d" % (n_inl, MIN_INLIERS))
-    if inlier_ratio < MIN_INLIER_RATIO:
-        reasons.append("низька частка інлаєрів: %.2f < %.2f" % (inlier_ratio, MIN_INLIER_RATIO))
+    if inlier_ratio < MIN_INLIER_RATIO and n_inl < STRONG_INLIERS:
+        reasons.append("низька частка інлаєрів: %.2f < %.2f (і інлаєрів %d < %d)"
+                       % (inlier_ratio, MIN_INLIER_RATIO, n_inl, STRONG_INLIERS))
     if rmse_px is None or rmse_px >= MAX_RMSE_PX:
         reasons.append("великий RMSE: %s px (поріг %.1f)" %
                        ("?" if rmse_px is None else "%.2f" % rmse_px, MAX_RMSE_PX))
