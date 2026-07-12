@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.41";
+  const APP_VERSION = "2.5.42";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2057,6 +2057,18 @@
       if (action === "start") return _mavLink.missionStart();
       return { ok: false, error: "Невідома дія: " + action };
     },
+    // Generic param write (PARAM_SET + read-back confirm) — used by the one-tap
+    // BT-UART activation (set SERIALx_PROTOCOL/BAUD over USB-OTG/WiFi, no PC).
+    async mav_set_param(p) {
+      if (!_mavLink) return { ok: false, error: "Немає звʼязку." };
+      return _mavLink.setParam(p.name, p.value);
+    },
+    // MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN (246, param1=1) — reboot the autopilot
+    // so a SERIALx_PROTOCOL change takes effect. Refused by ArduPilot when armed.
+    async mav_reboot() {
+      if (!_mavLink) return { ok: false, error: "Немає звʼязку." };
+      return _mavLink.command(246, [1]);
+    },
   };
   function mavApi() {
     return (!IS_QT && window.MAV_LINK && window.MAVLINK) ? jsMav : api();
@@ -2215,6 +2227,51 @@
     // Remember the chosen device for next time (field routine: same drone daily).
     list.addEventListener("change", () => {
       try { if (list.value) localStorage.setItem(LAST_KEY, list.value); } catch (e) {}
+    });
+
+    // One-tap BT-UART activation, NO PC: while connected over any WORKING link
+    // (USB-OTG / WiFi), write SERIALx_PROTOCOL=2 + SERIALx_BAUD=115 with read-back
+    // confirmation, then reboot the FC so the change takes effect. After the
+    // reboot the drone talks MAVLink on its Bluetooth bridge.
+    const enableBtn = $("ble-uart-enable"), uartSel = $("ble-uart-sel");
+    if (enableBtn) enableBtn.addEventListener("click", async () => {
+      const a = mavApi();
+      if (!mavConnected || !a.mav_set_param) {
+        setMsg("Спершу підключись до дрона робочим каналом (USB-OTG кабель до телефона або WiFi) — саме він і налаштує Bluetooth.", "error");
+        return;
+      }
+      const st = await a.mav_status();
+      if (st && st.armed) { setMsg("Мотори увімкнені — спершу вимкни (disarm), тоді налаштовуй.", "error"); return; }
+      const u = uartSel ? uartSel.value : "SERIAL4";
+      enableBtn.disabled = true;
+      setMsg("Вмикаю MAVLink на " + u + "…", null);
+      appLog("ble-uart enable: " + u);
+      try {
+        const r1 = await a.mav_set_param({ name: u + "_PROTOCOL", value: 2 });
+        if (!r1.ok) {
+          setMsg("Не вдалося виставити " + u + "_PROTOCOL: " + (r1.error || "без відповіді") +
+                 ". Можливо, BT-модуль на іншому UART — спробуй інший у списку.", "error");
+          appLog("ble-uart FAIL protocol: " + (r1.error || "")); return;
+        }
+        const r2 = await a.mav_set_param({ name: u + "_BAUD", value: 115 });
+        if (!r2.ok) {
+          setMsg(u + "_PROTOCOL записано, але " + u + "_BAUD не підтвердився: " + (r2.error || "") +
+                 ". Переткни батарею і спробуй підключитись по Bluetooth.", null);
+          appLog("ble-uart baud unconfirmed: " + (r2.error || "")); return;
+        }
+        const rb = await a.mav_reboot();
+        if (rb.ok) {
+          setMsg("Готово: MAVLink увімкнено на " + u + ". Плата перезавантажується (~10 с) — далі вибери «Bluetooth (BLE)», просканюй і підключайся.", "ok");
+          appLog("ble-uart enabled on " + u + " + reboot ack");
+          try { mavDisconnect(); } catch (e) {}
+        } else {
+          setMsg("Параметри на " + u + " записані й підтверджені, але ребут не відповів (" + (rb.error || "таймаут") +
+                 ") — переткни батарею вручну, далі підключайся по Bluetooth.", null);
+          appLog("ble-uart params ok, reboot no-ack");
+        }
+      } finally {
+        enableBtn.disabled = false;
+      }
     });
   })();
 
