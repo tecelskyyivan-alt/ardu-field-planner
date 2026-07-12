@@ -182,21 +182,8 @@
         <button id="mav-ble-scan" class="ghost">Сканувати</button>
         <p class="hint">Польотник зі SpeedyBee-Bluetooth або BLE-UART модуль. На BT-UART
           польотника має бути MAVLink (SERIALx_PROTOCOL=2), не MSP.</p>
-        <details open>
-          <summary class="hint">Політник мовчить по BLE? Разова активація без ПК</summary>
-          <p class="hint">Підключись до дрона БУДЬ-ЯКИМ робочим каналом (USB-OTG кабель до
-            телефона або WiFi) і натисни кнопку — додаток сам увімкне MAVLink на BT-UART
-            і перезавантажить плату. Далі підключайся по Bluetooth.</p>
-          <label>UART Bluetooth-модуля
-            <select id="ble-uart-sel">
-              <option value="SERIAL4" selected>SERIAL4 — SpeedyBee F405 V3/V4</option>
-              <option value="SERIAL6">SERIAL6 — SpeedyBee F405 WING / MINI</option>
-              <option value="SERIAL1">SERIAL1 — SpeedyBee F405 AIO</option>
-              <option value="SERIAL3">SERIAL3 — інша плата (спробувати)</option>
-            </select>
-          </label>
-          <button id="ble-uart-enable" class="ghost">Увімкнути BT-MAVLink і перезавантажити</button>
-        </details>
+        <p class="hint">Якщо політник мовчить по Bluetooth — просто підключись раз
+          по USB-OTG або WiFi: додаток сам налаштує його Bluetooth і перепідключиться.</p>
       </div>
       <div class="export-row">
         <button id="mav-connect" class="primary">Підключити</button>
