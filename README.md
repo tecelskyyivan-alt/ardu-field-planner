@@ -1,4 +1,4 @@
-# Field Mission Planner — ArduCopter (агрообприскування)
+# Field Mission Planner — ArduCopter (agricultural spraying)
 
 > ⚠️ **SAFETY / БЕЗПЕКА — read before use.** This software plans and uploads flight
 > missions for **real spraying drones**. A mistake can crash the aircraft, spray the
@@ -12,207 +12,156 @@
 > ГАРАНТІЙ**. Ти — командир екіпажу: перевіряй кожну місію, тримай візуальний контакт і
 > ручний override, дотримуйся законів про дрони й пестициди. Використання на власний ризик.
 
-Десктоп-додаток для побудови маршрутів покриття поля для ArduCopter.
-Малюєш контур реального поля на супутниковій карті → програма генерує
-маршрут «змійкою» (boustrophedon / lawnmower) → експорт офлайн-файлів місії
-для Mission Planner / QGroundControl. Орієнтований на **агрообприскування**.
+**Offline-first ground-control station + coverage-mission planner for ArduCopter
+agricultural spraying.** Draw a field on a satellite map → generate a boustrophedon
+(“lawnmower”) coverage route → export a mission (`.plan` / `.waypoints`) or **upload it
+straight to the drone over MAVLink** and fly it with **live telemetry**. Works fully
+offline (self-hosted map + engine, no CDN). Bilingual UI (**Українська / English**).
 
-## Можливості
+Офлайн-планувальник маршрутів покриття поля + наземна станція (GCS) для ArduCopter.
+Малюєш контур поля → «змійка» покриття → експорт місії або **пряма заливка в дрон по
+MAVLink** (кабель / WiFi-ELRS) + жива телеметрія.
 
-- 🛰️ Супутникова карта (Google/Esri) з перемикачем шарів і назвами міст/кордонів.
-- ✏️ Контур поля — **намалюй полігон** інструментом малювання, редагуй вершини
-  (маршрут перебудовується наживо). Без AI/OSM — повністю офлайн, вручну.
-- 🌳 **Перешкоди (вирізи)** — намалюй полігони над деревами / дорогами / ставками;
-  кнопка **«✓ Зберегти вирізи»** фіксує їх (як «Готово» контуру). Вирізаються з
-  маршруту І додаються у геозону; зберігаються у проєкті.
-- 🔁 Покриття: крок, кут (або **авто-кут** = найкоротший маршрут), відступ від країв,
-  проріджування близьких точок.
-- 📍 **Якір старту/фінішу** — наближає кінці маршруту до **GPS дрона / твоєї
-  GPS-позиції / точки зльоту**, щоб скоротити транзит і політний час.
-- 🔋 **Поділ на секції** — **N рівних за площею** (кожна = окремий виліт) або за
-  часом батареї; per-flight експорт.
-- ⏱️ **Розумний час місії** — зліт + транзит + крейсер + повороти + RTL + посадка.
-- 📈 **Лог польотів + калібрування** — кожен реальний AUTO-виліт пишеться офлайн
-  (IndexedDB); план-vs-факт калібрує оцінку часу/батареї під ТВІЙ дрон.
-- 💧 **Планування рідини** — норма (л/га) × покрита площа → розчин + заправки бака.
-- 📊 Статистика: точки, площа, покрита/вирізана площа, довжина, час, секції, рідина.
-- 🚁 **Живий політ (MAVLink)** — заливка місії, телеметрія/HUD, прогрес,
-  **live-таймери «до завершення» і «до посадки»**, ARM/режим/AUTO/RTL.
-- 💾 Експорт: `.waypoints` (QGC WPL 110), `.plan`, геозона `.plan` / `.fence` (MP), `.geojson`.
-- 📁 **Проєкти** — поле + параметри + вирізи (`exports/projects/`).
-- ✈️ Авто-зліт (NAV_TAKEOFF) + RTL у кінці.
+## Platforms / Платформи
 
-## Встановлення
+| | |
+|---|---|
+| 🖥️ **Desktop (Windows / macOS)** | native window on Qt / QtWebEngine (`app_qt.py`) |
+| 📱 **Android** | native APK (`android/`) — USB-serial to the FC + MAVLink over WiFi (ELRS backpack) |
+| 🍎 **iOS** | native shell (`ios/`) — MAVLink over WiFi |
+| 🌐 **Browser / PWA** | any Chromium/Safari; install as an offline PWA |
 
-```powershell
+## Features / Можливості
+
+- 🛰️ **Satellite map** (Google / Esri) with layer switching and place/border labels.
+- ✏️ **Field contour** — draw a polygon, drag vertices (route rebuilds live). Fully
+  offline, manual (no cloud / no AI required).
+- 🌳 **Obstacles (cut-outs)** — draw polygons over trees / roads / ponds; cut from the
+  route **and** added to the geofence; saved with the project.
+- 🔁 **Coverage** — pass spacing, angle (or **auto-angle** = least mission time / least
+  spray overlap), edge margin, waypoint de-clustering.
+- 🔄 **Rounded turns** — the copter flies a smooth U-turn at each pass end via the
+  autopilot’s `WP_RADIUS_M` (= spacing / 2); no extra waypoints.
+- 📍 **Start/finish anchor** — pulls the route ends toward the drone’s GPS / your GPS /
+  take-off point to cut transit and flight time.
+- 🔋 **Split into sorties** — **N equal-area** sections or by battery time; per-flight export.
+- ⏱️ **Realistic mission time** — take-off + transit + cruise + turns + RTL + landing.
+- 📈 **Flight log + calibration** — every real AUTO flight is logged offline (IndexedDB);
+  plan-vs-actual calibrates the time / battery estimate to *your* drone.
+- 💧 **Spray-liquid planning** — rate (l/ha) × sprayed area → working liquid + tank refills.
+- 🚁 **Live flight (MAVLink)** — mission upload with read-back verify, telemetry/HUD, live
+  “time to finish / to landing”, ARM / mode / AUTO / RTL, GPS jamming/spoofing guard.
+  - **Over cable (USB serial)** and **over WiFi** (ELRS backpack, UDP). The WiFi link and
+    mission upload are hardened for the narrow/lossy ELRS uplink (proactive re-send,
+    ArduPilot `MISSION_ITEM_INT` **and** INAV `MISSION_ITEM` dialects).
+- 💾 **Export** — `.waypoints` (QGC WPL 110), `.plan`, geofence `.plan` / `.fence`, `.geojson`; **KML** import/export.
+- 📁 **Projects** — field + parameters + cut-outs; auto-restore of the last field & settings.
+- 🌍 **UA / EN** language toggle (persisted).
+
+## Download / Завантажити
+
+**📥 Ready-to-use builds are on the [Releases page](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/latest).**
+
+- **Android (phone/tablet):** download **`FieldMissionPlanner-….apk`** from the latest release →
+  open it on the device → allow *install from unknown sources* → open the app.
+  *(Готові збірки — на сторінці [Releases](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/latest): завантаж `.apk`, відкрий на телефоні, дозволь встановлення з невідомих джерел.)*
+- **PC (Windows / macOS) & browser:** no prebuilt binary yet — run from source (below). Then open
+  the native desktop window (`python app_qt.py`) or the browser UI (`python serve.py`).
+- **iOS:** build from `ios/` with Xcode (Apple does not allow installing apps from a website).
+
+> The public build never “phones home” (log upload / self-update are disabled by default).
+
+## Build from source / Встановлення з коду
+
+Requires **Python 3.11+** (desktop / browser modes).
+
+```bash
+git clone https://github.com/tecelskyyivan-alt/ardu-field-planner
 cd ardu-field-planner
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python3 -m venv .venv
+# macOS / Linux:  source .venv/bin/activate
+# Windows:        .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-> Завжди використовуй project `.venv\Scripts\python.exe` (системний `python` на
-> цій машині — Hermes-venv без pip). Leaflet і рушій self-hosted (без CDN) —
-> планувальник працює повністю офлайн.
+Leaflet and the planning engine are self-hosted (no CDN) — it runs fully offline.
 
-## Запуск
+## Run / Запуск
 
-**Найпростіше — ярлик на робочому столі.** Один раз створи його:
-```powershell
-.\install_shortcut.ps1
+**Native desktop (recommended)** — a Qt / QtWebEngine window:
+```bash
+python app_qt.py
 ```
-З'явиться ярлик **«Field Mission Planner»** на робочому столі (своя іконка, без
-вікна консолі). Далі просто подвійний клік — і додаток відкривається. Скрипт
-можна перезапускати будь-коли, щоб відновити ярлик.
+The HTTP backend (`serve.py`) runs on a background thread; the UI is served at
+`http://127.0.0.1:8731/`.
 
-> Лаунчер запускає `app_qt.py` через `pythonw.exe` (GUI без чорного вікна
-> терміналу). Перший старт триває кілька секунд — підвантажується AI-модель.
-
-**Нативний десктоп (рекомендовано):**
-```powershell
-.\.venv\Scripts\python.exe app_qt.py
+**Browser mode:**
+```bash
+python serve.py      # then open the printed http://127.0.0.1:<port>/
 ```
-Вікно на **Qt / QtWebEngine** (стабільний вбудований Chromium). Бекенд
-(`serve.py`) працює у фоновому потоці; інтерфейс — `http://127.0.0.1:8731/`.
-SAM/torch обмежено до (ядер−4) потоків, щоб не лагав UI.
 
-> Старий `app.py` (pywebview/WebView2) нестабільний на Py3.14 — лишений як довідка.
+**Android / iOS** — build the native app from `android/` (Gradle, JDK 17, Android SDK)
+or `ios/` (Xcode). See `THIRD_PARTY.md`; keep any server URL/credentials out of the
+source (see *Self-hosting* below).
 
-**Браузерний режим:** `.\.venv\Scripts\python.exe serve.py`
+## How to use / Як користуватись
 
-## Як користуватись
+1. **Set the field** — draw the polygon and edit its vertices.
+2. **Obstacles** (optional) — draw obstacle polygons to cut from the coverage.
+3. **Parameters** — altitude, spacing, angle (or auto-angle), margin, speed, battery,
+   l/ha + tank (for liquid planning), rounded turns.
+4. **Build route** — the coverage snake + statistics.
+5. **Export or upload** — save `.waypoints` / `.plan` (open in Mission Planner / QGC,
+   check the home point, upload) **or** connect over MAVLink (cable / WiFi) and upload
+   directly, then fly with live telemetry.
 
-1. **Задай поле** — намалюй полігон, або обери джерело (Авто/AI/OSM), увімкни клік
-   і клікни по полю. Виправ вузли за потреби (правка зберігається для навчання).
-2. **Перешкоди** (опц.) — увімкни режим перешкод, клікай по деревах/дорогах у полі.
-3. **Параметри** — висота, крок, кут (або авто-кут), відступ, швидкість, батарея,
-   норма л/га + бак (для рідини).
-4. **«Побудувати маршрут»** — змійка покриття + статистика.
-5. **Експорт** — `.waypoints`/`.plan`, відкрий у Mission Planner / QGC, перевір
-   домашню точку, залий у дрон.
-
-## Архітектура
+## Architecture / Архітектура
 
 ```
-app_qt.py              # нативне вікно (PySide6/QtWebEngine) + serve.start()
-serve.py               # stdlib HTTP-сервер (:8731) + роутинг /api/*
+app_qt.py            # native window (PySide6 / QtWebEngine) + serve.start()
+serve.py             # stdlib HTTP server (:8731) + /api/* routing
 backend/
-  api.py               # центральний міст: build_route (час/секції/якір/калібрування),
-                        #   export, project, MAVLink-команди
-  coverage.py          # змійка, вирізи, відступ, авто-кут, площі, estimate_mission_time,
-                        #   split_route_by_area (N рівних секцій), якір старту/фінішу
-  flight_calib.py      # офлайн-калібрування плану з логів реальних польотів
-  geo.py               # проєкція lat/lon <-> локальні метри, відстані
-  mission.py           # експорт .waypoints / .plan / геозона / .fence / .geojson
-  mavlink_link.py      # живий MAVLink-лінк: телеметрія + пряма заливка місії
-                       #   (кабель COM / UDP / TCP); build_mission_items()
-web/  index.html · app.js · style.css   # Leaflet + Leaflet.draw фронтенд
+  api.py             # bridge: build_route (time / sections / anchor / calibration), export, MAVLink
+  coverage.py        # boustrophedon snake, cut-outs, margin, auto-angle, areas, mission time, splits
+  mission.py         # export .waypoints / .plan / geofence / .fence / .geojson
+  mavlink_link.py    # live MAVLink over cable (COM) / UDP / TCP: telemetry + mission upload
+  geo.py, flight_calib.py
+web-stable/          # Leaflet + Leaflet.draw frontend (index.html · app.js · i18n.js · mav/*)
+android/  ios/       # native shells (USB-serial + MAVLink-over-WiFi bridges)
 ```
 
-## Тести
+## Tests / Тести
 
-```powershell
-.\.venv\Scripts\python.exe test_core.py        # ядро: coverage, mission, geo
-.\.venv\Scripts\python.exe test_features.py    # margin, авто-кут, вирізи, рідина, експорт
-.\.venv\Scripts\python.exe test_v24.py         # v2.4/2.5: час, секції, калібрування, якір, overlap-кут
-.\.venv\Scripts\python.exe test_split.py       # v2.5: ручний поділ поля лінією на сектори
-.\.venv\Scripts\python.exe test_ui.py          # app.js id <-> index.html
-.\.venv\Scripts\python.exe test_controls.py    # польова безпека: керування = SLIDE-to-confirm, не тап
-.\.venv\Scripts\python.exe test_serve.py       # HTTP-шар (+ видалені AI-ендпоінти -> 404)
-.\.venv\Scripts\python.exe test_mavlink.py     # MAVLink: фейковий дрон по UDP (телеметрія + заливка)
-.\.venv\Scripts\python.exe test_sitl.py        # MAVLink E2E: РЕАЛЬНИЙ ArduCopter SITL (upload->verify->download)
-.\.venv\Scripts\python.exe test_sitl_wind.py   # E2E політ у вітрі: логи + план-vs-факт час + калібрування
+```bash
+python test_core.py        # coverage / mission / geo
+python test_features.py    # margin, auto-angle, cut-outs, liquid, export
+python test_ui.py          # app.js element ids <-> index.html
+python test_serve.py       # HTTP layer
+python test_mavlink.py     # MAVLink over a fake UDP drone
+python test_sitl.py        # E2E against a real ArduCopter SITL (upload -> verify -> download)
 ```
-(Старіші `test_api/cv/sam/combo/delineate.py` — для ранніх/вимкнених гілок.)
 
-## Деталі формату місії
+## Mission format / Формат місії
 
-- WP0 = HOME (центроїд поля, абсолютна рамка) — MP перепише фактичним home при заливці.
-- Зліт `MAV_CMD_NAV_TAKEOFF` (GLOBAL_RELATIVE_ALT); точки `MAV_CMD_NAV_WAYPOINT`;
-  кінець `MAV_CMD_NAV_RETURN_TO_LAUNCH` (якщо RTL).
-- Геозона: inclusion-полігон поля + один exclusion-полігон на кожну перешкоду.
-
-## Напрям (з 2026-06-21)
-
-Додаток розвивається у **наземну станцію (GCS) + планувальник місій** для
-ArduPilot — поєднати найкраще від Mission Planner / QGroundControl, але **без
-розділу налаштування дрона** (параметри/калібрування лишаються в Mission
-Planner). Спланувати → **залити напряму в дрон по MAVLink** (кабель/радіо) →
-вести виліт із **живою телеметрією**. Повний план — у беклозі нижче та в
-Obsidian-нотатці `FieldMissionPlanner.md`.
-
-## Бек-лог
-
-- ✅ **Розбиття за батареєю** + per-flight експорт
-- ✅ **Планування рідини** (л/га + заправки) · покрита/вирізана площа · проєкти
-- ✅ **Ярлик на робочому столі** (`install_shortcut.ps1`, іконка, без консолі)
-- ✅ **MAVLink-ядро**: connect (кабель COM / UDP / TCP) + телеметрія + пряма
-  заливка місії — `backend/mavlink_link.py`, протестовано loopback (`test_mavlink.py`)
-- ✅ **UI MAVLink** (Фаза 1): панель зʼєднання (кабель/UDP/TCP), кнопка «Залити в дрон»
-- ✅ **Телеметрія** (Фаза 2, базово): HUD (лінк/режим/GPS/батарея/…) + маркер дрона + трек
-- ✅ **Verify заливки**: після заливки місія авто-зчитується назад і звіряється;
-  UI показує «✅ збігається» або список розбіжностей. Протестовано НАСКРІЗНО на
-  **реальному ArduCopter SITL** (`test_sitl.py`): upload→verify→download з
-  квірками home / DO_CHANGE_SPEED / RTL (ArduPilot зануляє координати home-пункту,
-  доки нема GPS — verify це коректно ігнорує, бо звіряє seq 0 лише за командою).
-- ✅ **HOME від дрона**: періодичний `GET_HOME_POSITION` — одинична рання спроба
-  (до GPS-фіксу) лишалась без відповіді, тож реальний home не довантажувався;
-  тепер перепитуємо, доки не отримаємо (SITL-перевірено).
-- ☐ Фінальна перевірка на реальному дроні по кабелю в полі
-- ☐ Прогрес місії (підсвітка ноги, ETA) + сповіщення (батарея/GPS)
-- ☐ Керування польотом (Фаза 3): arm/режим/guided/пуш геозони
-- ☐ Простіше видалення/редагування вузлів (Leaflet-Geoman)
-
-## v2.4 (зроблено)
-
-- ✅ **AI прибрано** — поле і перешкоди лише ручним малюванням (нема torch/SAM/OSM/VPS).
-- ✅ **Кнопка «✓ Зберегти вирізи»** (парність із commit контуру) + round-trip у проєкті.
-- ✅ **Лог польотів** (IndexedDB) + офлайн-калібрування (`flight_calib.py`) → план-vs-факт.
-- ✅ **Якір старт/фініш** (GPS дрона / моя позиція / точка зльоту) — мінімізація транзиту.
-- ✅ **N рівних секцій за площею** (`split_route_by_area`), per-section стат.
-- ✅ **Розумний час місії** (`estimate_mission_time`: зліт/транзит/повороти/RTL/посадка).
-- ✅ **Live-таймери** «до завершення» / «до посадки» + детектори завершення/посадки.
-- ✅ **SITL-валідація з вітром** (`test_sitl_wind.py`): реальний політ у штиль і 7 м/с,
-  логи телеметрії, звірка планованого часу з фактичним + цикл калібрування (25%→1%).
-
-## v2.5 (зроблено)
-
-Натхнення — аналіз APK-аналога JIYI «Agri Assistant» (Obsidian `KJJ-Agri-Assistant-Inventory.md`).
-
-- 🏆 **Ідеальний алгоритм найменшого перекриття** (`overlap_optimal_angle`). Ключовий факт:
-  дрон обприскує **постійно від зльоту до посадки** (нема секц. контролю), тож КОЖЕН метр
-  польоту = розпил, і майже весь overlap — це lead-in + RTL перельоти, чия геометрія залежить
-  від кута проходів. Старий `optimal_angle` мінімізує лише довжину й цього не бачить. Новий
-  перебирає кут 0–180 і обирає мінімум РЕАЛЬНОГО `mission_overlap` (повний шлях із RTL) →
-  **−46% overlap** (10.23%→5.51% на бенчмарку), +1.2% часу. Дефолт «авто-кут». Знайдено
-  багатоагентним пошуком (5 стратегій). out-and-back став opt-in (для постійного розпилу гірший).
-- 📐 **Метрика `mission_overlap`** — справжнє перекриття по всьому польотному шляху (зліт→проходи→
-  конектори→RTL→посадка) + spray-outside-field; у статистиці «Покриття / Перекриття».
-- ✂️ **Ручний поділ поля лінією на сектори** (`split_field_by_line`, `shapely.ops.split` з
-  продовженням лінії за bbox) — кожен сектор = окремий виліт (основа для мульти-дрона). Малюй
-  лінію (Leaflet.draw polyline) → кольорові сектори, per-sector експорт.
-- 💾 **IndexedDB-сховище полів** (`fmp_fields`) з міграцією зі старого localStorage — структуровано,
-  велика ємність; localStorage лишився fallback.
-- 📊 **Записи робіт по полю + CSV** (дата/поле/га/час/батарея, BOM для Excel).
-- 🌍 **KML імпорт/експорт** контурів (поле + вирізи як дірки).
-- ⚙️ **Автозбереження налаштувань крайньої місії** (`fmp_last_settings`) — відкрив додаток і
-  параметри вже стоять.
+- WP0 = HOME (field centroid, absolute frame) — the GCS overwrites it with the real home on upload.
+- Take-off `MAV_CMD_NAV_TAKEOFF` (GLOBAL_RELATIVE_ALT); waypoints `MAV_CMD_NAV_WAYPOINT`;
+  end `MAV_CMD_NAV_RETURN_TO_LAUNCH` (if RTL).
+- Geofence: an inclusion polygon of the field + one exclusion polygon per obstacle.
 
 ---
 
-## Ліцензія / License
+## License / Ліцензія
 
-**GPLv3** — див. [LICENSE](LICENSE). Сторонні компоненти й атрибуція: [THIRD_PARTY.md](THIRD_PARTY.md).
+**GPLv3** — see [LICENSE](LICENSE). Third-party components & attribution: [THIRD_PARTY.md](THIRD_PARTY.md).
 
-## Свій сервер (необов'язково) / Self-hosting the optional server
+## Self-hosting the optional server / Свій сервер (необов'язково)
 
-Завантаження діагностичного логу та самооновлення APK **вимкнені за замовчуванням**
-(порожній URL) — публічна збірка **нікуди не «дзвонить додому»**. Щоб увімкнути для
-власного розгортання, впиши свій URL (+ за потреби basic-auth) у:
-`VPS_BASE` (web `app.js`), `LOG_URL` (iOS `ViewController.swift`),
-`LogBridge.URL_STR` / `UpdateBridge.BASE` + `AUTH` (Android). **Ніколи не коміт реальні креди** —
-тримай їх у gitignored-конфізі / build-property.
+Diagnostic-log upload and APK self-update are **disabled by default** (empty server URL) —
+a public build **never phones home**. To enable them for your own deployment, set your
+server URL (+ optional basic-auth) in: web `VPS_BASE` (`app.js`), iOS `LOG_URL`
+(`ViewController.swift`), Android `LogBridge.URL_STR` / `UpdateBridge.BASE` + `AUTH`.
+**Never commit real credentials** — keep them in a gitignored config / build property.
 
-## Безпека / Security
+## Security / Безпека
 
-Політика вразливостей і безпеки — [SECURITY.md](SECURITY.md).
+Vulnerability & safety policy — [SECURITY.md](SECURITY.md).
