@@ -1,0 +1,20 @@
+# Фото-імпорт полів (backend/photo_import.py + color_seg/ocr_labels/geocode/
+# registration) — SERVER-ONLY залежності. Свідомо ОКРЕМИЙ файл від
+# requirements.txt: ці модулі ніколи не вантажаться Pyodide-движком у браузері
+# (api.py робить lazy-import), і десктоп без них працює як раніше.
+#
+#   pip install -r requirements-photo.txt
+#
+# numpy і shapely вже в основному requirements.txt (numpy також тягнеться
+# самим opencv).
+opencv-python-headless>=4.10
+pytesseract>=0.3.10
+rapidfuzz>=3.6
+
+# СИСТЕМНІ залежності (pip їх НЕ ставить):
+#   tesseract >= 5 З УКРАЇНСЬКОЮ моделлю (ukr traineddata):
+#     macOS:          brew install tesseract tesseract-lang
+#     Debian/Ubuntu:  apt install tesseract-ocr tesseract-ocr-ukr
+#
+# Газетир населених пунктів (офлайн-геокодер) будується один раз (мережа):
+#   python scripts/build_gazetteer.py     ->  data/gazetteer.sqlite (~30 МБ)

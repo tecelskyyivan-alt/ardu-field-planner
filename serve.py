@@ -318,6 +318,8 @@ class Handler(BaseHTTPRequestHandler):
             return api.mav_verify_mission(payload)
         if path == "/api/mav_command":
             return api.mav_command(payload)
+        if path == "/api/import_photo":
+            return api.import_photo(payload)
         return {"ok": False, "error": "unknown endpoint"}
 
     MAV_PATHS = frozenset({
@@ -360,9 +362,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
-        if n > 1_000_000:                    # cap the read (legit /api/log body is ~600 KB);
-            self._send(413, json.dumps({"ok": False, "error": "too large"}))  # stops a
-            return                            # Content-Length: 2GB read from OOM-ing the box
+        # Body cap: /api/import_photo несе base64-скріншот (~1–6 МБ), тому лише
+        # цьому маршруту — 8 МБ; решті лишається жорсткий 1 МБ (legit /api/log
+        # body ~600 KB). Захист від Content-Length: 2GB, що OOM-ить сервер.
+        cap = 8_000_000 if self.path == "/api/import_photo" else 1_000_000
+        if n > cap:
+            self._send(413, json.dumps({"ok": False, "error": "too large"}))
+            return
         raw = self.rfile.read(n) if n else b"{}"
         try:
             payload = json.loads(raw.decode("utf-8") or "{}")

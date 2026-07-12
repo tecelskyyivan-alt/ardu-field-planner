@@ -4,6 +4,7 @@ Methods on this class are callable from JavaScript as
     window.pywebview.api.<method>(...)
 and return values (or Promises resolving to them) back to the page.
 """
+import base64
 import json
 import os
 import time
@@ -450,6 +451,49 @@ class Api:
         try:
             from .mavlink_link import LINK
             return LINK.verify_mission(items)
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    # ----------------------------------------------------------- photo import
+    def import_photo(self, params):
+        """Імпорт скріншота агро-ГІС: полігони полів + автоматична прив'язка.
+
+        params: {
+            image_b64: str,            # base64 зображення (можна data:-URL)
+            region_hint: {lat, lng} | [lat, lon],   # приблизний район (опційно)
+            allow_net: bool,           # дозволити тягнути тайли (дефолт True)
+        }
+        Відповідь — контракт photo_import.import_photo (band/confidence/
+        needs_confirm/labels/georef/contours/diag). needs_confirm завжди True —
+        фронт зобов'язаний показати підтвердження на мапі перед створенням полів.
+
+        backend.photo_import імпортується ЛІНИВО: він тягне cv2/pytesseract,
+        яких немає в Pyodide, а цей файл входить в ENGINE_MODULES і вантажиться
+        браузерним движком — top-level import зламав би планувальник у браузері.
+        """
+        try:
+            from . import photo_import
+        except Exception as exc:
+            return {"ok": False, "band": "red", "needs_confirm": True,
+                    "error": "Фото-імпорт недоступний на цьому пристрої "
+                             "(потрібен сервер з OpenCV/tesseract): %s" % exc}
+        try:
+            p = params or {}
+            b64 = str(p.get("image_b64") or "")
+            if b64.startswith("data:"):        # data:image/...;base64,XXXX
+                b64 = b64.split(",", 1)[-1]
+            try:
+                image_bytes = base64.b64decode(b64)
+            except Exception:
+                return {"ok": False, "band": "red", "needs_confirm": True,
+                        "error": "image_b64 не декодується як base64."}
+            # Мережа для тайлів: параметр клієнта + серверний вимикач
+            # (FMP_PHOTO_NET=0 — напр. на VPS без вихідного трафіку).
+            allow_net = bool(p.get("allow_net", True)) \
+                and os.environ.get("FMP_PHOTO_NET") != "0"
+            fetch_tile = photo_import.make_tile_fetcher() if allow_net else None
+            return photo_import.import_photo(image_bytes, fetch_tile=fetch_tile,
+                                             region_hint=p.get("region_hint"))
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
