@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.42";
+  const APP_VERSION = "2.5.43";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2310,7 +2310,12 @@
         mavSetControls(true);
         $("mav-hud").classList.remove("hidden");
         const bnote = r.baud ? ` (baud ${r.baud})` : "";
-        setMsg((r.warning || "Підключено до дрона.") + bnote, r.warning ? null : "ok");
+        let wmsg = r.warning || "Підключено до дрона.";
+        // A silent BLE link = the FC's BT-UART is not on MAVLink yet — point the
+        // operator STRAIGHT at the one-tap activation instead of a vague warning.
+        if (r.warning && conn.startsWith("ble:"))
+          wmsg += " Якщо політник мовчить: відключись, підключись по USB-OTG або WiFi і натисни «Увімкнути BT-MAVLink» у рядку Bluetooth (разово).";
+        setMsg(wmsg + bnote, r.warning ? null : "ok");
         mavStartPolling();
       } else {
         $("mav-connect").disabled = false;
