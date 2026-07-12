@@ -14,6 +14,12 @@ final class ViewController: UIViewController, WKScriptMessageHandler, WKNavigati
     private let loc = CLLocationManager()
     private var serverPort: Int = 0
 
+    // Remote diagnostic-log sink on the VPS. A dedicated token-guarded route
+    // (Caddy /fmplog/* → serve.py /api/log) so we never touch the /ai/ basic-auth
+    // the PWA/APK use. The token only lets a client PUSH logs — nothing readable.
+    private static let LOG_URL = "https://178.105.166.29.sslip.io/fmplog/api/log"
+    private static let LOG_TOKEN = "fmp_ios_log_7Qk2mVb8xR4tLn0aZ3wY"
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -89,6 +95,11 @@ final class ViewController: UIViewController, WKScriptMessageHandler, WKNavigati
     private func setupWebView() {
         let cfg = WKWebViewConfiguration()
         cfg.userContentController.add(self, name: "fmpUdp")
+        // Native diagnostic-log upload bridge (mirrors Android LogBridge): the web
+        // app hands us the log JSON, we POST it to the VPS ourselves. Native avoids
+        // the WebView CORS preflight a cross-origin fetch would hit, and keeps the
+        // push token out of the JS bundle.
+        cfg.userContentController.add(self, name: "fmpLog")
         cfg.allowsInlineMediaPlayback = true
         // Appending here keeps the normal Safari UA and adds our marker, so the web
         // app detects the iOS shell (IS_IOS) and routes UDP through this bridge.
@@ -135,6 +146,15 @@ final class ViewController: UIViewController, WKScriptMessageHandler, WKNavigati
     // MARK: - JS → native
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "fmpLog" {
+            // Body is the raw JSON string {device, version, platform, ua, log}.
+            if let json = message.body as? String, let data = json.data(using: .utf8) {
+                uploadLog(data)
+            } else {
+                reportLogResult(false)
+            }
+            return
+        }
         guard message.name == "fmpUdp",
               let body = message.body as? [String: Any],
               let op = body["op"] as? String else { return }
@@ -148,6 +168,31 @@ final class ViewController: UIViewController, WKScriptMessageHandler, WKNavigati
             udp.close()
         default:
             break
+        }
+    }
+
+    // MARK: - diagnostic log upload (native → VPS)
+
+    private func uploadLog(_ body: Data) {
+        guard let url = URL(string: Self.LOG_URL) else { reportLogResult(false); return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(Self.LOG_TOKEN, forHTTPHeaderField: "X-FMP-Token")
+        req.httpBody = body
+        req.timeoutInterval = 15
+        let task = URLSession.shared.dataTask(with: req) { [weak self] _, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            self?.reportLogResult(err == nil && (200...299).contains(code))
+        }
+        task.resume()
+    }
+
+    private func reportLogResult(_ ok: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.webView.evaluateJavaScript(
+                "window.__logUploadResult && window.__logUploadResult(\(ok ? "true" : "false"))",
+                completionHandler: nil)
         }
     }
 

@@ -377,6 +377,19 @@ class Api:
                 if not ps.get("ok"):
                     ps = LINK.set_param("WPNAV_SPEED", spd * 100.0)   # cm/s legacy
                 res["cruise_speed_set"] = ps.get("ok")
+            # Round-turn: the frontend passes turn_radius_m = pass-spacing / 2 (0 = off),
+            # so the copter flies a rounded U-turn (diameter ≈ pass step) at each pass end.
+            # Copter ≥4.7 uses WP_RADIUS_M (m); older firmware WPNAV_RADIUS (cm). No extra
+            # waypoints — the autopilot does the arc. Same new-then-legacy try as WP_SPD.
+            try:
+                trm = float((params or {}).get("turn_radius_m", 0) or 0)
+            except (TypeError, ValueError):
+                trm = 0.0
+            if trm > 0:
+                pr = LINK.set_param("WP_RADIUS_M", trm)               # m (Copter ≥4.7)
+                if not pr.get("ok"):
+                    pr = LINK.set_param("WPNAV_RADIUS", trm * 100.0)  # cm legacy
+                res["turn_radius_set"] = pr.get("ok")
             # Auto read-back verify unless the caller opts out.
             if (params or {}).get("verify", True):
                 v = LINK.verify_mission(items)

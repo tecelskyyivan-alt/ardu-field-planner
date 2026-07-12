@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.36";
+  const APP_VERSION = "2.5.40";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "https://178.105.166.29.sslip.io/ai";
@@ -29,6 +29,10 @@
   // exported and analysed afterwards. The «Лог для аналізу» button packages it.
   const LOG = [];
   let _logDirty = false;
+  // Count problems (JS errors / promise rejects / console.error) since the last
+  // successful remote upload, so the native shells can auto-send the log when a
+  // real problem happens during a field session (see maybeAutoUploadLog below).
+  let _errSinceUpload = 0;
   function appLog(s) {
     let t; try { t = new Date().toISOString().slice(11, 23); } catch (e) { t = ""; }
     LOG.push(t + " " + s);
@@ -45,10 +49,12 @@
     // the exact failing call — the single most useful thing for remote diagnosis.
     const _stackOf = (o) => (o && o.stack) ? " | " + String(o.stack).replace(/\s+/g, " ").slice(0, 500) : "";
     window.addEventListener("error", (e) => {
+      _errSinceUpload++;
       appLog("JS ERROR: " + ((e && e.message) || e) + " @ " + ((e && e.filename) || "")
         + ":" + ((e && e.lineno) || "") + ":" + ((e && e.colno) || "") + _stackOf(e && e.error));
     });
     window.addEventListener("unhandledrejection", (e) => {
+      _errSinceUpload++;
       const r = e && e.reason;
       appLog("PROMISE REJECT: " + ((r && r.message) || r || "") + _stackOf(r));
     });
@@ -61,6 +67,7 @@
       if (!orig) return;
       console[lvl] = function () {
         try {
+          if (lvl === "error") _errSinceUpload++;
           const parts = Array.prototype.map.call(arguments, (a) =>
             (a && a.stack) ? String(a.stack)
               : (a && typeof a === "object") ? (function () { try { return JSON.stringify(a); } catch (e) { return String(a); } })()
@@ -74,7 +81,7 @@
     // uploaded log shows EXACTLY where the offline engine failed on a device.
     window.FMP_ENGINE_LOG = appLog;
   }
-  appLog("start " + APP_VERSION + (IS_ANDROID ? " APK" : IS_QT ? " Qt" : " web") + " ua=" + (navigator.userAgent || "").slice(0, 70));
+  appLog("start " + APP_VERSION + (IS_ANDROID ? " APK" : IS_IOS ? " iOS" : IS_QT ? " Qt" : " web") + " ua=" + (navigator.userAgent || "").slice(0, 70));
 
   // ---- map ----------------------------------------------------------------
   // Start over a farmland-rich area (well mapped in OSM) so the auto-contour
@@ -108,7 +115,7 @@
   map.fitBounds([[44.0, 22.0], [52.5, 40.4]]);
   { const _av = document.getElementById("app-ver");
     if (_av) {
-      _av.textContent = "v" + APP_VERSION + (IS_ANDROID ? " APK" : IS_QT ? " ПК" : " web");
+      _av.textContent = "v" + APP_VERSION + (IS_ANDROID ? " APK" : IS_IOS ? " iOS" : IS_QT ? " ПК" : " web");
       // Tap the version (visible on every platform, incl. the APK where the «Додаток»
       // tab is hidden) to check the server for an update.
       _av.title = "Перевірити оновлення";
@@ -1130,9 +1137,14 @@
   ["spacing", "alt", "speed", "margin", "angle", "angle-range"].forEach((id) => {
     if ($(id)) $(id).addEventListener("input", scheduleSaveSettings);
   });
-  ["rtl", "auto_angle"].forEach((id) => {
+  ["rtl", "auto_angle", "viz-coverage", "round-turn"].forEach((id) => {
     if ($(id)) $(id).addEventListener("change", scheduleSaveSettings);
   });
+  function syncRoundTurnHint() {
+    const h = $("round-turn-hint");
+    if (h && $("round-turn")) h.style.display = $("round-turn").checked ? "" : "none";
+  }
+  if ($("round-turn")) $("round-turn").addEventListener("change", syncRoundTurnHint);
   window.addEventListener("beforeunload", () => { saveLastSettings(); saveLastField(); });
   restoreLastSettings();          // pre-fill last session's settings before first render
   // Deferred so ALL module-level `let`s (lastRoute, …) are initialized first —
@@ -1418,6 +1430,8 @@
       alt: parseFloat($("alt").value),
       speed: parseFloat($("speed").value),
       rtl: $("rtl").checked,
+      viz: $("viz-coverage") ? $("viz-coverage").checked : false,
+      round_turn: $("round-turn") ? $("round-turn").checked : false,
     };
   }
   function applyParams(p) {
@@ -1427,6 +1441,10 @@
     set("alt", p.alt); set("speed", p.speed);
     if ($("auto_angle")) $("auto_angle").checked = !!p.auto_angle;
     if ($("rtl")) $("rtl").checked = p.rtl !== false;
+    // viz-coverage (spray-footprint overlay) persists its state; default OFF when
+    // unset so a fresh install / a project saved before this field doesn't force it on.
+    if ($("viz-coverage")) $("viz-coverage").checked = !!p.viz;
+    if ($("round-turn")) { $("round-turn").checked = !!p.round_turn; syncRoundTurnHint(); }
     if (p.angle != null) {
       set("angle-range", p.angle);
       if ($("angle-val")) $("angle-val").textContent = Math.round(p.angle) + "°";
@@ -1440,7 +1458,7 @@
   function saveLastSettings() {
     try {
       localStorage.setItem("fmp_last_settings", JSON.stringify({
-        params: collectParams(), anchor_source: anchorSourceVal(),
+        params: collectParams(),
       }));
     } catch (e) { /* private mode / quota — ignore */ }
   }
@@ -1909,6 +1927,16 @@
         let ps = await _mavLink.setParam("WP_SPD", speed);
         if (!ps.ok) ps = await _mavLink.setParam("WPNAV_SPEED", speed * 100);
         res.cruise_speed_set = ps.ok;
+      }
+      // Round-turn: set the autopilot's waypoint acceptance/turn radius so the copter
+      // flies a rounded U-turn at each pass end. Copter ≥4.7 uses WP_RADIUS_M (m); older
+      // firmware WPNAV_RADIUS (cm). No extra waypoints — the autopilot does the arc.
+      const trm = p && p.turn_radius_m;
+      if (trm && trm > 0) {
+        let pr = await _mavLink.setParam("WP_RADIUS_M", trm);
+        if (!pr.ok) pr = await _mavLink.setParam("WPNAV_RADIUS", trm * 100);
+        res.turn_radius_set = pr.ok;
+        appLog("round-turn: WP_RADIUS_M " + trm + "m -> " + (pr.ok ? "ok" : "FAILED"));
       }
       if (!p || p.verify !== false) {
         const v = await _mavLink.verifyMission(items);
@@ -2683,8 +2711,14 @@
       // Live progress so a slow link (ELRS/RF) doesn't look frozen — the user sees
       // points climbing instead of guessing whether it timed out. Only the in-browser
       // jsMav link reports progress; the desktop /api path ignores the callback.
+      // Round-turn: diameter = pass spacing, so radius = spacing/2 (clamped to the
+      // autopilot's WP_RADIUS_M range). 0 = off → don't touch the drone's radius param.
+      const _rt = $("round-turn") && $("round-turn").checked;
+      const _sp = parseFloat($("spacing").value) || 20;
+      const turnRadiusM = _rt ? Math.max(1, Math.min(10, _sp / 2)) : 0;
       const r = await a.mav_upload_mission({
         onProgress: (s, t) => setMsg(`Заливаю місію в дрон… ${s}/${t} точок`, null),
+        turn_radius_m: turnRadiusM,
       });
       appLog("upload result: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error, warning: r.warning, verify: r.verify && r.verify.verified }));
       if (r && r.ok) {
@@ -2834,7 +2868,7 @@
   // would 401. Returns true on success.
   async function uploadLogToServer(text) {
     const payload = { device: deviceId(), version: APP_VERSION,
-      platform: IS_ANDROID ? "apk" : IS_QT ? "qt" : "web",
+      platform: IS_ANDROID ? "apk" : IS_IOS ? "ios" : IS_QT ? "qt" : "web",
       ua: (navigator.userAgent || "").slice(0, 140), log: text };
     if (IS_ANDROID && window.AndroidLog && window.AndroidLog.upload) {
       // Native upload runs on a background thread and reports back via a callback.
@@ -2843,6 +2877,18 @@
         const to = setTimeout(() => { if (!done) { done = true; resolve(false); } }, 13000);
         window.__logUploadResult = (ok) => { if (!done) { done = true; clearTimeout(to); resolve(!!ok); } };
         try { window.AndroidLog.upload(JSON.stringify(payload)); }
+        catch (e) { if (!done) { done = true; clearTimeout(to); resolve(false); } }
+      });
+    }
+    if (IS_IOS && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.fmpLog) {
+      // Same pattern as Android: the native shell (ViewController fmpLog) POSTs the
+      // log to the VPS and reports back via window.__logUploadResult. The iOS local
+      // server is loopback-only and has no /api/log, so a same-origin fetch can't work.
+      return await new Promise((resolve) => {
+        let done = false;
+        const to = setTimeout(() => { if (!done) { done = true; resolve(false); } }, 13000);
+        window.__logUploadResult = (ok) => { if (!done) { done = true; clearTimeout(to); resolve(!!ok); } };
+        try { window.webkit.messageHandlers.fmpLog.postMessage(JSON.stringify(payload)); }
         catch (e) { if (!done) { done = true; clearTimeout(to); resolve(false); } }
       });
     }
@@ -2876,6 +2922,36 @@
     setMsg("Лог (" + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : "на сервер не пішло — скопійовано в буфер") + ".", sent ? "ok" : "error");
   }
   $("mav-log").addEventListener("click", exportLog);
+
+  // ---- automatic remote log upload (native shells) --------------------------
+  // On the native apps (iOS/Android), when a real problem happens during a field
+  // session AND there's internet, push the log to the VPS on its own — the operator
+  // shouldn't have to remember the «Лог» button after something breaks. Gated to
+  // native only (the PWA/desktop keep the manual button, so we don't spam the VPS
+  // from every browser tab). Throttled, and flushed when the app goes to background.
+  const AUTO_LOG_NATIVE = IS_IOS || IS_ANDROID;
+  let _lastAutoUpload = 0, _autoUploading = false;
+  async function maybeAutoUploadLog(force) {
+    if (!AUTO_LOG_NATIVE) return;
+    if (!(navigator.onLine !== false)) return;         // skip when known-offline
+    if (_autoUploading) return;
+    let now = 0; try { now = Date.now(); } catch (e) {}
+    if (!force && (_errSinceUpload === 0 || now - _lastAutoUpload < 60000)) return;
+    if (force && _errSinceUpload === 0 && _lastAutoUpload !== 0) return;  // nothing new to flush
+    _autoUploading = true;
+    const hadErrors = _errSinceUpload;
+    try {
+      const ok = await uploadLogToServer(buildLogReport());
+      if (ok) { _lastAutoUpload = now; _errSinceUpload = Math.max(0, _errSinceUpload - hadErrors); appLog("auto-log uploaded (" + hadErrors + " new problems)"); }
+    } catch (e) {} finally { _autoUploading = false; }
+  }
+  if (AUTO_LOG_NATIVE) {
+    setInterval(() => { maybeAutoUploadLog(false); }, 20000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") maybeAutoUploadLog(true);
+    });
+    window.addEventListener("pagehide", () => { maybeAutoUploadLog(true); });
+  }
 
   // ---- in-app update --------------------------------------------------------
   // The app already talks to the server (logs), so it can check the server's

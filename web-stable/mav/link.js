@@ -400,30 +400,53 @@
     // mid-transfer even though they were progressing fine.
     async uploadMission(items, timeout, onProgress) {
       if (!this._t) return { ok: false, error: "Немає звʼязку. Спочатку підключись до дрона." };
-      const stallMs = timeout || 15000;
-      const HARD_CAP = 600000;     // absolute ceiling (10 min) — safety net only
+      const stallMs = timeout || 30000;   // no-PROGRESS window (a fresh request/item resets it)
+      const HARD_CAP = 600000;            // absolute ceiling (10 min) — safety net only
+      const REQ_WAIT = 1000;              // how long to wait each round for the next request
+      const RESEND_GAP = 1000;            // min gap between proactive re-sends (pace the narrow uplink)
       return this._withBusy(async () => {
         const { ts, tc } = this._targets();
         this._pauseStreams();          // clear the link so the mission handshake gets through
         const n = items.length;
         const sendCount = () => this._send("MISSION_COUNT", { target_system: ts, target_component: tc, count: n, mission_type: 0 });
+        const sendItem = (seq, v1) => {
+          const it = items[seq];
+          const f = {
+            target_system: ts, target_component: tc, seq: it.seq, frame: it.frame, command: it.command,
+            current: it.current, autocontinue: it.autocontinue, param1: it.p1, param2: it.p2, param3: it.p3, param4: it.p4,
+            z: it.alt, mission_type: 0,
+          };
+          // Match the item type to what the vehicle ASKED for: a v1 MISSION_REQUEST wants
+          // MISSION_ITEM (float lat/lon in degrees) — INAV / older stacks reject the INT
+          // variant; a MISSION_REQUEST_INT wants MISSION_ITEM_INT (lat/lon ×1e7, ArduPilot).
+          if (v1) this._send("MISSION_ITEM", Object.assign(f, { x: it.lat, y: it.lon }));
+          else this._send("MISSION_ITEM_INT", Object.assign(f, { x: Math.round(it.lat * 1e7), y: Math.round(it.lon * 1e7) }));
+        };
         sendCount();
         const sent = new Set();
         const hardDeadline = Date.now() + HARD_CAP;
-        let lastProgress = Date.now(), lastCount = Date.now(), gotReq = false;
+        let lastProgress = Date.now(), lastCount = Date.now(), lastResend = 0, gotReq = false, lastReqSeq = -1, lastReqV1 = false;
         while (sent.size < n && Date.now() < hardDeadline) {
           if (Date.now() - lastProgress > stallMs)
             return { ok: false, error: sent.size === 0
               ? `Дрон не відповів на заливку (0/${n}). Команда на дрон не доходить — по backpack/ELRS канал на завантаження часто замалий. Спробуй USB-кабель або ближче/кращу антену.`
               : `Заливка зупинилась на ${sent.size}/${n} — дрон перестав запитувати точки. Перевір зв'язок/антену.` };
-          const m = await this._recv(["MISSION_REQUEST", "MISSION_REQUEST_INT", "MISSION_ACK"], 1000);
+          const m = await this._recv(["MISSION_REQUEST", "MISSION_REQUEST_INT", "MISSION_ACK"], REQ_WAIT);
           if (!m) {
-            // Re-announce COUNT ONLY until the vehicle first responds, and never more
-            // often than 4 s. Each MISSION_COUNT RESETS the vehicle's mission receiver,
-            // so on a high-latency ELRS link an aggressive resend (e.g. every 1 s) keeps
-            // resetting an in-flight transfer and the upload never starts. 4 s safely
-            // exceeds the round-trip; once the first request arrives we never resend.
-            if (!gotReq && Date.now() - lastCount > 4000) { sendCount(); lastCount = Date.now(); }
+            // No request this round — recover a LOST packet instead of just waiting:
+            if (!gotReq) {
+              // Before the vehicle first engages: re-announce COUNT. It RESETS the
+              // vehicle's mission receiver, so throttle to safely exceed the ELRS
+              // round-trip (an aggressive resend keeps resetting an in-flight transfer).
+              if (Date.now() - lastCount > 4000) { sendCount(); lastCount = Date.now(); }
+            } else if (lastReqSeq >= 0 && Date.now() - lastResend > RESEND_GAP) {
+              // Handshake started but went quiet: RE-SEND the last requested item. If OUR
+              // item was lost the vehicle finally gets it; if the vehicle's REQUEST was lost,
+              // the duplicate makes it re-emit its request → the transfer un-sticks. Unlike
+              // MISSION_COUNT this does NOT reset the receiver, so it's safe to repeat. This
+              // is the fix for uploads stalling mid-way over a lossy WiFi/ELRS backpack link.
+              sendItem(lastReqSeq, lastReqV1); lastResend = Date.now();
+            }
             continue;
           }
           if (m.name === "MISSION_ACK") {
@@ -433,20 +456,33 @@
           gotReq = true;   // the vehicle is engaged — stop re-announcing COUNT
           const seq = m.fields.seq;
           if (seq < 0 || seq >= n) continue;
-          const it = items[seq];
-          this._send("MISSION_ITEM_INT", {
-            target_system: ts, target_component: tc, seq: it.seq, frame: it.frame, command: it.command,
-            current: it.current, autocontinue: it.autocontinue, param1: it.p1, param2: it.p2, param3: it.p3, param4: it.p4,
-            x: Math.round(it.lat * 1e7), y: Math.round(it.lon * 1e7), z: it.alt, mission_type: 0,
-          });
-          sent.add(seq);
-          lastProgress = Date.now();   // a request serviced → the link is alive
-          if (onProgress) { try { onProgress(sent.size, n); } catch (e) {} }
+          lastReqSeq = seq; lastReqV1 = (m.name === "MISSION_REQUEST");   // reply in the requested dialect
+          sendItem(seq, lastReqV1);
+          lastResend = Date.now();       // an item send also paces the next proactive resend
+          lastProgress = Date.now();     // any request (even a re-request) proves the link is alive
+          if (!sent.has(seq)) {          // advance the counter on NEW items only
+            sent.add(seq);
+            if (onProgress) { try { onProgress(sent.size, n); } catch (e) {} }
+          }
         }
-        // All items sent — wait (generously) for the final ACK.
-        const ack = await this._recv(["MISSION_ACK"], Math.max(stallMs, 8000));
-        if (ack && ack.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
-        if (ack) return { ok: false, error: this._rejectMission(ack.fields.type) };
+        // All items sent — wait (generously) for the final ACK, still nudging: the ACK,
+        // or a late re-request of the last item(s), is just as easily lost as anything else.
+        const ackDeadline = Date.now() + Math.max(stallMs, 10000);
+        while (Date.now() < ackDeadline) {
+          const m = await this._recv(["MISSION_ACK", "MISSION_REQUEST", "MISSION_REQUEST_INT"], REQ_WAIT);
+          if (m && m.name === "MISSION_ACK") {
+            if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
+            return { ok: false, error: this._rejectMission(m.fields.type) };
+          }
+          if (m && (m.name === "MISSION_REQUEST" || m.name === "MISSION_REQUEST_INT")) {
+            const seq = m.fields.seq;
+            const v1 = (m.name === "MISSION_REQUEST");
+            if (seq >= 0 && seq < n) { lastReqSeq = seq; lastReqV1 = v1; sendItem(seq, v1); lastResend = Date.now(); }
+            continue;
+          }
+          // Silence: re-send the last item to prompt the ACK (safe, non-resetting).
+          if (lastReqSeq >= 0 && Date.now() - lastResend > RESEND_GAP) { sendItem(lastReqSeq, lastReqV1); lastResend = Date.now(); }
+        }
         if (sent.size >= n) return { ok: true, count: n, warning: "Усі точки надіслано, але фінального ACK не отримано." };
         return { ok: false, error: "Таймаут заливки місії (дрон не підтвердив)." };
       });
