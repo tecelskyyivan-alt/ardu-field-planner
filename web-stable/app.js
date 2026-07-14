@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.51";
+  const APP_VERSION = "2.5.52";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1348,6 +1348,12 @@
       if (ss.baud && baud.querySelector('option[value="' + ss.baud + '"]')) baud.value = ss.baud;
       baud.addEventListener("change", () => sessionPatch({ baud: baud.value }));
     }
+    const mres = $("mission-resume");
+    if (mres) {
+      if (ss.resume != null) mres.checked = !!ss.resume;
+      mres.addEventListener("change", () => { sessionPatch({ resume: mres.checked }); resumeHint(); });
+      resumeHint();
+    }
     const fol = $("mav-follow");
     if (fol) {
       if (ss.follow != null) { fol.checked = !!ss.follow; fol.dispatchEvent(new Event("change")); }
@@ -1962,6 +1968,47 @@
   let targetLine = null;          // dashed line drone -> next waypoint
   let liveHomeMarker = null;      // ArduPilot's actual HOME (arm point)
   let droneMissionLayer = null;   // mission downloaded FROM the drone (visual)
+
+  // ---- продовження місії після заміни батареї -------------------------------
+  // Тумблер #mission-resume: поки дрон летить місію, точка прогресу пишеться в
+  // localStorage; після перепідключення (заміна батареї = ребут FC, лічильник
+  // місії обнуляється) «Старт місії» пропонує ПРОДОВЖИТИ з тієї точки:
+  // DO_SET_MISSION_CURRENT(N) + AUTO, без перезапуску з нуля. Вимога безпеки:
+  // дрон уже в повітрі (зліт вручну в LOITER/GUIDED) — з землі в середину місії
+  // не відправляємо.
+  const RESUME_KEY = "fmp_mission_progress";
+  function resumeOn() { const c = $("mission-resume"); return !!(c && c.checked); }
+  function resumeLoad() {
+    try { return JSON.parse(localStorage.getItem(RESUME_KEY) || "null"); } catch (e) { return null; }
+  }
+  function resumeClear() { try { localStorage.removeItem(RESUME_KEY); } catch (e) {} resumeHint(); }
+  function resumeHint() {
+    const el = $("resume-hint");
+    if (!el) return;
+    const p = resumeOn() ? resumeLoad() : null;
+    if (p && p.wp > 1) {
+      el.style.display = "";
+      el.textContent = "Збережена точка: " + p.wp + " з " + (p.total || "?") +
+        ". Після заміни батареї: злети вручну (LOITER/GUIDED) і натисни «Старт місії» — продовжить звідти.";
+    } else { el.style.display = "none"; }
+  }
+  let _resumeSavedAt = 0;
+  function missionProgressTick(s) {
+    if (!resumeOn() || !s || !s.armed) return;
+    const wp = s.wp_current, tot = s.wp_total;
+    if (wp == null || wp < 1) return;
+    const now = Date.now();
+    if (now - _resumeSavedAt < 3000) return;
+    _resumeSavedAt = now;
+    try {
+      const prev = resumeLoad();
+      // не даємо прогресу «відкотитись» від скинутого лічильника після ребуту
+      if (prev && prev.total === tot && prev.wp > wp) return;
+      localStorage.setItem(RESUME_KEY, JSON.stringify({ wp: wp, total: tot, ts: now }));
+      resumeHint();
+    } catch (e) {}
+  }
+
   let lastStatus = null;          // latest telemetry snapshot (for upload-time home)
   let mavFollow = false;          // off by default; user opts in via the checkbox
 
@@ -2185,6 +2232,13 @@
       }
       if (action === "mode") return _mavLink.setMode(p.mode);
       if (action === "start") return _mavLink.missionStart();
+      if (action === "resume") {
+        // Продовження: виставити поточну точку БЕЗ reset і перейти в AUTO —
+        // дрон летить прямо до неї і далі за місією. Тільки коли вже в повітрі.
+        const r1 = await _mavLink.setMissionCurrent(p.seq, 0);
+        if (!r1.ok) return r1;
+        return _mavLink.setMode("AUTO");
+      }
       return { ok: false, error: "Невідома дія: " + action };
     },
     // Param read — the automatic BT-UART activation checks what currently owns
@@ -2604,6 +2658,7 @@
     if (!mavConnected) return;
     if (!s || !s.ok) return;
     lastStatus = s;
+    missionProgressTick(s);      // резюме після заміни батареї: памʼятаємо точку
     flightRecTick(s);
     mavDetectPhase(s);
     mavUpdateHome(s);
@@ -3193,6 +3248,7 @@
                               diff: r.verify.mismatches } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
+        resumeClear();          // нова місія в дроні → стара точка продовження недійсна
         // Snapshot exactly what we uploaded — progress is computed off this, so
         // editing/rebuilding the route afterwards can't corrupt the live HUD.
         flownRoute = lastRoute ? lastRoute.slice() : null;
@@ -3525,6 +3581,23 @@
     // For a clean "climb straight up, then fly", the drone must start from the
     // ground — otherwise ArduCopter skips the vertical takeoff.
     const airborne = lastStatus && lastStatus.alt_rel != null && lastStatus.alt_rel > 1.5;
+    // Продовження після заміни батареї: є збережена точка тієї САМОЇ місії →
+    // пропонуємо продовжити з неї, а не летіти все з початку.
+    const prog = resumeOn() ? resumeLoad() : null;
+    const sameMission = prog && lastStatus && lastStatus.wp_total != null
+      && prog.total === lastStatus.wp_total && prog.wp > 1 && prog.wp < prog.total;
+    if (sameMission) {
+      if (!airborne) {
+        setMsg("Продовження з точки " + prog.wp + ": спершу злети вручну (LOITER/GUIDED) на кілька метрів, тоді натисни «Старт місії» ще раз.", "error");
+        return;
+      }
+      if (confirm("Продовжити місію з точки " + prog.wp + " з " + prog.total + "? (Почати спочатку — «Скасувати», потім вимкни тумблер продовження.)")) {
+        appLog("[resume] продовжую з точки " + prog.wp + "/" + prog.total);
+        mavCommand({ action: "resume", seq: prog.wp }, "Продовження місії");
+        return;
+      }
+      return;
+    }
     let warn = "Запустити місію в AUTO? Апарат полетить за маршрутом.";
     if (airborne) {
       warn = "Дрон уже в повітрі — вертикальний зліт буде пропущено, він піде " +
