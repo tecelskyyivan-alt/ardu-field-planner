@@ -286,11 +286,55 @@ function testMissionStartsWithTakeoff() {
   check("залишок коротший за повну", rest.length === 5);
 }
 
+/* ------------------------------------------------------------------ Test F --
+ * Пауза/продовження місії БЕЗ виходу з AUTO (MAV_CMD_DO_PAUSE_CONTINUE 193):
+ * безпечна альтернатива LOITER+повернення в AUTO, після якого ArduPilot летить
+ * до точки навскіс з поточної висоти (реальний інцидент 2026-07-14). */
+async function testPauseContinue() {
+  console.log("F. пауза/продовження місії (DO_PAUSE_CONTINUE)");
+  let s = 99;
+  const rnd = (n) => (s = (s * 1103515245 + 12345) & 0x7fffffff) % n;
+  const fcParser = MAVLINK.createParser();
+  let fcSeq = 0;
+  const seen = [];
+  const t = { ondata: null, _closed: false,
+    write(b) { for (const m of fcParser.push(b)) fcHandle(m); },
+    close() { this._closed = true; } };
+  let fcClock = 0;
+  function fcSend(name, fields) {
+    const frame = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: fcSeq++ & 0xff });
+    fcClock = Math.max(fcClock, Date.now());
+    for (let off = 0; off < frame.length; off += 20) {
+      const chunk = frame.slice(off, Math.min(off + 20, frame.length));
+      fcClock += 2 + rnd(8);
+      setTimeout(() => { if (t.ondata && !t._closed) t.ondata(chunk); }, Math.max(1, fcClock - Date.now()));
+    }
+  }
+  function fcHandle(m) {
+    if (m.name === "COMMAND_LONG" && m.fields.command === 193) {
+      seen.push(m.fields.param1);
+      fcSend("COMMAND_ACK", { command: 193, result: 0 });
+    }
+  }
+  const hb = setInterval(() => fcSend("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 81, custom_mode: 3, system_status: 4, mavlink_version: 3 }), 700);
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const rp = await link.missionPause();
+  check("пауза прийнята дроном (ACK)", rp.ok, rp.error);
+  check("пауза = DO_PAUSE_CONTINUE param1=0", seen[0] === 0, String(seen[0]));
+  const rc = await link.missionContinue();
+  check("продовження прийнято (ACK)", rc.ok, rc.error);
+  check("продовження = param1=1", seen[1] === 1, String(seen[1]));
+  clearInterval(hb);
+  link.disconnect();
+}
+
 (async () => {
   await testUpload();
   await testOpenAndroidBle();
   await testAutoUartFlow();
   testMissionStartsWithTakeoff();
+  await testPauseContinue();
   console.log(failures === 0 ? "\nУСІ BLE-СИМУЛЯЦІЇ ЗЕЛЕНІ" : `\nПРОВАЛІВ: ${failures}`);
   process.exit(failures === 0 ? 0 : 1);
 })();

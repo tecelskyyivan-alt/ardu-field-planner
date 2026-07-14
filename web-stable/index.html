@@ -229,6 +229,10 @@
         <button id="mav-start" class="primary" disabled>Старт місії (AUTO)</button>
         <button id="mav-rtl" class="ghost" disabled>RTL</button>
       </div>
+      <button id="mav-pause" class="ghost" disabled>Пауза місії</button>
+      <p class="hint">Пауза тримає дрон на маршруті й на висоті — продовження без ризику.
+        Якщо ж вийти з AUTO (LOITER/RTL) і повернути AUTO тумблером, ArduPilot полетить
+        до точки навскіс з поточної висоти — тоді продовжуй кнопкою «Старт місії» тут.</p>
       <label class="row"><input id="mission-resume" type="checkbox" />
         Продовжувати місію після заміни батареї</label>
       <p class="hint" id="resume-hint" style="display:none"></p>
