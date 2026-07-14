@@ -659,6 +659,41 @@ def _best_angle_route(angles, gen, score, valid=bool):
     return best
 
 
+def expand_exclusions(exclusions, margin_m):
+    """Розширити кожен виріз НАЗОВНІ на `margin_m` метрів — дзеркало inset_boundary:
+    дрон тримає від краю перешкоди ту саму дистанцію, що й від краю поля.
+    Мітра-стик (join_style=2) — гострі кути без дугових скупчень вершин (та сама
+    грабля, що колись була в buffer_boundary). margin_m <= 0 повертає копію як є.
+
+    Повертає список кілець [(lat, lon), ...]; виріз, що зник у буфері (виродився),
+    пропускається. Кільця НЕ зливаються між собою — подальший difference(unary_union)
+    в _free_polygon зробить це сам."""
+    if not exclusions:
+        return []
+    if margin_m <= 0:
+        return [[(la, lo) for la, lo in e] for e in exclusions if len(e) >= 3]
+    out = []
+    for e in exclusions:
+        if len(e) < 3:
+            continue
+        lat0 = sum(p[0] for p in e) / len(e)
+        lon0 = sum(p[1] for p in e) / len(e)
+        poly = Polygon([latlon_to_local(la, lo, lat0, lon0) for la, lo in e])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if poly.is_empty:
+            continue
+        grown = poly.buffer(margin_m, join_style=2, mitre_limit=2.0)
+        if grown.is_empty:
+            continue
+        if grown.geom_type == "MultiPolygon":       # виродження — беремо найбільший
+            grown = max(grown.geoms, key=lambda g: g.area)
+        ring = [local_to_latlon(x, y, lat0, lon0) for x, y in grown.exterior.coords[:-1]]
+        if len(ring) >= 3:
+            out.append(ring)
+    return out
+
+
 def optimal_angle(boundary, spacing, step=5, exclusions=None, return_route=False,
                   anchor=None, start_finish_anchor=False):
     """Sweep heading (deg) giving the SHORTEST total coverage path.
