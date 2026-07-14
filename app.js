@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.53";
+  const APP_VERSION = "2.5.54";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2018,8 +2018,10 @@
     if (r) {
       el.style.display = "";
       el.textContent = "Збережено прогрес: пройдено " + r.idx + " з " + r.total +
-        " точок. Після заміни батареї натисни «Старт місії» — додаток заллє залишок (" +
-        r.rest.length + " точок), дрон злетить на задану висоту і продовжить.";
+        " точок. Щоб продовжити — натисни «Старт місії» ТУТ (і на землі, і в повітрі): " +
+        "додаток заллє залишок (" + r.rest.length + " точок) і дрон підніметься на задану висоту, " +
+        "перш ніж летіти далі. УВАГА: якщо просто повернути AUTO тумблером на пульті, ArduPilot " +
+        "полетить до точки навскіс з поточної висоти — саме тому продовжуй через додаток.";
     } else { el.style.display = "none"; }
   }
   let _resumeSavedAt = 0;
@@ -2270,6 +2272,8 @@
       }
       if (action === "mode") return _mavLink.setMode(p.mode);
       if (action === "start") return _mavLink.missionStart();
+      if (action === "pause") return _mavLink.missionPause();
+      if (action === "continue") return _mavLink.missionContinue();
       return { ok: false, error: "Невідома дія: " + action };
     },
     // Param read — the automatic BT-UART activation checks what currently owns
@@ -3344,7 +3348,10 @@
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
       updateMissionStatus();
-      setMsg("Залишок залито (" + r.count + " пунктів). Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить.", "ok");
+      const air = lastStatus && lastStatus.alt_rel != null && lastStatus.alt_rel > 1.5;
+      setMsg("Залишок залито (" + r.count + " пунктів). " + (air
+        ? "Натисни «Старт місії» — дрон підніметься вертикально на задану висоту і продовжить."
+        : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить."), "ok");
     } finally {
       $("mav-start").disabled = !mavConnected;
     }
@@ -3362,11 +3369,31 @@
     } catch (e) {}
   }
 
+
+  // ---- Пауза місії (без виходу з AUTO) --------------------------------------
+  // MAV_CMD_DO_PAUSE_CONTINUE: дрон зупиняється НА ТРЕКУ, тримає висоту місії й
+  // швидкість; «Продовжити» веде його далі рівно з того місця. Це безпечний
+  // спосіб перервати обробіток — на відміну від виходу в LOITER/RTL і повернення
+  // в AUTO, після якого ArduPilot летить до точки навскіс з поточної висоти.
+  let missionPaused = false;
+  function syncPauseBtn() {
+    const b = $("mav-pause");
+    if (!b) return;
+    b.textContent = missionPaused ? t("Продовжити місію") : t("Пауза місії");
+  }
+  const _pauseBtn = $("mav-pause");
+  if (_pauseBtn) _pauseBtn.addEventListener("click", async () => {
+    const want = !missionPaused;
+    const r = await mavCommand({ action: want ? "pause" : "continue" },
+                               want ? "Пауза місії" : "Продовження місії");
+    if (r && r.ok) { missionPaused = want; syncPauseBtn(); }
+  });
+
   $("mav-upload").addEventListener("click", mavUpload);
 
   // ---- flight control (arm / mode / start / RTL) --------------------------
   const MAV_CTRL_IDS = ["mav-arm", "mav-disarm", "mav-mode", "mav-set-mode",
-                        "mav-start", "mav-rtl", "mav-check"];
+                        "mav-start", "mav-rtl", "mav-check", "mav-pause"];
   function mavSetControls(on) {
     MAV_CTRL_IDS.forEach((id) => { if ($(id)) $(id).disabled = !on; });
   }
@@ -3662,21 +3689,27 @@
     // Продовження після заміни батареї: заливаємо ЗАЛИШОК як нову місію — вона
     // почнеться зі зльоту на задану висоту, і лише тоді дрон піде по точках.
     const rem = resumeRemaining();
-    if (rem && !airborne) {
+    if (rem) {
+      // Працює і НА ЗЕМЛІ, і В ПОВІТРІ: залишок заливається як повноцінна місія,
+      // а її NAV_TAKEOFF (пункт місії, не команда!) у повітрі піднімає дрон
+      // ВЕРТИКАЛЬНО на задану висоту над поточною точкою — і лише тоді він іде
+      // горизонтально. Саме цього бракувало, коли AUTO вмикали з пульта: тоді
+      // ArduCopter летить прямою 3D-лінією до точки з тієї висоти, де він є.
+      const where = airborne
+        ? "Дрон у повітрі: він підніметься ВЕРТИКАЛЬНО на задану висоту, а тоді полетить далі."
+        : "Дрон злетить на задану висоту і продовжить обробіток.";
       if (confirm("Продовжити з місця зупинки?\n\nПройдено " + rem.idx + " з " + rem.total +
-                  " точок. Заллю залишок (" + rem.rest.length + " точок) — дрон злетить на задану " +
-                  "висоту і продовжить обробіток.\n\n«Скасувати» = почати поле спочатку.")) {
+                  " точок. Заллю залишок (" + rem.rest.length + " точок).\n" + where +
+                  "\n\n«Скасувати» = почати поле спочатку.")) {
         resumeUploadRemainder(rem);
         return;
       }
-      // оператор обрав почати спочатку — прогрес більше не потрібен
-      resumeClear();
+      resumeClear();   // оператор обрав почати спочатку
     }
     let warn = "Запустити місію в AUTO? Апарат полетить за маршрутом.";
     if (airborne) {
-      warn = "Дрон уже в повітрі — вертикальний зліт буде пропущено, він піде " +
-             "одразу до точки. Для чистого зльоту спершу посади (RTL/LAND) і роззброй. " +
-             "Все одно запустити?";
+      warn = "Дрон уже в повітрі. Місія почнеться з вертикального набору на задану " +
+             "висоту над поточною точкою, і лише тоді він піде по маршруту. Запустити?";
     }
     if (confirm(warn)) {
       // Switch to AUTO, then start (the backend resets to the takeoff first).

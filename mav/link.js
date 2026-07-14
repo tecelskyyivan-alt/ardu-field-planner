@@ -16,6 +16,7 @@
   const FRAME_GLOBAL = 0, FRAME_GLOBAL_REL = 3;
   const CMD_WAYPOINT = 16, CMD_RTL = 20, CMD_TAKEOFF = 22, CMD_DO_CHANGE_SPEED = 178;
   const CMD_DO_SET_MODE = 176, CMD_MISSION_START = 300, CMD_ARM_DISARM = 400;
+  const CMD_PAUSE_CONTINUE = 193;   // MAV_CMD_DO_PAUSE_CONTINUE (Copter: hold on track, stay in AUTO)
   const CMD_GET_HOME = 410, CMD_DO_SET_MISSION_CURRENT = 224;
   const CMD_SET_MESSAGE_INTERVAL = 511;   // MAV_CMD_SET_MESSAGE_INTERVAL (a COMMAND_LONG)
   const GCS_SYS = 255, GCS_COMP = 190;
@@ -587,6 +588,12 @@
       return this.command(CMD_DO_SET_MODE, [1, num]);
     }
     setMissionCurrent(seq, reset) { return this.command(CMD_DO_SET_MISSION_CURRENT, [seq, reset || 0]); }
+    // Пауза БЕЗ виходу з AUTO: дрон зупиняється на треку, ТРИМАЄ висоту місії
+    // і збережену швидкість. Продовження — рівно з того ж місця, без діагоналі
+    // й без набору висоти (на відміну від виходу в LOITER і повернення в AUTO,
+    // де ArduCopter летить прямою 3D-лінією до точки з поточної висоти).
+    missionPause() { return this.command(CMD_PAUSE_CONTINUE, [0]); }
+    missionContinue() { return this.command(CMD_PAUSE_CONTINUE, [1]); }
     async missionStart() {
       await this.setMissionCurrent(0, 1);
       return this.command(CMD_MISSION_START, [0, 0]);
