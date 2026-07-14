@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.45";
+  const APP_VERSION = "2.5.46";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2301,14 +2301,17 @@
     //   • else protocol -1 (None) — unclaimed;
     //   • anything else (GPS/RC/OSD/DisplayPort/…) is NEVER touched.
     window.__fmpAutoBleSetup = async () => {
-      const p = blePendingGet();
-      if (!p) return;
+      // PROACTIVE (2.5.46): no precondition. Every working non-BLE connection
+      // probes the SpeedyBee BT UARTs; an MSP(32) UART = factory-state BT bridge
+      // → configure immediately. A prior silent-BLE attempt is NOT required (the
+      // old gate meant the automation never ran in the field); its only role now
+      // is remembering the MAC so we can auto-reconnect after the reboot.
+      const p = blePendingGet() || {};
       const a = mavApi();
       if (!mavConnected || !a.mav_get_param) return;
       const st = await a.mav_status();
       if (st && st.armed) { appLog("[auto-ble] мотори увімкнені — відкладаю налаштування"); return; }
-      appLog("[auto-ble] шукаю Bluetooth-UART автоматично…");
-      setMsg("Автоналаштування Bluetooth…", null);
+      appLog("[auto-ble] проба BT-UART (проактивно)…");
       const ORDER = ["SERIAL4", "SERIAL6", "SERIAL1", "SERIAL3"];
       const states = {};
       for (const u of ORDER) {
@@ -2319,14 +2322,17 @@
       const target = ORDER.find((u) => states[u] === 32)
                   || ORDER.find((u) => states[u] === -1);
       if (!target) {
-        blePendingClear();
         const already = ORDER.filter((u) => states[u] === 2);
         if (already.length) {
-          appLog("[auto-ble] вже MAVLink: " + already.join(",") + ", але BLE мовчав — надішли лог");
-          setMsg("Bluetooth-UART уже виглядає налаштованим (" + already.join(", ") + "), але звʼязку не було — надішли лог кнопкою «Лог».", "error");
+          // Bluetooth вже налаштований — це НОРМА після першої активації.
+          appLog("[auto-ble] BT-UART вже MAVLink (" + already.join(",") + ") — нічого робити");
+          if (p.mac) {
+            blePendingClear();
+            setMsg("Bluetooth уже налаштований (" + already.join(", ") + "), але минула BLE-спроба мовчала — надішли лог кнопкою «Лог».", "error");
+          }
         } else {
-          appLog("[auto-ble] вільного UART не знайдено — автоматично нічого не чіпаю");
-          setMsg("Не знайшов UART для Bluetooth (усі зайняті іншим обладнанням) — надішли лог кнопкою «Лог».", "error");
+          appLog("[auto-ble] вільного/MSP UART не знайдено — нічого не чіпаю");
+          if (p.mac) { blePendingClear(); setMsg("Не знайшов UART для Bluetooth (усі зайняті) — надішли лог кнопкою «Лог».", "error"); }
         }
         return;
       }
@@ -2342,7 +2348,10 @@
       const rr = await a.mav_reboot();
       if (!rr.ok) appLog("[auto-ble] reboot без ACK (" + (rr.error || "таймаут") + ") — чекаю довше");
       try { mavDisconnect(); } catch (e) {}
-      window.__fmpBleAutoReconnect(p.mac, rr.ok ? 13000 : 17000);
+      let mac = p.mac;
+      try { mac = mac || localStorage.getItem(LAST_KEY) || ""; } catch (e) {}
+      if (mac) window.__fmpBleAutoReconnect(mac, rr.ok ? 13000 : 17000);
+      else setMsg("Bluetooth активовано — плата перезавантажується (~10 с). Далі: тип «Bluetooth (BLE)» → Сканувати → Підключити.", "ok");
     };
   })();
 
