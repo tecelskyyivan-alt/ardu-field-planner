@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.49";
+  const APP_VERSION = "2.5.50";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2135,6 +2135,13 @@
         res.turn_radius_set = pr.ok;
         appLog("round-turn: WP_RADIUS_M " + trm + "m -> " + (pr.ok ? "ok" : "FAILED"));
       }
+      // Додому — КАМЕРОЮ ВПЕРЕД: дефолтний WP_YAW_BEHAVIOR=2 тримає останній
+      // курс під час RTL (дрон вертається боком/хвостом — оператор не бачить
+      // перешкод у камеру). 1 = ніс за курсом і в RTL теж. На проходи місії не
+      // впливає (1 і 2 в місії ідентичні), діє і на ручний RTL з пульта/кнопки.
+      const py = await _mavLink.setParam("WP_YAW_BEHAVIOR", 1);
+      res.yaw_forward_set = py.ok;
+      appLog("камерою вперед у RTL: WP_YAW_BEHAVIOR=1 -> " + (py.ok ? "ok" : "FAILED"));
       if (!p || p.verify !== false) {
         const v = await _mavLink.verifyMission(items);
         res.verify = v;
