@@ -399,6 +399,10 @@ class Api:
                 if not pr.get("ok"):
                     pr = LINK.set_param("WPNAV_RADIUS", trm * 100.0)  # cm legacy
                 res["turn_radius_set"] = pr.get("ok")
+            # Додому — камерою вперед: WP_YAW_BEHAVIOR=1 (ніс за курсом і під час
+            # RTL; дефолт 2 тримає останній курс — оператор не бачить перешкод).
+            py = LINK.set_param("WP_YAW_BEHAVIOR", 1)
+            res["yaw_forward_set"] = py.get("ok")
             # Auto read-back verify unless the caller opts out.
             if (params or {}).get("verify", True):
                 v = LINK.verify_mission(items)
