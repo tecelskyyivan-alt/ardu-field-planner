@@ -15,7 +15,7 @@ except Exception:
     webview = None
 
 from .coverage import (
-    generate_coverage, polygon_area_ha, inset_boundary, optimal_angle,
+    generate_coverage, polygon_area_ha, inset_boundary, expand_exclusions, optimal_angle,
     split_route_by_time, split_route_by_area, covered_area_ha, estimate_mission_time,
     coverage_metrics, split_field_by_line, overlap_optimal_angle, mission_overlap,
     return_corridor_route, coverage_overlap_geo,
@@ -106,6 +106,14 @@ class Api:
                 [(float(p["lat"]), float(p["lng"])) for p in ex]
                 for ex in (params.get("exclusions") or []) if len(ex) >= 3
             ]
+            # «Відступ від країв» діє і на вирізи, ДЗЕРКАЛЬНО: поле стискається
+            # всередину, перешкоди розширюються назовні на ту саму величину — дрон
+            # тримає однакову дистанцію від краю поля і від краю дерева/стовпа.
+            # Розширюємо ОДИН раз тут: маршрут, sprayed/excluded_ha і геозона далі
+            # використовують ті самі розширені кільця (консистентно); намальовані
+            # користувачем контури в UI лишаються як є.
+            if margin > 0 and exclusions:
+                exclusions = expand_exclusions(exclusions, margin)
 
             # Anchor: the operator's takeoff / GPS / chosen point. Routes begin (and
             # with start_finish_anchor, also finish) at the field point nearest it.

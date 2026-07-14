@@ -2,13 +2,13 @@
   "spacing": 20.0,
   "repeats": 1,
   "python": "3.13.14",
-  "recorded_at": "2026-07-14 21:32:39",
+  "recorded_at": "2026-07-14 22:23:15",
   "cases": {
     "a_big_irregular": {
       "name": "a_big_irregular",
-      "time_s": 31.883,
+      "time_s": 0.647,
       "times_s": [
-        31.883
+        0.647
       ],
       "length_m": 28453.1,
       "count": 155,
@@ -24,27 +24,27 @@
     },
     "b_big_exclusions": {
       "name": "b_big_exclusions",
-      "time_s": 44.471,
+      "time_s": 0.596,
       "times_s": [
-        44.471
+        0.596
       ],
-      "length_m": 28281.2,
-      "count": 154,
-      "angle_used": 48.0,
+      "length_m": 28214.1,
+      "count": 165,
+      "angle_used": 62.0,
       "area_ha": 51.647,
-      "sprayed_ha": 50.746,
-      "coverage_pct": 98.6,
-      "overlap_pct": 13.3,
-      "duration_s": 2844,
+      "sprayed_ha": 50.48,
+      "coverage_pct": 98.4,
+      "overlap_pct": 14.1,
+      "duration_s": 2866,
       "flights": 4,
       "n_passes": 53,
-      "same_dir_pairs": 1
+      "same_dir_pairs": 6
     },
     "c_small_simple": {
       "name": "c_small_simple",
-      "time_s": 0.03,
+      "time_s": 0.015,
       "times_s": [
-        0.03
+        0.015
       ],
       "length_m": 1606.6,
       "count": 20,
@@ -60,9 +60,9 @@
     },
     "d_long_narrow": {
       "name": "d_long_narrow",
-      "time_s": 0.078,
+      "time_s": 0.037,
       "times_s": [
-        0.078
+        0.037
       ],
       "length_m": 4731.0,
       "count": 14,
