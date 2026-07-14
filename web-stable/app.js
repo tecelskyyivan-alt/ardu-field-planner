@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.50";
+  const APP_VERSION = "2.5.51";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -754,6 +754,7 @@
   // тут — решта: побудований маршрут (без перерахунку і без холодного старту
   // рушія), активна вкладка, позиція карти, тип зʼєднання і авто-реконект BLE.
   const SESSION_KEY = "fmp_session";
+  let _bootRestoring = false;      // під час відновлення clearRoute НЕ стирає знімок
   function sessionLoad() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "{}"); } catch (e) { return {}; } }
   function sessionPatch(part) { try { localStorage.setItem(SESSION_KEY, JSON.stringify(Object.assign(sessionLoad(), part))); } catch (e) {} }
   function saveLastRoute(res) {
@@ -774,9 +775,12 @@
       }));
     } catch (e) { /* quota — ignore */ }
   }
-  function restoreLastRoute() {
+  function restoreLastRoute(raw) {
+    // raw = знімок, зчитаний ДО restoreLastField: adoptField() викликає
+    // clearRoute(), який інакше стер би збережений маршрут раніше, ніж ми
+    // встигли б його відновити (польовий баг 2.5.49 — «будуй заново»).
     let s;
-    try { s = JSON.parse(localStorage.getItem("fmp_last_route") || "null"); } catch (e) { return; }
+    try { s = JSON.parse(raw || localStorage.getItem("fmp_last_route") || "null"); } catch (e) { return; }
     if (!s || !s.res || !s.res.waypoints || s.res.waypoints.length < 2) return;
     const res = s.res;
     try {
@@ -802,6 +806,7 @@
       ["exp-wp", "exp-plan", "exp-fence", "exp-fencemp", "exp-geojson"]
         .forEach((id) => { if ($(id)) $(id).disabled = false; });
       updateMissionStatus();
+      if (raw) { try { localStorage.setItem("fmp_last_route", raw); } catch (e) {} }
       appLog("[restore] маршрут відновлено: " + pts.length + " точок (без перерахунку)");
     } catch (e) { appLog("[restore] маршрут не відновився: " + e); }
   }
@@ -904,7 +909,7 @@
   })();
 
   function clearRoute(keepViz) {
-    try { localStorage.removeItem("fmp_last_route"); } catch (e) {}
+    if (!_bootRestoring) { try { localStorage.removeItem("fmp_last_route"); } catch (e) {} }
     lastRoute = null;               // editing buffer; flownRoute keeps the uploaded one
     if (typeof updateMissionStatus === "function") updateMissionStatus();
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
@@ -1295,8 +1300,13 @@
   // Deferred so ALL module-level `let`s (lastRoute, …) are initialized first —
   // adoptField()→clearRoute() touches them, which would hit a TDZ error if run inline.
   setTimeout(() => {
-    restoreLastField();            // контур + вирізи (як і раніше)
-    restoreLastRoute();            // побудований маршрут — без перерахунку
+    let _routeSnap = null;
+    try { _routeSnap = localStorage.getItem("fmp_last_route"); } catch (e) {}
+    _bootRestoring = true;
+    try {
+      restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
+      restoreLastRoute(_routeSnap); // маршрут — зі знімка, без перерахунку
+    } finally { _bootRestoring = false; }
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
     if (ss.map && ss.map.z != null) {
@@ -1333,6 +1343,16 @@
     if (tsel) tsel.addEventListener("change", () => sessionPatch({ connType: tsel.value }));
     const addr = $("mav-address");
     if (addr) addr.addEventListener("change", () => sessionPatch({ addr: addr.value }));
+    const baud = $("mav-baud");
+    if (baud) {
+      if (ss.baud && baud.querySelector('option[value="' + ss.baud + '"]')) baud.value = ss.baud;
+      baud.addEventListener("change", () => sessionPatch({ baud: baud.value }));
+    }
+    const fol = $("mav-follow");
+    if (fol) {
+      if (ss.follow != null) { fol.checked = !!ss.follow; fol.dispatchEvent(new Event("change")); }
+      fol.addEventListener("change", () => sessionPatch({ follow: fol.checked }));
+    }
     const disc = $("mav-disconnect");
     if (disc) disc.addEventListener("click", () => sessionPatch({ wasConnected: false }));
     document.querySelectorAll(".tab").forEach((b) =>
