@@ -1,0 +1,80 @@
+{
+  "spacing": 20.0,
+  "repeats": 1,
+  "python": "3.13.14",
+  "recorded_at": "2026-07-14 21:32:39",
+  "cases": {
+    "a_big_irregular": {
+      "name": "a_big_irregular",
+      "time_s": 31.883,
+      "times_s": [
+        31.883
+      ],
+      "length_m": 28453.1,
+      "count": 155,
+      "angle_used": 0.0,
+      "area_ha": 51.647,
+      "sprayed_ha": 51.647,
+      "coverage_pct": 98.9,
+      "overlap_pct": 13.3,
+      "duration_s": 2903,
+      "flights": 4,
+      "n_passes": 48,
+      "same_dir_pairs": 4
+    },
+    "b_big_exclusions": {
+      "name": "b_big_exclusions",
+      "time_s": 44.471,
+      "times_s": [
+        44.471
+      ],
+      "length_m": 28281.2,
+      "count": 154,
+      "angle_used": 48.0,
+      "area_ha": 51.647,
+      "sprayed_ha": 50.746,
+      "coverage_pct": 98.6,
+      "overlap_pct": 13.3,
+      "duration_s": 2844,
+      "flights": 4,
+      "n_passes": 53,
+      "same_dir_pairs": 1
+    },
+    "c_small_simple": {
+      "name": "c_small_simple",
+      "time_s": 0.03,
+      "times_s": [
+        0.03
+      ],
+      "length_m": 1606.6,
+      "count": 20,
+      "angle_used": 116.0,
+      "area_ha": 3.048,
+      "sprayed_ha": 3.048,
+      "coverage_pct": 96.9,
+      "overlap_pct": 13.0,
+      "duration_s": 246,
+      "flights": 1,
+      "n_passes": 9,
+      "same_dir_pairs": 0
+    },
+    "d_long_narrow": {
+      "name": "d_long_narrow",
+      "time_s": 0.078,
+      "times_s": [
+        0.078
+      ],
+      "length_m": 4731.0,
+      "count": 14,
+      "angle_used": 2.0,
+      "area_ha": 9.863,
+      "sprayed_ha": 9.863,
+      "coverage_pct": 91.9,
+      "overlap_pct": 11.9,
+      "duration_s": 525,
+      "flights": 1,
+      "n_passes": 7,
+      "same_dir_pairs": 0
+    }
+  }
+}

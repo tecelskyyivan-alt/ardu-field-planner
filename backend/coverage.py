@@ -9,11 +9,26 @@ Approach:
      snakes back and forth instead of flying empty return legs.
   5. Rotate the resulting waypoints back by +angle and project to lat/lon.
 """
+import heapq
 import math
 
 from shapely.geometry import Polygon, LineString, MultiPolygon
 from shapely.affinity import rotate
 from shapely.ops import unary_union, split
+
+try:                # shapely 2.x: prepared-геометрія робить contains у ~10-20 разів швидшим
+    from shapely import prepare as _prepare
+except ImportError:  # старий shapely — без підготовки, просто повільніше
+    def _prepare(geom):
+        return None
+
+try:                # shapely 2.x + numpy: векторні створення/предикати — пучок відрізків
+    import numpy as _np                               # перевіряється ОДНИМ C-викликом без
+    from shapely import linestrings as _linestrings   # LineString-обгортки на кожен
+    from shapely import contains as _contains         # відрізок (головна алокаційна churn
+    from shapely import intersection as _intersection  # у Дейкстрі). Нема — скалярний
+except ImportError:                                   # шлях, як раніше.
+    _np = _linestrings = _contains = _intersection = None
 
 from .geo import latlon_to_local, local_to_latlon, centroid, path_length, haversine
 
@@ -71,19 +86,22 @@ def _ring_vertices(geom):
     return pts
 
 
-def _vis_path(a, b, nodes, inside):
-    """Shortest a→b path over the visibility graph of `nodes` where `inside(p,q)`
-    says the straight leg p→q stays in free space. Dijkstra; falls back to the
-    direct leg if no path is found."""
-    import heapq
-    V = [a, b] + list(nodes)
-    n = len(V)
+def _vis_dijkstra(a, b, nodes, sub, inside, node_vis, vis_a, vis_b):
+    """Дейкстра по ПІДГРАФУ видимості: вершини = [a, b] + вузли `sub` (глобальні
+    індекси в `nodes`). Повертає (path, довжина) або (None, inf), якщо шляху нема.
+    Видимість ребер лінива й мемоізована: vis_a / vis_b — від кінців a/b (ключ —
+    глобальний індекс вузла, -1 = пряме ребро a→b), node_vis — вузол↔вузол
+    (спільний кеш на весь перебір кутів — ребра між вузлами межі не залежать
+    ані від кута, ані від конкретної з'єднувальної ноги)."""
+    hypot = math.hypot
+    nV = len(sub) + 2
+    V = [a, b] + [nodes[g] for g in sub]
+    G = [-1, -1] + list(sub)             # глобальний id вершини (для кешів)
     INF = float("inf")
-    dist = [INF] * n
-    prev = [-1] * n
+    dist = [INF] * nV
+    prev = [-1] * nV
     dist[0] = 0.0
     pq = [(0.0, 0)]
-    # cache edge validity lazily
     while pq:
         d, u = heapq.heappop(pq)
         if d > dist[u]:
@@ -91,46 +109,118 @@ def _vis_path(a, b, nodes, inside):
         if u == 1:
             break
         ux, uy = V[u]
-        for v in range(n):
+        gu = G[u]
+        for v in range(1, nV):           # ребро назад в a (v=0) нічого не покращує
             if v == u:
                 continue
             vx, vy = V[v]
-            w = math.hypot(ux - vx, uy - vy)
-            if d + w >= dist[v]:
+            nd = d + hypot(ux - vx, uy - vy)
+            if nd >= dist[v]:
                 continue
-            if not inside(V[u], V[v]):
+            if u == 0:                   # a → b або a → вузол
+                cache, key = vis_a, G[v]
+            elif v == 1:                 # вузол → b
+                cache, key = vis_b, gu
+            else:                        # вузол ↔ вузол
+                gv = G[v]
+                cache, key = node_vis, ((gu, gv) if gu < gv else (gv, gu))
+            ok = cache.get(key)
+            if ok is None:
+                ok = inside(V[u], V[v])
+                cache[key] = ok
+            if not ok:
                 continue
-            dist[v] = d + w
+            dist[v] = nd
             prev[v] = u
-            heapq.heappush(pq, (dist[v], v))
+            heapq.heappush(pq, (nd, v))
     if dist[1] == INF:
-        return [a, b]
+        return None, INF
     path, u = [], 1
     while u != -1:
         path.append(V[u])
         u = prev[u]
     path.reverse()
-    return path
+    return path, dist[1]
 
 
-def _route_freespace(pts, free, clearance=1.0):
+def _vis_path(a, b, nodes, inside, node_vis=None, nodes_np=None):
+    """Shortest a→b path over the visibility graph of `nodes` where `inside(p,q)`
+    says the straight leg p→q stays in free space. Falls back to the direct leg
+    if no path is found.
+
+    ТОЧНИЙ пошук з ЕЛІПСНИМ відсіканням: спершу Дейкстра лише по вузлах із
+    найменшою нижньою межею key(v) = |av| + |vb| (шлях через v не коротший за
+    key(v)). Якщо знайдений шлях НЕ довший за key найближчого ВІДКИНУТОГО вузла —
+    він глобально оптимальний (кожен шлях через відкинутий вузол ≥ його key), і
+    ~9/10 geos-перевірок видимості від кінців a/b не потрібні (обхід зазвичай
+    огинає ОДНУ виїмку поруч). Інакше підмножину розширюємо (х4) аж до повного
+    графа — результат завжди збігається з повним перебором (заміряно: маршрути
+    побайтово ідентичні до пошуку по повному графу на всіх бенч-полях)."""
+    n = len(nodes)
+    if n == 0:
+        return [a, b]
+    if _np is not None:
+        if nodes_np is None:
+            nodes_np = _np.asarray(nodes, dtype=float)
+        da = _np.hypot(nodes_np[:, 0] - a[0], nodes_np[:, 1] - a[1])
+        keys = da + _np.hypot(nodes_np[:, 0] - b[0], nodes_np[:, 1] - b[1])
+        order = _np.argsort(keys, kind="stable").tolist()
+        keys = keys.tolist()
+    else:                                # без numpy — те саме чистим Python
+        hypot = math.hypot
+        keys = [hypot(x - a[0], y - a[1]) + hypot(x - b[0], y - b[1])
+                for x, y in nodes]
+        order = sorted(range(n), key=keys.__getitem__)
+    if node_vis is None:
+        node_vis = {}
+    vis_a, vis_b = {}, {}                # лінива видимість від кінців цієї ноги
+    m = min(12, n)
+    while True:
+        path, plen = _vis_dijkstra(a, b, nodes, order[:m],
+                                   inside, node_vis, vis_a, vis_b)
+        if m >= n:
+            return path if path is not None else [a, b]
+        if path is not None and plen <= keys[order[m]]:
+            return path
+        m = min(n, m * 4)
+
+
+def _route_freespace(pts, free, clearance=1.0, ctx=None):
     """Reroute connector legs so the whole route stays INSIDE the field and
     OUTSIDE exclusions. `free` = field polygon minus exclusion holes (local m).
     Coverage passes are already clipped to `free`; this fixes the connecting legs
     that would cut across a concave notch (outside the contour) or an exclusion.
-    """
+
+    `ctx` — (опційний) спільний контекст вільного простору для ПЕРЕБОРУ КУТІВ:
+    буфер-оболонка, спрощені вузли видимості та кеш вузол↔вузол залежать лише від
+    `free` (не від кута), тож optimal_angle/overlap_optimal_angle рахують їх один
+    раз на все поле і передають той самий dict у кожен виклик. None — контекст
+    будується локально (поведінка як раніше, лише швидша за рахунок prepare)."""
     if len(pts) < 2 or free is None or free.is_empty:
         return pts
-    free_ok = free.buffer(0.5)            # tolerance shell for boundary-following legs
-    # Routing corners: simplified boundary (cap cost on dense OSM fields).
-    simp = free
-    tol = max(1.0, clearance)
-    for _ in range(6):
-        nodes = _ring_vertices(simp)
-        if len(nodes) <= 200:
-            break
-        simp = free.simplify(tol)
-        tol *= 2
+    if ctx is None:
+        ctx = {}
+    if "free_ok" not in ctx:
+        free_ok = free.buffer(0.5)        # tolerance shell for boundary-following legs
+        _prepare(free_ok)                 # prepared contains — головний хотспот двигуна
+        # Routing corners: simplified boundary (cap cost on dense OSM fields).
+        simp = free
+        tol = max(1.0, clearance)
+        for _ in range(6):
+            nodes = _ring_vertices(simp)
+            if len(nodes) <= 200:
+                break
+            simp = free.simplify(tol)
+            tol *= 2
+        ctx["free_ok"] = free_ok
+        ctx["nodes"] = nodes
+        ctx["node_vis"] = {}
+        ctx["nodes_np"] = (_np.asarray(nodes, dtype=float)
+                           if (_np is not None and nodes) else None)
+    free_ok = ctx["free_ok"]
+    nodes = ctx["nodes"]
+    node_vis = ctx["node_vis"]
+    nodes_np = ctx["nodes_np"]
 
     def inside(p, q):
         try:
@@ -138,12 +228,20 @@ def _route_freespace(pts, free, clearance=1.0):
         except Exception:
             return False
 
+    legs_ok = None
+    if _np is not None and len(pts) > 2:
+        try:                                   # усі з'єднувальні ноги одним викликом
+            P = _np.asarray(pts, dtype=float)
+            legs_ok = _contains(free_ok, _linestrings(_np.stack((P[:-1], P[1:]), axis=1)))
+        except Exception:
+            legs_ok = None
+
     out = [pts[0]]
-    for a, b in zip(pts, pts[1:]):
-        if inside(a, b):
+    for i, (a, b) in enumerate(zip(pts, pts[1:])):
+        if legs_ok[i] if legs_ok is not None else inside(a, b):
             out.append(b)
             continue
-        path = _vis_path(a, b, nodes, inside)
+        path = _vis_path(a, b, nodes, inside, node_vis, nodes_np)
         out.extend(path[1:])
     return out
 
@@ -288,13 +386,18 @@ def _order_cells(cells, anchor=None, outback=False):
 
 
 def generate_coverage(boundary, spacing, angle_deg, exclusions=None, anchor=None,
-                      start_finish_anchor=False):
+                      start_finish_anchor=False, _field=None, _fs=None):
     """Generate lawnmower waypoints covering a field.
 
     Args:
         boundary:  list of (lat, lon) field polygon vertices.
         spacing:   distance between adjacent sweep lines, metres.
         angle_deg: sweep heading in degrees (0 = lines run W->E, advancing N).
+        _field:    (приватне) готовий (poly, lat0, lon0) від _free_polygon — той
+                   самий полігон поля-мінус-виключення НЕ залежить від кута, тож
+                   перебір кутів рахує його один раз і передає сюди.
+        _fs:       (приватне) спільний dict-контекст _route_freespace (буфер,
+                   вузли видимості, кеш) — теж інваріант кута, див. там.
 
     Returns:
         list of (lat, lon) waypoints, in flight order.
@@ -303,26 +406,13 @@ def generate_coverage(boundary, spacing, angle_deg, exclusions=None, anchor=None
         return []
     spacing = max(float(spacing), 0.5)
 
-    lat0, lon0 = centroid(boundary)
-    local = [latlon_to_local(lat, lon, lat0, lon0) for lat, lon in boundary]
-
-    poly = Polygon(local)
-    if not poly.is_valid:
-        poly = poly.buffer(0)  # repair self-intersections
-    # Subtract obstacle/exclusion polygons (trees, poles, ponds) so the coverage
-    # route does not pass over them.
-    if exclusions:
-        ex = []
-        for e in exclusions:
-            if len(e) >= 3:
-                ep = Polygon([latlon_to_local(la, lo, lat0, lon0) for la, lo in e])
-                if not ep.is_valid:
-                    ep = ep.buffer(0)
-                if not ep.is_empty and ep.area > 0:
-                    ex.append(ep)
-        if ex:
-            poly = poly.difference(unary_union(ex))
-    if poly.is_empty or poly.area <= 0:
+    # Field polygon minus exclusions in local metres — кут-незалежна частина;
+    # логіка побудови (repair + difference) живе в _free_polygon.
+    if _field is not None:
+        poly, lat0, lon0 = _field
+    else:
+        poly, lat0, lon0 = _free_polygon(boundary, exclusions)
+    if poly is None or poly.is_empty or poly.area <= 0:
         return []
 
     # Rotate field so sweep lines are horizontal.
@@ -361,12 +451,25 @@ def generate_coverage(boundary, spacing, angle_deg, exclusions=None, anchor=None
     # DEGENERATE slivers (shorter than the gap) so corner micro-passes don't
     # become spurious cells. Keep the single longest raw segment as a fallback.
     min_gap = min(max(2.0, 0.25 * spacing), 0.5 * spacing)
+    cuts = None
+    if _intersection is not None and len(ys) > 1:
+        try:                       # усі скан-лінії одним векторним intersection
+            coords = _np.empty((len(ys), 2, 2))
+            coords[:, 0, 0] = minx - 10.0
+            coords[:, 1, 0] = maxx + 10.0
+            coords[:, 0, 1] = ys
+            coords[:, 1, 1] = ys
+            cuts = _intersection(rpoly, _linestrings(coords))
+        except Exception:
+            cuts = None
+    if cuts is None:
+        cuts = [rpoly.intersection(LineString([(minx - 10.0, y), (maxx + 10.0, y)]))
+                for y in ys]
     seg_rows = []
     longest = None
-    for y in ys:
-        scan = LineString([(minx - 10.0, y), (maxx + 10.0, y)])
+    for cut in cuts:
         raw = []
-        for a, b in _extract_segments(rpoly.intersection(scan)):
+        for a, b in _extract_segments(cut):
             if a[0] > b[0]:
                 a, b = b, a
             length = math.hypot(b[0] - a[0], b[1] - a[1])
@@ -406,7 +509,8 @@ def generate_coverage(boundary, spacing, angle_deg, exclusions=None, anchor=None
     # Keep the WHOLE path inside the field and outside exclusions: reroute any
     # connector leg that would cut across a concave notch (outside the contour)
     # or across an exclusion. `poly` is the field minus exclusions = free space.
-    local_pts = _route_freespace(local_pts, poly, clearance=min(max(1.0, 0.1 * spacing), 5.0))
+    local_pts = _route_freespace(local_pts, poly,
+                                 clearance=min(max(1.0, 0.1 * spacing), 5.0), ctx=_fs)
 
     # Collapse any point pile-ups (e.g. micro-passes at a thin spike) so the route has
     # no clustered waypoints — the centred pass placement can otherwise leave tiny gaps.
@@ -533,6 +637,28 @@ def buffer_boundary(boundary, meters):
     return [local_to_latlon(x, y, lat0, lon0) for (x, y) in ext]
 
 
+def _best_angle_route(angles, gen, score, valid=bool):
+    """Повний перебір кутів: маршрут на кожному куті-кандидаті, повертає
+    (best_angle, best_wps, best_score) або None. Нічия — на користь МЕНШОГО кута
+    (як у старому лінійному переборі).
+
+    Перебір свідомо ВИЧЕРПНИЙ: заміри на бенч-полях (tests/bench_route.py)
+    показали, що ландшафт score(кут) майже плаский між далекими кутами
+    (Δt ~0.2% при Δдовжини ~2.3%) і водночас має вузькі (±2°) провали-оптимуми
+    (вузьке поле: сусідній кут гірший на 10%) — грубі сітки/двоетапний пошук або
+    промахуються повз оптимум, або відсіюють <10% кандидатів. Швидкість натомість
+    дає дешева генерація одного кута (спільні _field/_fs + еліпсний _vis_path)."""
+    best = None
+    for a in angles:
+        wps = gen(a)
+        if not valid(wps):
+            continue
+        s = score(wps)
+        if best is None or s < best[2]:
+            best = (float(a), wps, s)
+    return best
+
+
 def optimal_angle(boundary, spacing, step=5, exclusions=None, return_route=False,
                   anchor=None, start_finish_anchor=False):
     """Sweep heading (deg) giving the SHORTEST total coverage path.
@@ -550,15 +676,24 @@ def optimal_angle(boundary, spacing, step=5, exclusions=None, return_route=False
     """
     if len(boundary) < 3:
         return (0.0, None) if return_route else 0.0
-    best_a, best_len, best_wps = 0.0, None, None
-    for a in range(0, 180, step):
-        wps = generate_coverage(boundary, spacing, float(a), exclusions=exclusions,
-                                anchor=anchor, start_finish_anchor=start_finish_anchor)
-        if not wps:
-            continue
-        length = path_length(wps)
-        if best_len is None or length < best_len:
-            best_len, best_a, best_wps = length, float(a), wps
+    step = max(1, int(step))
+    # Кут-незалежні інваріанти рахуємо ОДИН раз на весь перебір (а не 180/step
+    # разів): полігон поля-мінус-виключення і контекст вільного простору.
+    field = _free_polygon(boundary, exclusions)
+    fs = {}
+
+    def _gen(a):
+        return generate_coverage(boundary, spacing, float(a), exclusions=exclusions,
+                                 anchor=anchor, start_finish_anchor=start_finish_anchor,
+                                 _field=field, _fs=fs)
+
+    def _score(wps):
+        return path_length(wps)
+
+    best = _best_angle_route(range(0, 180, step), _gen, _score)
+    if best is None:
+        return (0.0, None) if return_route else 0.0
+    best_a, best_wps, _ = best
     return (best_a, best_wps) if return_route else best_a
 
 
@@ -943,17 +1078,23 @@ def overlap_optimal_angle(cover, spacing, home, field_boundary=None, exclusions=
     # are EXCLUDED so the heading is never tilted just to bring the start/finish near the
     # take-off. Coverage is NOT scored and there is NO gate — the fastest heading wins
     # outright (it may tilt a few degrees and leave small edge slivers on some fields).
-    cands = []
-    for a in range(0, 180, max(1, int(step))):
-        wps = generate_coverage(cover, spacing, float(a), exclusions=exclusions, anchor=a0)
-        if not wps or len(wps) < 2:
-            continue
+    step = max(1, int(step))
+    # Кут-незалежні інваріанти — один раз на перебір (не 180/step разів).
+    field = _free_polygon(cover, exclusions)
+    fs = {}
+
+    def _gen(a):
+        return generate_coverage(cover, spacing, float(a), exclusions=exclusions,
+                                 anchor=a0, _field=field, _fs=fs)
+
+    def _score(wps):
         e = estimate_mission_time(wps, home, speed=speed, rtl=rtl)
-        t = e["takeoff_s"] + e["cruise_s"] + e["turn_s"] + e["descent_s"]
-        cands.append((float(a), wps, t))
-    if not cands:
+        return e["takeoff_s"] + e["cruise_s"] + e["turn_s"] + e["descent_s"]
+
+    best = _best_angle_route(range(0, 180, step), _gen, _score,
+                             valid=lambda wps: bool(wps) and len(wps) >= 2)
+    if best is None:
         return (0.0, None) if return_route else 0.0
-    best = min(cands, key=lambda c: c[2])
     return (best[0], best[1]) if return_route else best[0]
 
 
@@ -973,8 +1114,11 @@ def finish_home_angle(cover, spacing, home, field_boundary=None, exclusions=None
     a0 = anchor if anchor is not None else home
     thr = near_factor * max(float(spacing), 0.5)
     glob, near = None, None
+    field = _free_polygon(cover, exclusions)     # інваріанти кута — один раз
+    fs = {}
     for a in range(0, 180, max(1, int(step))):
-        wps = generate_coverage(cover, spacing, float(a), exclusions=exclusions, anchor=a0)
+        wps = generate_coverage(cover, spacing, float(a), exclusions=exclusions,
+                                anchor=a0, _field=field, _fs=fs)
         if not wps or len(wps) < 2:
             continue
         for cand in (wps, wps[::-1]):
