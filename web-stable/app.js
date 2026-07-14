@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.48";
+  const APP_VERSION = "2.5.49";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -748,6 +748,64 @@
     } catch (e) { /* malformed save — ignore */ }
   }
 
+  // ---- ПОВНА сесія (2.5.49): маршрут, вкладка, карта, зʼєднання ------------
+  // Мета: закрив додаток → відкрив — і ВСЕ на місці, нічого не натискаєш заново.
+  // Контур+вирізи й параметри вже персистяться (fmp_last_field/fmp_last_settings);
+  // тут — решта: побудований маршрут (без перерахунку і без холодного старту
+  // рушія), активна вкладка, позиція карти, тип зʼєднання і авто-реконект BLE.
+  const SESSION_KEY = "fmp_session";
+  function sessionLoad() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "{}"); } catch (e) { return {}; } }
+  function sessionPatch(part) { try { localStorage.setItem(SESSION_KEY, JSON.stringify(Object.assign(sessionLoad(), part))); } catch (e) {} }
+  function saveLastRoute(res) {
+    try {
+      if (!res || !res.ok || !res.waypoints || res.waypoints.length < 2) return;
+      const lite = {
+        waypoints: res.waypoints, cover: res.cover || null, home: res.home || null,
+        duration_s: res.duration_s, length_m: res.length_m, sprayed_ha: res.sprayed_ha,
+        area_ha: res.area_ha, liquid_l: res.liquid_l, flights: res.flights,
+        calibration: res.calibration || null,
+      };
+      const st = $("stats");
+      localStorage.setItem("fmp_last_route", JSON.stringify({
+        res: lite,
+        statsHtml: (st && !st.classList.contains("hidden")) ? st.innerHTML : "",
+        rtl: $("rtl") ? $("rtl").checked : true,
+        ts: Date.now(),
+      }));
+    } catch (e) { /* quota — ignore */ }
+  }
+  function restoreLastRoute() {
+    let s;
+    try { s = JSON.parse(localStorage.getItem("fmp_last_route") || "null"); } catch (e) { return; }
+    if (!s || !s.res || !s.res.waypoints || s.res.waypoints.length < 2) return;
+    const res = s.res;
+    try {
+      if (res.cover && res.cover.length)
+        insetLayer = L.polygon(res.cover.map((p) => [p.lat, p.lng]), {
+          color: "#5fd3a3", weight: 1.5, dashArray: "6 5", fill: false,
+        }).addTo(map).bindTooltip("Межа проходів (півширини внесення від краю)");
+      const pts = res.waypoints.map((p) => [p.lat, p.lng]);
+      lastRoute = pts;
+      lastHome = res.home ? { lat: res.home.lat, lng: res.home.lng } : null;
+      lastRtl = !!s.rtl;
+      lastBuildStats = { duration_s: res.duration_s, length_m: res.length_m, sprayed_ha: res.sprayed_ha };
+      lastFieldAreaHa = res.area_ha || 0;
+      lastWorkContext = { field: currentFieldName || "поле", area_ha: res.area_ha || 0,
+        sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1 };
+      if (res.calibration) lastCalibration = res.calibration;
+      routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
+      routeMarkers = L.featureGroup([
+        L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 }).bindTooltip("Старт"),
+        L.circleMarker(pts[pts.length - 1], { radius: 5, color: "#ff7b72", fillOpacity: 1 }).bindTooltip("Фініш"),
+      ]).addTo(map);
+      if (s.statsHtml && $("stats")) { $("stats").innerHTML = s.statsHtml; $("stats").classList.remove("hidden"); }
+      ["exp-wp", "exp-plan", "exp-fence", "exp-fencemp", "exp-geojson"]
+        .forEach((id) => { if ($(id)) $(id).disabled = false; });
+      updateMissionStatus();
+      appLog("[restore] маршрут відновлено: " + pts.length + " точок (без перерахунку)");
+    } catch (e) { appLog("[restore] маршрут не відновився: " + e); }
+  }
+
   // Edit the field contour's vertices in place, rebuilding the route LIVE as the
   // user drags (uses leaflet.draw's per-layer editing handler — no extra library,
   // and more discoverable + live than the modal toolbar pencil).
@@ -846,6 +904,7 @@
   })();
 
   function clearRoute(keepViz) {
+    try { localStorage.removeItem("fmp_last_route"); } catch (e) {}
     lastRoute = null;               // editing buffer; flownRoute keeps the uploaded one
     if (typeof updateMissionStatus === "function") updateMissionStatus();
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
@@ -1093,6 +1152,7 @@
         ? `Кут ${res.angle_used}° — маршрут оновлено наживо.`
         : "Маршрут готовий. Можна експортувати маршрут або контур.", "ok");
     }
+    saveLastRoute(res);            // повна сесія: маршрут переживає закриття додатку
   }
 
   function row(label, value) {
@@ -1234,7 +1294,50 @@
   restoreLastSettings();          // pre-fill last session's settings before first render
   // Deferred so ALL module-level `let`s (lastRoute, …) are initialized first —
   // adoptField()→clearRoute() touches them, which would hit a TDZ error if run inline.
-  setTimeout(restoreLastField, 0);   // auto-restore the last drawn contour (+ exclusions)
+  setTimeout(() => {
+    restoreLastField();            // контур + вирізи (як і раніше)
+    restoreLastRoute();            // побудований маршрут — без перерахунку
+    const ss = sessionLoad();
+    // Позиція карти користувача перемагає fitBounds відновленого поля.
+    if (ss.map && ss.map.z != null) {
+      try { map.setView([ss.map.lat, ss.map.lng], ss.map.z, { animate: false }); } catch (e) {}
+    }
+    if (ss.connType) {
+      try {
+        const tsel = $("mav-conn-type");
+        if (tsel && tsel.querySelector('option[value="' + ss.connType + '"]')) {
+          tsel.value = ss.connType; mavSyncRows();
+        }
+      } catch (e) {}
+    }
+    if (ss.addr) { try { if ($("mav-address")) $("mav-address").value = ss.addr; } catch (e) {} }
+    if (ss.tab && ss.tab !== "plan") {
+      try { const b = document.querySelector('.tab[data-tab="' + ss.tab + '"]'); if (b) b.click(); } catch (e) {}
+    }
+    // Сесія закінчилась підключеною по BLE → тихо перепідключаємось самі.
+    if (ss.wasConnected && ss.connType === "ble" && window.AndroidBle && window.__fmpBleAutoReconnect) {
+      let mac = "";
+      try { mac = localStorage.getItem("fmp_ble_last") || ""; } catch (e) {}
+      if (mac) { appLog("[restore] авто-реконект BLE до " + mac); window.__fmpBleAutoReconnect(mac, 2500); }
+    }
+    // Хуки збереження решти сесії.
+    let _mvTimer = null;
+    map.on("moveend zoomend", () => {
+      if (_mvTimer) clearTimeout(_mvTimer);
+      _mvTimer = setTimeout(() => {
+        const c = map.getCenter();
+        sessionPatch({ map: { lat: c.lat, lng: c.lng, z: map.getZoom() } });
+      }, 400);
+    });
+    const tsel = $("mav-conn-type");
+    if (tsel) tsel.addEventListener("change", () => sessionPatch({ connType: tsel.value }));
+    const addr = $("mav-address");
+    if (addr) addr.addEventListener("change", () => sessionPatch({ addr: addr.value }));
+    const disc = $("mav-disconnect");
+    if (disc) disc.addEventListener("click", () => sessionPatch({ wasConnected: false }));
+    document.querySelectorAll(".tab").forEach((b) =>
+      b.addEventListener("click", () => sessionPatch({ tab: b.getAttribute("data-tab") })));
+  }, 0);
   syncAngleEnabled();
   $("build").addEventListener("click", () => buildRoute());
   // Toggling the spray-footprint overlay rebuilds at once so it appears/disappears
@@ -2400,6 +2503,7 @@
         }
         setMsg(wmsg + bnote, r.warning ? null : "ok");
         mavStartPolling();
+        sessionPatch({ wasConnected: true, connType: $("mav-conn-type").value });
         // Working non-BLE link + a pending BLE setup -> run it, hands-free.
         if (!conn.startsWith("ble:") && window.__fmpAutoBleSetup)
           setTimeout(() => { try { window.__fmpAutoBleSetup(); } catch (e) {} }, 1500);
