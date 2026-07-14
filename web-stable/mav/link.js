@@ -546,7 +546,12 @@
           const sameFrame = e.frame === a.frame || equiv.some((g) => g.has(e.frame) && g.has(a.frame));
           if (!sameFrame) { mismatches.push(`#${e.seq}: рамка висоти ${e.frame}≠${a.frame}`); continue; }
           const ex = Math.round(e.lat * 1e7), ey = Math.round(e.lon * 1e7);
-          if (Math.abs(ex - a.x) > 3 || Math.abs(ey - a.y) > 3) mismatches.push(`#${e.seq}: координати розійшлись`);
+          // Tolerance 100×1e-7° ≈ 1.1 m: when the vehicle asks for the v1 dialect
+          // (MISSION_ITEM, float32 lat/lon — this ArduPilot does), float32 rounds
+          // coordinates by up to ~0.5 m. The old 3-unit (3 cm!) gate flagged EVERY
+          // waypoint of a perfectly-stored mission (field log 2026-07-13). 1 m is
+          // spray-grade honest — real corruption is metres-to-kilometres off.
+          if (Math.abs(ex - a.x) > 100 || Math.abs(ey - a.y) > 100) mismatches.push(`#${e.seq}: координати розійшлись`);
           else if (Math.abs(Number(e.alt) - Number(a.z)) > 1.0) mismatches.push(`#${e.seq}: висота ${e.alt}≠${Math.round(a.z * 10) / 10}`);
         }
       }
