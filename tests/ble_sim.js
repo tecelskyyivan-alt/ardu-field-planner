@@ -247,10 +247,50 @@ async function testAutoUartFlow() {
   link.disconnect();
 }
 
+/* ------------------------------------------------------------------ Test E --
+ * Структура місії: ЗАВЖДИ вертикальний зліт на ЗАДАНУ висоту перед точками —
+ * і для повної місії, і для ЗАЛИШКУ (продовження після заміни батареї). Це
+ * гарантія, що дрон не піде низько по діагоналі через поле. */
+function testMissionStartsWithTakeoff() {
+  console.log("E. місія завжди починається зльотом на задану висоту");
+  const CMD_WAYPOINT = 16, CMD_TAKEOFF = 22, CMD_DO_CHANGE_SPEED = 178, CMD_RTL = 20;
+  const FRAME_REL = 3;
+  const ALT = 45, SPEED = 9;
+  const home = [50.45, 30.55, 0];
+  const full = [];
+  for (let i = 0; i < 12; i++) full.push([50.45 + i * 0.0004, 30.55 + (i % 2) * 0.001]);
+
+  function assertShape(items, route, label) {
+    check(`${label}: 0 = home (WP)`, items[0].command === CMD_WAYPOINT && items[0].current === 1);
+    const tk = items[1];
+    check(`${label}: 1 = TAKEOFF`, tk.command === CMD_TAKEOFF);
+    check(`${label}: зліт саме на задану висоту (${ALT} м)`, tk.alt === ALT, String(tk.alt));
+    check(`${label}: зліт відносно точки зльоту (frame REL)`, tk.frame === FRAME_REL);
+    check(`${label}: 2 = швидкість`, items[2].command === CMD_DO_CHANGE_SPEED);
+    // точки маршруту йдуть ПІСЛЯ зльоту — жодного WP до нього
+    const firstWpIdx = items.findIndex((it, i) => i > 1 && it.command === CMD_WAYPOINT);
+    check(`${label}: точки маршруту лише після зльоту`, firstWpIdx > 1);
+    const wps = items.filter((it, i) => i > 1 && it.command === CMD_WAYPOINT);
+    check(`${label}: усі ${route.length} точок на місці`, wps.length === route.length,
+      `${wps.length}/${route.length}`);
+    check(`${label}: точки на заданій висоті`, wps.every((w) => w.alt === ALT));
+    check(`${label}: RTL останній`, items[items.length - 1].command === CMD_RTL);
+    // lead-офсет, яким app.js рахує залишок: home + takeoff + speed = 3
+    check(`${label}: службових пунктів перед маршрутом = 3`, firstWpIdx === 3);
+  }
+
+  assertShape(MAV_LINK.buildMissionItems(home, ALT, full, ALT, true, SPEED), full, "повна місія");
+  // залишок після заміни батареї = хвіст маршруту, залитий як ПОВНОЦІННА місія
+  const rest = full.slice(7);
+  assertShape(MAV_LINK.buildMissionItems(home, ALT, rest, ALT, true, SPEED), rest, "залишок");
+  check("залишок коротший за повну", rest.length === 5);
+}
+
 (async () => {
   await testUpload();
   await testOpenAndroidBle();
   await testAutoUartFlow();
+  testMissionStartsWithTakeoff();
   console.log(failures === 0 ? "\nУСІ BLE-СИМУЛЯЦІЇ ЗЕЛЕНІ" : `\nПРОВАЛІВ: ${failures}`);
   process.exit(failures === 0 ? 0 : 1);
 })();
