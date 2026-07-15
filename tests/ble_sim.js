@@ -329,12 +329,76 @@ async function testPauseContinue() {
   link.disconnect();
 }
 
+/* ------------------------------------------------------------------ Test G --
+ * Двостек: заливка INAV-місії проти симульованого INAV-борта. INAV просить пункти
+ * legacy-запитом MISSION_REQUEST (v1), приймає ЛИШЕ NAV_WAYPOINT(frame REL) +
+ * NAV_RTL(frame MISSION), як MISSION_ITEM(39). Перевіряємо, що buildMissionItemsInav
+ * дає правильний список і заливка завершується ACCEPTED (а не зависає, як з
+ * ArduCopter-стилем — реальний баг на крилі 2026-07-15). */
+async function testInavMissionUpload() {
+  console.log("G. двостек: заливка INAV-місії (WP+RTL, v1)");
+  const CMD_WAYPOINT = 16, CMD_RTL = 20;
+  const wps = [];
+  for (let i = 0; i < 5; i++) wps.push([50.45 + i * 0.0006, 30.55 + (i % 2) * 0.001]);
+  const items = MAV_LINK.buildMissionItemsInav(wps, 40, true);
+
+  // структура: 5 WP (frame REL=3) + RTL (frame MISSION=2), seq 0-based, без home/takeoff
+  check("INAV: пунктів = точки + RTL", items.length === 6, String(items.length));
+  check("INAV: seq0 = перша точка (не home)", items[0].seq === 0 && items[0].command === CMD_WAYPOINT);
+  check("INAV: усі WP frame REL(3)", items.slice(0, 5).every((it) => it.frame === 3 && it.command === CMD_WAYPOINT));
+  check("INAV: RTL останній, frame MISSION(2)", items[5].command === CMD_RTL && items[5].frame === 2);
+  check("INAV: жодного TAKEOFF/DO_CHANGE_SPEED", !items.some((it) => it.command === 22 || it.command === 178));
+  check("INAV: autocontinue=1 скрізь", items.every((it) => it.autocontinue === 1));
+
+  // симульований INAV-борт: просить MISSION_REQUEST (v1), приймає лише WP/RTL frame3/2
+  let s = 555;
+  const rnd = (n) => (s = (s * 1103515245 + 12345) & 0x7fffffff) % n;
+  const fcParser = MAVLINK.createParser();
+  let fcSeq = 0, count = -1, got = new Map();
+  const t = { ondata: null, _closed: false,
+    write(b) { for (const m of fcParser.push(b)) fcHandle(m); }, close() {} };
+  let clk = 0;
+  function fcSend(name, fields) {
+    const fr = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: fcSeq++ & 0xff });
+    clk = Math.max(clk, Date.now());
+    for (let o = 0; o < fr.length; o += 20) {
+      const ch = fr.slice(o, Math.min(o + 20, fr.length)); clk += 2 + rnd(8);
+      setTimeout(() => { if (t.ondata && !t._closed) t.ondata(ch); }, Math.max(1, clk - Date.now()));
+    }
+  }
+  function fcHandle(m) {
+    if (m.name === "MISSION_COUNT") { count = m.fields.count; got.clear();
+      fcSend("MISSION_REQUEST", { target_system: 255, target_component: 190, seq: 0, mission_type: 0 }); }
+    else if (m.name === "MISSION_ITEM") {   // INAV приймає ТІЛЬКИ v1
+      const f = m.fields;
+      const okCmd = f.command === CMD_WAYPOINT || f.command === CMD_RTL;
+      const okFrame = f.frame === 3 || (f.frame === 2 && f.command === CMD_RTL);
+      if (!okCmd || !okFrame || f.autocontinue !== 1) {
+        fcSend("MISSION_ACK", { target_system: 255, target_component: 190, type: 3, mission_type: 0 }); return; // UNSUPPORTED
+      }
+      got.set(f.seq, f);
+      if (f.seq + 1 < count) fcSend("MISSION_REQUEST", { target_system: 255, target_component: 190, seq: f.seq + 1, mission_type: 0 });
+      else fcSend("MISSION_ACK", { target_system: 255, target_component: 190, type: 0, mission_type: 0 });
+    }
+    else if (m.name === "MISSION_ITEM_INT") {   // INAV НЕ має обробника — глухо (не відповідаємо)
+    }
+  }
+  const hb = setInterval(() => fcSend("HEARTBEAT", { type: 1, autopilot: 0, base_mode: 81, custom_mode: 0, system_status: 4, mavlink_version: 3 }), 700);
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const res = await link.uploadMission(items);
+  check("INAV: заливка ACCEPTED (не зависла)", !!res.ok, res.error);
+  check("INAV: борт отримав усі 6 пунктів", got.size === 6, `${got.size}/6`);
+  clearInterval(hb); link.disconnect();
+}
+
 (async () => {
   await testUpload();
   await testOpenAndroidBle();
   await testAutoUartFlow();
   testMissionStartsWithTakeoff();
   await testPauseContinue();
+  await testInavMissionUpload();
   console.log(failures === 0 ? "\nУСІ BLE-СИМУЛЯЦІЇ ЗЕЛЕНІ" : `\nПРОВАЛІВ: ${failures}`);
   process.exit(failures === 0 ? 0 : 1);
 })();

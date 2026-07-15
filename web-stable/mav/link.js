@@ -13,7 +13,7 @@
 (function (root) {
   "use strict";
 
-  const FRAME_GLOBAL = 0, FRAME_GLOBAL_REL = 3;
+  const FRAME_GLOBAL = 0, FRAME_GLOBAL_REL = 3, FRAME_MISSION = 2;
   const CMD_WAYPOINT = 16, CMD_RTL = 20, CMD_TAKEOFF = 22, CMD_DO_CHANGE_SPEED = 178;
   const CMD_DO_SET_MODE = 176, CMD_MISSION_START = 300, CMD_ARM_DISARM = 400;
   const CMD_PAUSE_CONTINUE = 193;   // MAV_CMD_DO_PAUSE_CONTINUE (Copter: hold on track, stay in AUTO)
@@ -41,6 +41,15 @@
 
   const ACM_MODES = { STABILIZE: 0, ALT_HOLD: 2, AUTO: 3, GUIDED: 4, LOITER: 5, RTL: 6, LAND: 9, BRAKE: 17, SMART_RTL: 21 };
   const ACM_REV = Object.fromEntries(Object.entries(ACM_MODES).map(([k, v]) => [v, k]));
+  // ArduPlane mode numbers. INAV re-maps ITS OWN flight mode onto these numbers for
+  // fixed-wing (and onto the ArduCopter table for multirotor), so one table names
+  // both a real ArduPlane and an INAV wing. 23 = INAV's "unmapped" sentinel.
+  const APM_PLANE = { 0:"MANUAL",1:"CIRCLE",2:"STABILIZE",3:"TRAINING",4:"ACRO",5:"FBWA",
+    6:"FBWB",7:"CRUISE",8:"AUTOTUNE",10:"AUTO",11:"RTL",12:"LOITER",13:"TAKEOFF",15:"GUIDED" };
+  function modeName(cm, vtype) {
+    const name = (vtype === 1 ? APM_PLANE[cm] : ACM_REV[cm]);   // 1 = MAV_TYPE_FIXED_WING
+    return name || ("MODE " + cm);
+  }
 
   const CMD_RESULT = {
     0: "прийнято",
@@ -88,6 +97,22 @@
     if (speed && speed > 0) add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0, 0, 0, 0, 1.0, speed, -1.0);
     for (const [lat, lon] of waypoints) add(FRAME_GLOBAL_REL, CMD_WAYPOINT, lat, lon, wpAlt);
     if (rtl) add(FRAME_GLOBAL_REL, CMD_RTL, 0, 0, 0);
+    return items;
+  }
+
+  // INAV mission builder. INAV's MAVLink receiver (src/main/telemetry/mavlink.c,
+  // verified on 8.0.1) accepts ONLY NAV_WAYPOINT (frame GLOBAL_RELATIVE_ALT) and
+  // NAV_RETURN_TO_LAUNCH, as MISSION_ITEM (v1 float), and seq0 = the FIRST waypoint
+  // (NO home slot, NO takeoff, NO do_change_speed — each of those gets a
+  // MAV_MISSION_UNSUPPORTED and the transfer dies, which is why the ArduCopter-style
+  // upload hung on the wing). Cruise speed is a vehicle setting on INAV, not an item.
+  function buildMissionItemsInav(waypoints, wpAlt, rtl) {
+    const items = [];
+    const add = (frame, command, lat, lon, alt) =>
+      items.push({ seq: items.length, frame, command, current: 0, autocontinue: 1,
+        p1: 0, p2: 0, p3: 0, p4: 0, lat, lon, alt });
+    for (const [lat, lon] of waypoints) add(FRAME_GLOBAL_REL, CMD_WAYPOINT, lat, lon, wpAlt);
+    if (rtl) add(FRAME_MISSION, CMD_RTL, 0, 0, 0);
     return items;
   }
 
@@ -269,8 +294,10 @@
         }
         if (isAp) {
           this._tsys = m.sysid; this._tcomp = m.compid; this._apSeen = true;
+          tl.autopilot = f.autopilot;   // 3 = ArduPilot, 0 = INAV/generic — drives dual-stack
+          tl.vehicle_type = f.type;     // 1 = plane, 2 = quad… selects the mode table
           tl.armed = !!(f.base_mode & 0x80);   // MAV_MODE_FLAG_SAFETY_ARMED
-          tl.mode = ACM_REV[f.custom_mode] || ("MODE " + f.custom_mode);
+          tl.mode = modeName(f.custom_mode, f.type);
           // Keep asking for HOME until we have it (first ask precedes GPS lock).
           if (tl.home_lat == null && !this._busy && Date.now() - this._lastHomeReq > 8000) {
             this._lastHomeReq = Date.now();
@@ -512,7 +539,12 @@
         const deadline = Date.now() + 600000;
         while (seq < n && Date.now() < deadline) {
           if (Date.now() - lastProgress > stallMs) break;
-          if (Date.now() - lastReq > 1000) { this._send("MISSION_REQUEST_INT", { target_system: ts, target_component: tc, seq, mission_type: 0 }); lastReq = Date.now(); }
+          if (Date.now() - lastReq > 1000) {
+            // INAV has NO MISSION_REQUEST_INT handler — it only answers the legacy
+            // MISSION_REQUEST (and replies with MISSION_ITEM). ArduPilot handles both.
+            const reqT = (this._tlm.autopilot == null || this._tlm.autopilot === 3) ? "MISSION_REQUEST_INT" : "MISSION_REQUEST";
+            this._send(reqT, { target_system: ts, target_component: tc, seq, mission_type: 0 }); lastReq = Date.now();
+          }
           const im = await this._recv(["MISSION_ITEM_INT", "MISSION_ITEM"], 1000);
           if (!im || im.fields.seq !== seq) continue;
           lastProgress = Date.now();
@@ -648,5 +680,5 @@
     }
   }
 
-  root.MAV_LINK = { MavLink, buildMissionItems, humanize };
+  root.MAV_LINK = { MavLink, buildMissionItems, buildMissionItemsInav, humanize };
 })(typeof globalThis !== "undefined" ? globalThis : this);
