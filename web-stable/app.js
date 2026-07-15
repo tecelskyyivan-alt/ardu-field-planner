@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.54";
+  const APP_VERSION = "2.5.55";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2704,7 +2704,7 @@
       mavPoll._lastSnap = Date.now();
       // OPSEC: log the DIAGNOSTIC state only — never lat/lon/home. `hasfix` shows a
       // position arrived without leaking WHERE. (security audit S3)
-      appLog(`tlm mode=${s.mode} armed=${s.armed} fix=${s.fix_type} sats=${s.sats} `
+      appLog(`tlm mode=${s.mode} armed=${s.armed} alt=${s.alt_rel} fix=${s.fix_type} sats=${s.sats} `
         + `hasfix=${s.lat != null} batt=${s.battery_v} gs=${s.groundspeed} wp=${s.wp_current}/${s.wp_total}`);
     }
     mavRenderHud(s);
@@ -3104,7 +3104,16 @@
   // last waypoint is reached and when the aircraft is down (the flight-log finalize
   // also fires on disarm).
   let _wasArmed = false, _missionDoneShown = false, _landedShown = false;
+  let _lastLoggedMode = null, _lastLoggedArmed = null;
+  function mavLogTransitions(s) {
+    if (!s) return;
+    if (s.mode !== _lastLoggedMode || s.armed !== _lastLoggedArmed) {
+      appLog(`>> режим=${s.mode} armed=${s.armed} alt=${s.alt_rel}m wp=${s.wp_current}/${s.wp_total} gs=${s.groundspeed}`);
+      _lastLoggedMode = s.mode; _lastLoggedArmed = s.armed;
+    }
+  }
   function mavDetectPhase(s) {
+    mavLogTransitions(s);
     if (s.armed) {
       _wasArmed = true; _landedShown = false;
       if ((s.wp_current || 0) <= 1) _missionDoneShown = false;       // a fresh mission
