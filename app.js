@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.57";
+  const APP_VERSION = "2.5.58";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2222,12 +2222,16 @@
       // Місія ЗАВЖДИ починається вертикальним зльотом на задану висоту
       // (NAV_TAKEOFF), і лише потім — горизонтальний політ по точках. Це
       // стосується і продовження після батареї: залишок теж має свій зліт.
-      const items = MAV_LINK.buildMissionItems(home, Math.max(alt, 2),
-        route.map((pt) => [pt[0], pt[1]]), alt, rtl, speed);
-      res_route_len = route.length;
+      // Dual-stack: INAV accepts only bare NAV_WAYPOINT + RTL (no home/takeoff/speed
+      // items). Pick the builder by the detected autopilot (3 = ArduPilot).
+      const _wps = route.map((pt) => [pt[0], pt[1]]);
+      const isInav = st && st.autopilot != null && st.autopilot !== 3;
+      const items = isInav
+        ? MAV_LINK.buildMissionItemsInav(_wps, alt, rtl)
+        : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), _wps, alt, rtl, speed);
       const res = await _mavLink.uploadMission(items, undefined, p && p.onProgress);
       if (!res.ok) return res;
-      if (speed > 0) {
+      if (speed > 0 && !isInav) {   // INAV: MAVLink param-set is a stub; speed is a vehicle setting
         let ps = await _mavLink.setParam("WP_SPD", speed);
         if (!ps.ok) ps = await _mavLink.setParam("WPNAV_SPEED", speed * 100);
         res.cruise_speed_set = ps.ok;
@@ -2236,7 +2240,7 @@
       // flies a rounded U-turn at each pass end. Copter ≥4.7 uses WP_RADIUS_M (m); older
       // firmware WPNAV_RADIUS (cm). No extra waypoints — the autopilot does the arc.
       const trm = p && p.turn_radius_m;
-      if (trm && trm > 0) {
+      if (trm && trm > 0 && !isInav) {
         let pr = await _mavLink.setParam("WP_RADIUS_M", trm);
         if (!pr.ok) pr = await _mavLink.setParam("WPNAV_RADIUS", trm * 100);
         res.turn_radius_set = pr.ok;
@@ -2246,8 +2250,10 @@
       // курс під час RTL (дрон вертається боком/хвостом — оператор не бачить
       // перешкод у камеру). 1 = ніс за курсом і в RTL теж. На проходи місії не
       // впливає (1 і 2 в місії ідентичні), діє і на ручний RTL з пульта/кнопки.
-      const py = await _mavLink.setParam("WP_YAW_BEHAVIOR", 1);
-      res.yaw_forward_set = py.ok;
+      if (!isInav) {   // ArduPilot-only param
+        const py = await _mavLink.setParam("WP_YAW_BEHAVIOR", 1);
+        res.yaw_forward_set = py.ok;
+      }
       appLog("камерою вперед у RTL: WP_YAW_BEHAVIOR=1 -> " + (py.ok ? "ok" : "FAILED"));
       if (!p || p.verify !== false) {
         const v = await _mavLink.verifyMission(items);
@@ -3112,7 +3118,21 @@
       _lastLoggedMode = s.mode; _lastLoggedArmed = s.armed;
     }
   }
+  // Dual-stack UI gate: INAV does NOT accept arm/mode/start/RTL over MAVLink (those
+  // are RC-aux only). When an INAV heartbeat is seen, disable those buttons + say so
+  // once; mission upload/read + telemetry stay fully available.
+  let _inavGated = null;
+  function mavStackGate(s) {
+    if (!s || s.autopilot == null) return;
+    const inav = s.autopilot !== 3;
+    if (inav === _inavGated) return;
+    _inavGated = inav;
+    ["mav-arm", "mav-disarm", "mav-mode", "mav-set-mode", "mav-start", "mav-rtl", "mav-pause"]
+      .forEach((id) => { if ($(id)) $(id).disabled = inav; });
+    if (inav) setMsg("INAV: телеметрія й заливка/читання місій працюють; arm/режим/старт/RTL — лише з пульта (INAV не приймає їх по MAVLink).", null);
+  }
   function mavDetectPhase(s) {
+    mavStackGate(s);
     mavLogTransitions(s);
     if (s.armed) {
       _wasArmed = true; _landedShown = false;
