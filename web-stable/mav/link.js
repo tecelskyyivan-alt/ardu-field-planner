@@ -392,6 +392,9 @@
     // duration; they re-arm automatically right after (streamsOk=false).
     _pauseStreams() {
       const { ts, tc } = this._targets();
+      // INAV has no COMMAND_LONG/SET_MESSAGE_INTERVAL handler, so this would only
+      // waste the narrow uplink at the exact moment MISSION_COUNT needs it. Skip.
+      if (this._tlm.autopilot != null && this._tlm.autopilot !== 3) { this._log("stream-pause skipped (INAV ignores it)"); return; }
       try {
         for (const [mid] of STREAM_MSGS)
           this._send("COMMAND_LONG", { target_system: ts, target_component: tc,
@@ -414,7 +417,14 @@
     }
 
     async _withBusy(fn) {
-      if (this._busy) return { ok: false, error: "Триває інший обмін з дроном — зачекай." };
+      // Don't fail instantly if a SHORT background op (proactive UART probe, home
+      // request) holds the lock — wait briefly for it to clear. Only a genuinely
+      // long-running conflict (another transfer in progress) still errors out.
+      if (this._busy) {
+        const until = Date.now() + 6000;
+        while (this._busy && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+        if (this._busy) return { ok: false, error: "Триває інший обмін з дроном — зачекай." };
+      }
       this._busy = true;
       this._pending = [];   // start each transfer with a clean inbound buffer
       try { return await fn(); } finally { this._busy = false; }
@@ -430,13 +440,18 @@
       if (!this._t) return { ok: false, error: "Немає звʼязку. Спочатку підключись до дрона." };
       const stallMs = timeout || 30000;   // no-PROGRESS window (a fresh request/item resets it)
       const HARD_CAP = 600000;            // absolute ceiling (10 min) — safety net only
-      const REQ_WAIT = 1000;              // how long to wait each round for the next request
-      const RESEND_GAP = 1000;            // min gap between proactive re-sends (pace the narrow uplink)
+      const REQ_WAIT = 300;               // idle poll only; a real request wakes _recv instantly, so shorter = faster loss recovery, zero extra uplink
+      const RESEND_GAP = 500;             // faster re-send of a lost item (ArduPilot tolerates the duplicate); still > ELRS round-trip
+      const INAV_RESTART_GAP = 2500;      // INAV: gap before a safe re-COUNT restart (see loop below)
       return this._withBusy(async () => {
         const { ts, tc } = this._targets();
         this._pauseStreams();          // clear the link so the mission handshake gets through
         const n = items.length;
-        const sendCount = () => this._send("MISSION_COUNT", { target_system: ts, target_component: tc, count: n, mission_type: 0 });
+        // INAV hard-rejects out-of-sequence items and never retransmits its own
+        // request, so its stall-recovery must differ from ArduPilot (see loop).
+        const isInav = this._tlm.autopilot != null && this._tlm.autopilot !== 3;
+        let _countN = 0;
+        const sendCount = () => { _countN++; this._log("mission: COUNT " + n + " sent (#" + _countN + ")"); this._send("MISSION_COUNT", { target_system: ts, target_component: tc, count: n, mission_type: 0 }); };
         const sendItem = (seq, v1) => {
           const it = items[seq];
           const f = {
@@ -453,7 +468,7 @@
         sendCount();
         const sent = new Set();
         const hardDeadline = Date.now() + HARD_CAP;
-        let lastProgress = Date.now(), lastCount = Date.now(), lastResend = 0, gotReq = false, lastReqSeq = -1, lastReqV1 = false;
+        let lastProgress = Date.now(), lastCount = Date.now(), lastResend = 0, gotReq = false, lastReqSeq = -1, lastReqV1 = false, inavRestarts = 0;
         while (sent.size < n && Date.now() < hardDeadline) {
           if (Date.now() - lastProgress > stallMs)
             return { ok: false, error: sent.size === 0
@@ -466,21 +481,34 @@
               // Before the vehicle first engages: re-announce COUNT. It RESETS the
               // vehicle's mission receiver, so throttle to safely exceed the ELRS
               // round-trip (an aggressive resend keeps resetting an in-flight transfer).
-              if (Date.now() - lastCount > 4000) { sendCount(); lastCount = Date.now(); }
+              if (Date.now() - lastCount > 2000) { sendCount(); lastCount = Date.now(); }
+            } else if (isInav) {
+              // INAV HARD-REJECTS any out-of-sequence item (MAV_MISSION_INVALID_SEQUENCE)
+              // and never retransmits its own request. Re-sending the last item after INAV
+              // advanced (its request for the NEXT item was lost) is seen as out-of-order
+              // and POISONS the whole upload. The only INAV-safe recovery is to re-announce
+              // COUNT — that resets INAV's sequence to 0 and it re-requests cleanly. Longer
+              // gap than a per-item round-trip so a merely-slow transfer isn't reset.
+              if (Date.now() - lastResend > INAV_RESTART_GAP) {
+                if (++inavRestarts > 12)
+                  return { ok: false, error: `INAV скидає заливку через втрати в каналі (дійшло ${sent.size}/${n}). Канал backpack заслабкий для цієї місії — спробуй коротшу місію, ближче/кращу антену або USB-кабель.` };
+                sendCount(); lastResend = Date.now();
+                gotReq = false; lastReqSeq = -1; sent.clear();
+                if (onProgress) { try { onProgress(0, n); } catch (e) {} }
+              }
             } else if (lastReqSeq >= 0 && Date.now() - lastResend > RESEND_GAP) {
-              // Handshake started but went quiet: RE-SEND the last requested item. If OUR
-              // item was lost the vehicle finally gets it; if the vehicle's REQUEST was lost,
-              // the duplicate makes it re-emit its request → the transfer un-sticks. Unlike
-              // MISSION_COUNT this does NOT reset the receiver, so it's safe to repeat. This
-              // is the fix for uploads stalling mid-way over a lossy WiFi/ELRS backpack link.
+              // ArduPilot tolerates a duplicate/old item (ignores it) and re-emits its
+              // request, so re-sending the last requested item safely un-sticks a stall.
               sendItem(lastReqSeq, lastReqV1); lastResend = Date.now();
             }
             continue;
           }
           if (m.name === "MISSION_ACK") {
+            this._log("mission: ACK type " + m.fields.type);
             if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
             return { ok: false, error: this._rejectMission(m.fields.type) };
           }
+          if (!gotReq) this._log("mission: first REQUEST (" + m.name + " seq " + m.fields.seq + ")");
           gotReq = true;   // the vehicle is engaged — stop re-announcing COUNT
           const seq = m.fields.seq;
           if (seq < 0 || seq >= n) continue;
@@ -508,8 +536,12 @@
             if (seq >= 0 && seq < n) { lastReqSeq = seq; lastReqV1 = v1; sendItem(seq, v1); lastResend = Date.now(); }
             continue;
           }
-          // Silence: re-send the last item to prompt the ACK (safe, non-resetting).
-          if (lastReqSeq >= 0 && Date.now() - lastResend > RESEND_GAP) { sendItem(lastReqSeq, lastReqV1); lastResend = Date.now(); }
+          // Silence while awaiting the final ACK. ArduPilot: nudge by re-sending the
+          // last item (it tolerates the duplicate). INAV: that item arrives AFTER it has
+          // completed → out-of-sequence → MAV_MISSION_INVALID_SEQUENCE, rejecting a mission
+          // it actually stored. So for INAV just wait; a lost ACK still yields success-with-
+          // warning below (every item was delivered).
+          if (!isInav && lastReqSeq >= 0 && Date.now() - lastResend > RESEND_GAP) { sendItem(lastReqSeq, lastReqV1); lastResend = Date.now(); }
         }
         if (sent.size >= n) return { ok: true, count: n, warning: "Усі точки надіслано, але фінального ACK не отримано." };
         return { ok: false, error: "Таймаут заливки місії (дрон не підтвердив)." };
@@ -526,13 +558,15 @@
         // Re-announce REQUEST_LIST until the vehicle replies with the count — the
         // first request is easily lost over a lossy ELRS link (a one-shot request
         // made "Що залито в дрон" / verify fail intermittently over the backpack).
-        let cm = null;
+        let cm = null, _rlN = 0;
         const listDeadline = Date.now() + Math.max(stallMs, 8000);
         while (!cm && Date.now() < listDeadline) {
+          _rlN++; this._log("mission read: REQUEST_LIST sent (#" + _rlN + ")");
           this._send("MISSION_REQUEST_LIST", { target_system: ts, target_component: tc, mission_type: 0 });
           cm = await this._recv(["MISSION_COUNT"], 2000);
         }
         if (!cm) return { ok: false, error: "Дрон не повернув кількість пунктів." };
+        this._log("mission read: got COUNT " + cm.fields.count);
         const n = cm.fields.count;
         const items = {};
         let seq = 0, lastReq = 0, lastProgress = Date.now();
@@ -567,6 +601,9 @@
       const dl = await this.downloadMission(timeout);
       if (!dl.ok) return { ok: false, verified: false, error: dl.error, count_expected: expected.length };
       const actual = dl.items;
+      // INAV has no home slot: seq 0 IS the first waypoint, so verify its coords too
+      // (ArduPilot's seq 0 is home and is intentionally skipped below).
+      const isInav = this._tlm.autopilot != null && this._tlm.autopilot !== 3;
       const mismatches = [];
       if (actual.length !== expected.length) mismatches.push(`кількість: очікувалось ${expected.length}, у дроні ${actual.length}`);
       const equiv = [new Set([3, 6]), new Set([0, 5])];
@@ -575,7 +612,7 @@
         if (!e) { mismatches.push(`#${i}: зайвий пункт у дроні (cmd ${a.command})`); continue; }
         if (!a) { mismatches.push(`#${i}: пункт відсутній у дроні`); continue; }
         if (e.command !== a.command) { mismatches.push(`#${e.seq}: команда ${e.command}≠${a.command}`); continue; }
-        if ((e.command === CMD_WAYPOINT || e.command === CMD_TAKEOFF) && e.seq !== 0) {
+        if ((e.command === CMD_WAYPOINT || e.command === CMD_TAKEOFF) && (isInav || e.seq !== 0)) {
           const sameFrame = e.frame === a.frame || equiv.some((g) => g.has(e.frame) && g.has(a.frame));
           if (!sameFrame) { mismatches.push(`#${e.seq}: рамка висоти ${e.frame}≠${a.frame}`); continue; }
           const ex = Math.round(e.lat * 1e7), ey = Math.round(e.lon * 1e7);
@@ -590,6 +627,33 @@
       }
       const verified = actual.length === expected.length && mismatches.length === 0;
       return { ok: true, verified, count_expected: expected.length, count_actual: actual.length, mismatches: mismatches.slice(0, 10) };
+    }
+
+    // ---- fast verify: just confirm the stored COUNT (one round-trip, any mission size) ----
+    // The upload already returned ok only after MISSION_ACK type 0 (vehicle STORED the
+    // mission) and every frame is CRC-gated, so a re-download of every item is redundant
+    // on a narrow ELRS link (it ~doubles the time). Count-only keeps a real safety check
+    // (wrong total = failed upload) at a fixed 1-round-trip cost. Use verifyMission() for
+    // byte-for-byte when you want it.
+    async verifyMissionCount(expectedN, timeout) {
+      if (!this._t) return { ok: false, verified: false, error: "Немає звʼязку.", count_expected: expectedN };
+      const stallMs = timeout || 15000;
+      return this._withBusy(async () => {
+        const { ts, tc } = this._targets();
+        this._pauseStreams();
+        let cm = null;
+        const deadline = Date.now() + Math.max(stallMs, 8000);
+        while (!cm && Date.now() < deadline) {
+          this._send("MISSION_REQUEST_LIST", { target_system: ts, target_component: tc, mission_type: 0 });
+          cm = await this._recv(["MISSION_COUNT"], 2000);
+        }
+        if (!cm) return { ok: false, verified: false, error: "Дрон не повернув кількість пунктів.", count_expected: expectedN };
+        this._send("MISSION_ACK", { target_system: ts, target_component: tc, type: 0, mission_type: 0 });
+        const actual = cm.fields.count;
+        const verified = actual === expectedN;
+        return { ok: true, verified, count_expected: expectedN, count_actual: actual,
+          mismatches: verified ? [] : [`кількість: очікувалось ${expectedN}, у дроні ${actual}`] };
+      });
     }
 
     // ---- flight commands ----

@@ -32,6 +32,9 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private var serial: SerialBridge? = null
     private var udp: UdpBridge? = null
+    private var ble: BleBridge? = null
+    // A BLE scan awaiting the runtime Bluetooth-permission result (API 31+ SCAN/CONNECT).
+    private var pendingBlePerm: ((Boolean) -> Unit)? = null
     // A WebView geolocation request awaiting the OS location-permission result.
     private var pendingGeo: Pair<String?, GeolocationPermissions.Callback?>? = null
     // A WebView <input type=file> click awaiting the SAF document-picker result.
@@ -140,7 +143,10 @@ class MainActivity : Activity() {
         webView.addJavascriptInterface(serial!!, "AndroidSerial")
         udp = UdpBridge(this, webView)                 // MAVLink over WiFi (ELRS backpack)
         webView.addJavascriptInterface(udp!!, "AndroidUdp")
-        webView.addJavascriptInterface(LogBridge(webView), "AndroidLog")  // diagnostic-log upload
+        ble = BleBridge(this, webView)                 // MAVLink over Bluetooth LE (SpeedyBee-style)
+        webView.addJavascriptInterface(ble!!, "AndroidBle")
+        webView.addJavascriptInterface(LogBridge(this, webView), "AndroidLog")  // diagnostic-log upload (store-and-forward)
+        webView.addJavascriptInterface(PhotoBridge(webView), "AndroidPhoto")  // photo-import upload
         // In-app self-update (download + install an APK): only for the self-distributed
         // builds. The Google Play build (SELF_UPDATE=false) omits it — Play forbids apps
         // installing APKs, and the REQUEST_INSTALL_PACKAGES permission is stripped too.
@@ -223,6 +229,27 @@ class MainActivity : Activity() {
 
     companion object { private const val REQ_FILE = 42 }
 
+    // Runtime Bluetooth permissions for the BLE bridge. On API 31+ scanning/connecting
+    // needs BLUETOOTH_SCAN + BLUETOOTH_CONNECT granted at runtime; before that, BLE
+    // scanning rides on ACCESS_FINE_LOCATION (already requested at startup). The
+    // WebView itself can't prompt — the Activity does, and the bridge retries after.
+    fun requestBlePermissions(cb: (Boolean) -> Unit) {
+        // Callable from the WebView's JS binder thread — permission APIs want the UI thread.
+        runOnUiThread {
+            val wanted = if (android.os.Build.VERSION.SDK_INT >= 31)
+                arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+            else
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            if (wanted.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+                cb(true)
+            } else {
+                pendingBlePerm = cb
+                try { requestPermissions(wanted, 9) }
+                catch (e: Exception) { pendingBlePerm = null; cb(false) }
+            }
+        }
+    }
+
     // Deliver the OS location-permission result to a WebView geolocation request that
     // was waiting on it (the «📍 Мій GPS» on-demand prompt).
     override fun onRequestPermissionsResult(
@@ -234,11 +261,17 @@ class MainActivity : Activity() {
             pendingGeo?.let { (origin, cb) -> cb?.invoke(origin, ok, false) }
             pendingGeo = null
         }
+        if (requestCode == 9) {
+            val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            pendingBlePerm?.invoke(ok)
+            pendingBlePerm = null
+        }
     }
 
     override fun onDestroy() {
         try { serial?.close() } catch (_: Exception) {}
         try { udp?.close() } catch (_: Exception) {}
+        try { ble?.close() } catch (_: Exception) {}
         super.onDestroy()
     }
 }

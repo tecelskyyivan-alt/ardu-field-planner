@@ -1,6 +1,9 @@
 package com.fmp.planner
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
@@ -60,15 +63,35 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
     private var port = 14550
     private val broadcast: InetAddress = InetAddress.getByName("255.255.255.255")
     private var subnetBroadcasts: List<InetAddress> = emptyList()
+    // Well-known GCS/telemetry-bridge addresses to ALSO unicast the GCS heartbeat
+    // to before we've learned the peer. Some bridges only start streaming after a
+    // UNICAST packet at their own IP (a subnet broadcast isn't always enough).
+    //   10.0.0.1  — ExpressLRS TX Backpack AP (documented) in MAVLink mode.
+    //   192.168.4.1 — common ESP-based backpack/SoftAP default.
+    private val knownPeers: List<InetAddress> = listOf(
+        InetAddress.getByName("10.0.0.1"),
+        InetAddress.getByName("192.168.4.1"),
+    )
+    // The phone's OWN addresses. Our GCS-heartbeat broadcast LOOPS BACK to our
+    // own listening socket on some networks/Android builds; without this filter
+    // the bridge "learns" ITSELF as the peer and then talks to itself forever —
+    // the backpack never hears the GCS (field log: «ПЕРШИЙ пакет від 10.0.0.100»
+    // where 10.0.0.100 was the phone). Never learn or count self-packets.
+    private var ownAddrs: Set<InetAddress> = emptySet()
+    @Volatile private var loggedSelfDrop = false
+    @Volatile private var rxDumped = 0        // how many raw packets we've hex-dumped (diag)
     private var mcast: WifiManager.MulticastLock? = null
 
     // Diagnostics
     @Volatile private var rxPackets = 0L
     @Volatile private var rxBytes = 0L
+    @Volatile private var txPackets = 0L
+    @Volatile private var txBytes = 0L
     @Volatile private var loggedFirstRx = false
     @Volatile private var loggedFirstTx = false
     @Volatile private var openedAt = 0L
     private var lastSummary = 0L
+    private var lastTxSummary = 0L
     private var idleStage = 0
 
     // ------------------------------------------------------------- diagnostics
@@ -84,6 +107,7 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
         close()
         port = if (p > 0) p else 14550
         rxPackets = 0L; rxBytes = 0L; loggedFirstRx = false; loggedFirstTx = false
+        txPackets = 0L; txBytes = 0L; lastTxSummary = 0L
         idleStage = 0; lastSummary = 0L
         openedAt = System.currentTimeMillis()
 
@@ -114,6 +138,28 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
             return err("Не вдалося відкрити UDP :$port — ${e.message}")
         }
 
+        // (2b) FORCE this socket to EGRESS via WiFi. An ELRS backpack AP has NO internet,
+        // so when mobile data is on, Android sends our uplink out the CELLULAR default
+        // network — the backpack never receives it (its stats show «Packets Uplink: 0 /
+        // GCS IP UNSET») even though downlink telemetry arrives fine over WiFi. Binding
+        // the socket to the WiFi Network makes uplink go out WiFi regardless of mobile data.
+        try {
+            val cm = ctx.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            var wifiNet: Network? = null
+            for (nw in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(nw) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) { wifiNet = nw; break }
+            }
+            if (wifiNet != null) {
+                wifiNet.bindSocket(socket)
+                dlog("сокет прив'язано до WiFi-мережі — uplink піде через WiFi навіть із увімкненими мобільними даними")
+            } else {
+                dlog("⚠ WiFi-мережу не знайдено для прив'язки — якщо ввімкнено мобільні дані, uplink може піти повз backpack; вимкни мобільні дані")
+            }
+        } catch (e: Exception) {
+            dlog("прив'язка до WiFi не вдалась (${e.message}) — як обхід вимкни мобільні дані на телефоні")
+        }
+
         // (3) Figure out where to send GCS heartbeats before we learn the peer.
         subnetBroadcasts = computeBroadcasts()
         val bcs = if (subnetBroadcasts.isEmpty()) "(жодного — тільки 255.255.255.255)"
@@ -142,6 +188,14 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
             } catch (e: Exception) {
                 if (socket === s && !s.isClosed) continue else break
             }
+            // Drop our own looped-back broadcasts BEFORE learning the peer.
+            if (pkt.address in ownAddrs) {
+                if (!loggedSelfDrop) {
+                    loggedSelfDrop = true
+                    dlog("ігнорую власний broadcast (${pkt.address?.hostAddress}) — чекаю пакети саме від backpack")
+                }
+                continue
+            }
             remote = pkt.address                     // learn who the backpack/FC is
             remotePort = pkt.port
             rxPackets++
@@ -149,6 +203,33 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
             if (!loggedFirstRx) {
                 loggedFirstRx = true
                 dlog("✓ ПЕРШИЙ пакет: ${pkt.length} байт від ${pkt.address?.hostAddress}:${pkt.port} — телефон ОТРИМУЄ дані")
+            }
+            // DIAG: dump the raw bytes of the first few packets + decode the MAVLink
+            // magic/msgid, so a non-parsing link ("no heartbeat" despite data) can be
+            // pinned down — is it the vehicle's telemetry or just the ELRS link's own?
+            if (rxDumped < 6 && pkt.length > 0) {
+                rxDumped++
+                val n = minOf(pkt.length, 40)
+                val hex = StringBuilder()
+                for (k in 0 until n) hex.append(String.format("%02x", pkt.data[k].toInt() and 0xff))
+                val b0 = pkt.data[0].toInt() and 0xff
+                val info = when (b0) {
+                    0xFD -> { // MAVLink2: magic,len,inc,cmp,seq,sys,cmp,msgid(3)
+                        val ln = pkt.data[1].toInt() and 0xff
+                        val sys = pkt.data[5].toInt() and 0xff
+                        val cmp = pkt.data[6].toInt() and 0xff
+                        val mid = (pkt.data[7].toInt() and 0xff) or ((pkt.data[8].toInt() and 0xff) shl 8) or ((pkt.data[9].toInt() and 0xff) shl 16)
+                        "MAVLink2 len=$ln sys=$sys comp=$cmp msgid=$mid"
+                    }
+                    0xFE -> {
+                        val ln = pkt.data[1].toInt() and 0xff
+                        val sys = pkt.data[3].toInt() and 0xff
+                        val mid = pkt.data[5].toInt() and 0xff
+                        "MAVLink1 len=$ln sys=$sys msgid=$mid"
+                    }
+                    else -> "НЕ MAVLink (перший байт 0x%02x)".format(b0)
+                }
+                dlog("пакет#$rxDumped [$info] hex=$hex")
             }
             val now = System.currentTimeMillis()
             if (now - lastSummary > 3000) {
@@ -189,15 +270,19 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
                 if (peer != null) {
                     if (!loggedFirstTx) { loggedFirstTx = true; dlog("tx→ peer ${peer.hostAddress}:$remotePort") }
                     s.send(DatagramPacket(bytes, bytes.size, peer, remotePort))
+                    txPackets++; txBytes += bytes.size
+                    val now = System.currentTimeMillis()
+                    if (now - lastTxSummary > 3000) { lastTxSummary = now; dlog("tx: $txPackets пакетів / $txBytes байт → ${peer.hostAddress}:$remotePort") }
                 } else {
                     // No peer yet: blast the GCS heartbeat at every subnet broadcast
-                    // (Android often drops the global 255.255.255.255) so the backpack
-                    // hears us and starts replying.
-                    val targets = if (subnetBroadcasts.isEmpty()) listOf(broadcast)
-                                  else subnetBroadcasts + broadcast
+                    // (Android often drops the global 255.255.255.255) AND unicast it
+                    // to the known bridge IPs (ELRS backpack 10.0.0.1 etc.) — some
+                    // backpacks only start replying after a unicast at their own IP.
+                    val targets = (if (subnetBroadcasts.isEmpty()) listOf(broadcast)
+                                   else subnetBroadcasts + broadcast) + knownPeers
                     if (!loggedFirstTx) {
                         loggedFirstTx = true
-                        dlog("tx→ broadcast ${targets.joinToString { it.hostAddress ?: "?" }}:$port (peer ще невідомий)")
+                        dlog("tx→ ${targets.joinToString { it.hostAddress ?: "?" }}:$port (peer ще невідомий)")
                     }
                     for (tgt in targets) {
                         try { s.send(DatagramPacket(bytes, bytes.size, tgt, port)) } catch (e: Exception) {}
@@ -227,15 +312,19 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
         mcast = null
     }
 
-    /** Every IPv4 interface's directed broadcast address (e.g. 192.168.4.255). */
+    /** Every IPv4 interface's directed broadcast address (e.g. 192.168.4.255).
+     *  Also records the phone's own IPv4s so recvLoop can drop looped-back
+     *  self-broadcasts (see ownAddrs above). */
     private fun computeBroadcasts(): List<InetAddress> {
         val outs = ArrayList<InetAddress>()
+        val own = HashSet<InetAddress>()
         try {
             val ifaces = NetworkInterface.getNetworkInterfaces() ?: return outs
             for (nif in ifaces) {
                 try {
                     if (!nif.isUp || nif.isLoopback) continue
                     for (ia in nif.interfaceAddresses) {
+                        if (ia.address is Inet4Address) own.add(ia.address)
                         val b = ia.broadcast ?: continue
                         if (ia.address is Inet4Address) {
                             outs.add(b)
@@ -245,6 +334,8 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
                 } catch (e: Exception) { /* skip this iface */ }
             }
         } catch (e: Exception) { dlog("перелік інтерфейсів: ${e.message}") }
+        ownAddrs = own
+        loggedSelfDrop = false
         return outs
     }
 

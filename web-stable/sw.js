@@ -13,16 +13,16 @@
  *     fully offline even if the user never built one while online.
  *   • /api/* , /downloads/* and non-GET requests are never cached.
  */
-const SHELL_CACHE = "fmp-shell-v71";         // bump this on every app deploy
+const SHELL_CACHE = "fmp-shell-v105";         // bump this on every app deploy
 const PYO_VERSION = "0.26.4";                // == pyodide-lock.json info.version
 const PYO_CACHE = "fmp-pyodide-" + PYO_VERSION;
 
 // Mutable app code (incl. the backend engine modules the Pyodide worker mounts).
 const SHELL = [
-  "./", "index.html", "app.js", "sw-register.js", "style.css", "manifest.json",
+  "./", "index.html", "app.js", "vendor/clipper.min.js", "sw-register.js", "style.css", "manifest.json",
   "icon-192.png", "icon-512.png",
   "engine.js", "engine-worker.js", "mav/mavlink.js", "mav/transport.js", "mav/link.js", "mav/specs.json",
-  "engine/__init__.py", "engine/geo.py", "engine/coverage.py", "engine/mission.py", "engine/api.py", "engine/flight_calib.py",
+  "engine/__init__.py", "engine/geo.py", "engine/coverage.py", "engine/plane_turns.py", "engine/mission.py", "engine/api.py", "engine/flight_calib.py",
   "lib/leaflet.css", "lib/leaflet.js", "lib/leaflet.draw.css", "lib/leaflet.draw.js",
   "lib/images/marker-icon.png", "lib/images/marker-icon-2x.png", "lib/images/marker-shadow.png",
   "lib/images/layers.png", "lib/images/layers-2x.png",

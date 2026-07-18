@@ -363,10 +363,11 @@ button.active { background: var(--accent); color: #fff; border-color: var(--acce
   border-bottom:14px solid rgba(63,128,255,0.85); transform-origin:50% 100%; }
 
 /* Language toggle (UA/EN) in the header */
-.lang-toggle {
-  font: inherit; font-size: 11px; font-weight: 700; line-height: 1;
-  padding: 2px 7px; margin-left: 4px; border-radius: 999px; cursor: pointer;
-  color: var(--fg, #cfe3f5); background: rgba(255,255,255,.08);
-  border: 1px solid rgba(255,255,255,.18); vertical-align: middle;
-}
+.lang-toggle { font: inherit; font-size: 11px; font-weight: 700; line-height: 1; padding: 2px 7px; margin-left: 4px; border-radius: 999px; cursor: pointer; color: var(--fg, #cfe3f5); background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); vertical-align: middle; }
 .lang-toggle:hover { background: rgba(255,255,255,.16); }
+
+
+/* «Стежити за дроном» toolbar button — matches «Моє місце» */
+.follow-ctl a { display: flex; align-items: center; justify-content: center; }
+.follow-ctl a .ic { width: 18px; height: 18px; }
+.follow-ctl a.active { background: var(--accent); color: #fff; }

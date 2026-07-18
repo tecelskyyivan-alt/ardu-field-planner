@@ -64,6 +64,10 @@ MAVLink** (кабель / WiFi-ELRS) + жива телеметрія.
     mission upload are hardened for the narrow/lossy ELRS uplink (proactive re-send,
     ArduPilot `MISSION_ITEM_INT` **and** INAV `MISSION_ITEM` dialects).
 - 💾 **Export** — `.waypoints` (QGC WPL 110), `.plan`, geofence `.plan` / `.fence`, `.geojson`; **KML** import/export.
+- 🗺️ **Multi-field KML import** — load a whole GIS field database (named parcels with
+  cut-outs & areas); tap a contour on the map to pick it, or select several adjacent
+  parcels and **merge** them into one field (gaps/field-roads closed); recent imports
+  kept for one-tap reload.
 - 📁 **Projects** — field + parameters + cut-outs; auto-restore of the last field & settings.
 - 🌍 **UA / EN** language toggle (persisted).
 

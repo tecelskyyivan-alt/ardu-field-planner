@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.58";
+  const APP_VERSION = "2.5.71";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -292,6 +292,35 @@
     },
   });
   map.addControl(new LocateControl());
+
+  // «Стежити за дроном» toolbar button next to «Моє місце» (moved off the Flight
+  // panel). Drives the hidden #mav-follow checkbox, so its wiring (mavFollow +
+  // session persistence) is unchanged. `.active` = accent highlight when following.
+  let _followBtn = null;
+  const FollowControl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd: function () {
+      const div = L.DomUtil.create("div", "leaflet-bar leaflet-control follow-ctl");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.title = "Стежити за дроном"; a.setAttribute("role", "button");
+      a.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2"/></svg>';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); toggleFollow(); });
+      _followBtn = a;
+      return div;
+    },
+  });
+  map.addControl(new FollowControl());
+  function syncFollowBtn() { if (_followBtn) _followBtn.classList.toggle("active", !!mavFollow); }
+  function setFollow(v) {
+    const cb = $("mav-follow");
+    if (cb) { if (cb.checked !== !!v) { cb.checked = !!v; cb.dispatchEvent(new Event("change")); } }
+    else { mavFollow = !!v; }
+    syncFollowBtn();
+  }
+  function toggleFollow() { setFollow(!mavFollow); }
+  // User grabs the map to look around → stop following (re-enable via the button).
+  map.on("dragstart", function () { if (mavFollow) setFollow(false); });
 
   // ---- Elevation map: highest / lowest point of the field contour -------------
   // Selecting «Карта висот» shows a relief basemap; if a field is drawn it queries
@@ -862,6 +891,10 @@
 
   function setMsg(text, kind) {
     text = t(text);                            // i18n: translate whole-string messages (EN)
+    // Auto-capture EVERY red (error) message in the diagnostic log with its cause
+    // (the text carries it; the lines just above give the context) and flag a new
+    // problem so the log auto-uploads — the operator never relays a red one by hand.
+    if (kind === "error" && text) { appLog("[ЧЕРВОНЕ] " + text); _errSinceUpload++; }
     const el = $("msg");
     if (el) {                                  // persistent status line (bottom of panel)
       el.textContent = text || "";
@@ -1007,6 +1040,10 @@
       alt: parseFloat($("alt").value),
       speed: parseFloat($("speed").value),
       rtl: $("rtl").checked,
+      // Fixed-wing (auto by connected FC type): engine replaces sharp pass-end U-turns
+      // with contained arcs (R=spacing/2, passes shortened). THIS is the param the
+      // engine reads — plane_turn in collectParams() was save/load only, not the build.
+      plane_turn: !!($("round-turn") && $("round-turn").checked && isPlaneVehicle()),
       exclusions: collectExclusions(),
       // Spray-footprint overlay (swath + double-spray): only on a real build, and only
       // if the toggle is on — keeps live angle drags fast (no buffer geometry then).
@@ -1080,19 +1117,29 @@
     // High-contrast over GREEN farmland satellite: CYAN swath (a green fill on a green
     // field was invisible), VIVID RED double-spray. Higher opacity so it reads on a
     // phone in daylight.
-    if (res.coverage_geo && res.coverage_geo.length) {
-      coverageLayer = L.featureGroup(res.coverage_geo.map((ring) =>
-        L.polygon(ring.map((p) => [p.lat, p.lng]), {
-          color: "#0077b6", weight: 1.5, opacity: 0.9,
-          fillColor: "#00c2ff", fillOpacity: 0.35, interactive: false,
-        }))).addTo(map).bindTooltip("Площа внесення (ширина смуги = крок)");
-    }
-    if (res.overlap_geo && res.overlap_geo.length) {
-      overlapLayer = L.featureGroup(res.overlap_geo.map((ring) =>
-        L.polygon(ring.map((p) => [p.lat, p.lng]), {
-          color: "#c0392b", weight: 0.5, opacity: 0.55,
-          fillColor: "#ff3b30", fillOpacity: 0.3, interactive: false,
-        }))).addTo(map).bindTooltip("Накладання — подвійне внесення");
+    // Spray overlays (N swath + M double-spray polygons) are the heaviest paint.
+    // Defer them a frame so the route line + markers + stats appear FIRST; they fill
+    // in after and the route is lifted back on top. Guard drops a superseded build.
+    if ((res.coverage_geo && res.coverage_geo.length) || (res.overlap_geo && res.overlap_geo.length)) {
+      setTimeout(() => {
+        if (myToken !== buildSeq) return;
+        if (res.coverage_geo && res.coverage_geo.length) {
+          coverageLayer = L.featureGroup(res.coverage_geo.map((ring) =>
+            L.polygon(ring.map((p) => [p.lat, p.lng]), {
+              color: "#0077b6", weight: 1.5, opacity: 0.9,
+              fillColor: "#00c2ff", fillOpacity: 0.35, interactive: false,
+            }))).addTo(map).bindTooltip("Площа внесення (ширина смуги = крок)");
+        }
+        if (res.overlap_geo && res.overlap_geo.length) {
+          overlapLayer = L.featureGroup(res.overlap_geo.map((ring) =>
+            L.polygon(ring.map((p) => [p.lat, p.lng]), {
+              color: "#c0392b", weight: 0.5, opacity: 0.55,
+              fillColor: "#ff3b30", fillOpacity: 0.3, interactive: false,
+            }))).addTo(map).bindTooltip("Накладання — подвійне внесення");
+        }
+        if (routeLayer && routeLayer.bringToFront) routeLayer.bringToFront();
+        if (routeMarkers && routeMarkers.bringToFront) routeMarkers.bringToFront();
+      }, 0);
     }
 
     const pts = res.waypoints.map((p) => [p.lat, p.lng]);
@@ -1157,7 +1204,7 @@
         ? `Кут ${res.angle_used}° — маршрут оновлено наживо.`
         : "Маршрут готовий. Можна експортувати маршрут або контур.", "ok");
     }
-    saveLastRoute(res);            // повна сесія: маршрут переживає закриття додатку
+    setTimeout(() => saveLastRoute(res), 0);   // #8: JSON.stringify+localStorage off the paint frame
   }
 
   function row(label, value) {
@@ -1646,6 +1693,31 @@
       rtl: $("rtl").checked,
       viz: $("viz-coverage") ? $("viz-coverage").checked : false,
       round_turn: $("round-turn") ? $("round-turn").checked : false,
+      // Fixed-wing (auto by connected FC type = fixed_wing): the engine replaces sharp
+      // pass-end U-turns with contained arcs (R=spacing/2, passes shortened). Copter
+      // keeps the WP_RADIUS round-turn. Needs the round-turn toggle on + a plane heartbeat.
+      plane_turn: !!($("round-turn") && $("round-turn").checked && isPlaneVehicle()),
+    };
+  }
+  // A plane is a plane even if you plan the route BEFORE connecting: remember the
+  // last-seen fixed-wing so an offline build still adds the arcs.
+  function isPlaneVehicle() {
+    if (lastStatus && lastStatus.vehicle_type === 1) return true;
+    try { return localStorage.getItem("fmp_is_plane") === "1"; } catch (e) { return false; }
+  }
+  // Autopilot params so a fixed-wing FLIES the planned R=spacing/2 arcs instead of
+  // cutting them (mirror of engine plane_turn_params): cap cruise so min turn radius
+  // V²/(g·tanφ) ≤ R; L1 look-ahead (NAVL1·V/π) ≈ 0.6·R to track the arc; small WP_RADIUS.
+  function planeTurnParams(spacing, cruise) {
+    const R = Math.max(spacing / 2, 1), g = 9.81, bank = 45;
+    const vMax = Math.sqrt(0.4 * g * R * Math.tan(bank * Math.PI / 180));
+    const V = Math.max(1, Math.min(cruise || 12, vMax));
+    const navl1 = Math.max(6, Math.min(20, 0.6 * Math.PI * R / V));
+    return {
+      AIRSPEED_CRUISE: Math.round(V * 10) / 10,
+      ROLL_LIMIT_DEG: bank,
+      NAVL1_PERIOD: Math.round(navl1 * 10) / 10,
+      WP_RADIUS: Math.max(3, Math.round(R / 8)),
     };
   }
   function applyParams(p) {
@@ -1897,49 +1969,249 @@
     await downloadBlob("field.kml", "application/vnd.google-earth.kml+xml", buildKml(field, collectExclusions()));
     setMsg("Контур експортовано в .kml.", "ok");
   }
-  function parseKmlCoords(text) {       // "lon,lat[,alt] ..." -> [{lat,lng}]
-    return (text || "").trim().split(/\s+/).map((tok) => {
-      const a = tok.split(",");
-      return { lng: parseFloat(a[0]), lat: parseFloat(a[1]) };
-    }).filter((p) => isFinite(p.lat) && isFinite(p.lng));
+  // Real-world KMLs vary a lot — namespace prefixes (<kml:Polygon>), LineString-
+  // traced fields, "lon, lat" with spaces, a UTF-8 BOM. Parse defensively into a
+  // LIST of named contours so a multi-field KML can be browsed on the map like the
+  // saved-fields overview, and any subset unioned into one field.
+  function _kmlTags(root, name) {                 // namespace-agnostic element lookup
+    let els = [];
+    if (root.getElementsByTagNameNS) els = Array.prototype.slice.call(root.getElementsByTagNameNS("*", name));
+    if (!els.length) els = Array.prototype.slice.call(root.getElementsByTagName(name));
+    return els;
   }
-  function importKml(text) {
-    const doc = new DOMParser().parseFromString(text, "application/xml");
-    const polys = doc.getElementsByTagName("Polygon");
-    if (!polys.length) { setMsg("У KML немає полігонів (Polygon).", "error"); return; }
-    const outer = polys[0].getElementsByTagName("outerBoundaryIs")[0];
-    const oc = outer && outer.getElementsByTagName("coordinates")[0];
-    const fieldPts = oc ? parseKmlCoords(oc.textContent) : [];
-    if (fieldPts.length < 3) { setMsg("KML без коректного контуру поля.", "error"); return; }
-    exclusionItems.clearLayers();
-    removeByKind("split");          // drop the previous field's split lines (bug-hunt #1)
-    if (sectorsLayer) { map.removeLayer(sectorsLayer); sectorsLayer = null; }
-    adoptField(L.polygon(fieldPts.map((p) => [p.lat, p.lng]), { color: "#2d7ff9", weight: 2 }));
-    let holes = 0;
-    const addRingsFrom = (el) => {
-      const cs = el.getElementsByTagName("coordinates");
-      for (let i = 0; i < cs.length; i++) {
-        const pts = parseKmlCoords(cs[i].textContent);
-        if (pts.length >= 3) { addExclusionLayer(L.polygon(pts.map((p) => [p.lat, p.lng]))); holes++; }
+  function _kmlCoords(text) {          // "lon,lat[,alt] ..." (tolerating "lon, lat") -> [{lat,lng}]
+    if (!text) return [];
+    return String(text).replace(/\s*,\s*/g, ",").trim().split(/\s+/).map((tok) => {
+      const a = tok.split(","); return { lng: parseFloat(a[0]), lat: parseFloat(a[1]) };
+    }).filter((p) => isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180);
+  }
+  // KML text -> { ok, error, contours:[{ name, ring:[{lat,lng}], holes:[[{lat,lng}]] }] }
+  function parseKmlContours(text) {
+    const s = String(text || "").replace(/^﻿/, "").replace(/^\s+/, "");   // strip BOM + leading WS
+    const doc = new DOMParser().parseFromString(s, "application/xml");
+    if (_kmlTags(doc, "parsererror").length) return { ok: false, error: "Файл не є коректним KML/XML (можливо, це KMZ-архів — розпакуй у .kml)." };
+    const out = [];
+    const pms = _kmlTags(doc, "Placemark");
+    const scopes = pms.length ? pms : [doc];
+    scopes.forEach((pm) => {
+      const nm = ((_kmlTags(pm, "name")[0] || {}).textContent || "").trim();
+      const polys = _kmlTags(pm, "Polygon");
+      if (polys.length) {
+        polys.forEach((poly) => {
+          const outerEl = _kmlTags(poly, "outerBoundaryIs")[0];
+          let oc = outerEl ? _kmlTags(outerEl, "coordinates")[0] : null;
+          if (!oc) oc = _kmlTags(poly, "coordinates")[0];
+          const ring = oc ? _kmlCoords(oc.textContent) : [];
+          if (ring.length < 3) return;
+          const holes = [];
+          _kmlTags(poly, "innerBoundaryIs").forEach((inr) =>
+            _kmlTags(inr, "coordinates").forEach((c) => { const h = _kmlCoords(c.textContent); if (h.length >= 3) holes.push(h); }));
+          out.push({ name: nm, ring: ring, holes: holes });
+        });
+      } else {                          // no Polygon → accept a traced LineString / LinearRing
+        _kmlTags(pm, "LineString").concat(_kmlTags(pm, "LinearRing")).forEach((ln) => {
+          const c = _kmlTags(ln, "coordinates")[0];
+          const ring = c ? _kmlCoords(c.textContent) : [];
+          if (ring.length >= 3) out.push({ name: nm, ring: ring, holes: [] });
+        });
       }
-    };
-    // inner rings of the field polygon = holes; any further <Polygon> = exclusions.
-    const inners = polys[0].getElementsByTagName("innerBoundaryIs");
-    for (let i = 0; i < inners.length; i++) addRingsFrom(inners[i]);
-    for (let k = 1; k < polys.length; k++) addRingsFrom(polys[k]);
-    clearRoute();
-    setMsg(`Імпортовано контур із .kml${holes ? ` (+${holes} вирізів)` : ""}.`, "ok");
+    });
+    if (!out.length) return { ok: false, error: "У KML не знайдено контуру (Polygon/LineString)." };
+    out.forEach((c, i) => { if (!c.name) c.name = "Контур " + (i + 1); });
+    return { ok: true, contours: out };
   }
+  function _ptInRing(pt, ring) {         // ray-cast even-odd test (for union hole classification)
+    let inside = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+      if (((yi > pt.lat) !== (yj > pt.lat)) && (pt.lng < (xj - xi) * (pt.lat - yi) / (yj - yi) + xi)) inside = !inside;
+    } return inside;
+  }
+  function _haOf(ring) { try { return L.GeometryUtil.geodesicArea(ring.map((p) => L.latLng(p.lat, p.lng))) / 1e4; } catch (e) { return 0; } }
+  // Merge several contours into ONE field via a morphological CLOSE (offset out →
+  // union → offset in) so small gaps — the roads/paths between adjacent fields —
+  // get filled and the fields become one continuous boundary. Worked in local metres
+  // so the gap distance is real. -> { ok, outers:[[{lat,lng}]], holes:[[{lat,lng}]] }
+  function unionContours(list) {
+    const C = window.ClipperLib;
+    if (!C) return { ok: false, error: "Модуль об'єднання недоступний." };
+    let la = 0, lo = 0, n = 0;
+    list.forEach((c) => c.ring.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
+    if (!n) return { ok: false, error: "Порожньо." };
+    la /= n; lo /= n;
+    const mlat = 111320, mlng = (111320 * Math.cos(la * Math.PI / 180)) || 1;
+    const SC = 100, GAP = 20, D = GAP / 2;              // fill gaps (field roads) up to GAP metres
+    const toClip = (ring) => ring.map((p) => ({ X: Math.round((p.lng - lo) * mlng * SC), Y: Math.round((p.lat - la) * mlat * SC) }));
+    const toLL = (path) => path.map((pt) => ({ lng: lo + pt.X / SC / mlng, lat: la + pt.Y / SC / mlat }));
+    const co = new C.ClipperOffset(2, 0.25 * SC);
+    list.forEach((c) => co.AddPath(toClip(c.ring), C.JoinType.jtMiter, C.EndType.etClosedPolygon));
+    let outP = new C.Paths(); co.Execute(outP, D * SC);             // 1) grow each field by D
+    const cl = new C.Clipper(); cl.AddPaths(outP, C.PolyType.ptSubject, true);
+    let uni = new C.Paths(); cl.Execute(C.ClipType.ctUnion, uni, C.PolyFillType.pftNonZero, C.PolyFillType.pftNonZero);  // 2) union
+    const co2 = new C.ClipperOffset(2, 0.25 * SC); co2.AddPaths(uni, C.JoinType.jtMiter, C.EndType.etClosedPolygon);
+    let fin = new C.Paths(); co2.Execute(fin, -D * SC);             // 3) shrink back by D
+    if (!fin.length) return { ok: false, error: "Порожньо." };
+    const outers = [], holes = [];
+    fin.forEach((path) => { if (path.length >= 3) (C.Clipper.Area(path) > 0 ? outers : holes).push(toLL(path)); });
+    list.forEach((c) => (c.holes || []).forEach((h) => { if (h.length >= 3) holes.push(h.slice()); }));  // keep exclusions
+    return { ok: true, outers: outers, holes: holes };
+  }
+  // Adopt one parsed contour as the active field (+ its inner rings as exclusions).
+  function adoptContour(c) {
+    exclusionItems.clearLayers();
+    removeByKind("split");          // drop the previous field's split lines
+    if (sectorsLayer) { map.removeLayer(sectorsLayer); sectorsLayer = null; }
+    adoptField(L.polygon(c.ring.map((p) => [p.lat, p.lng]), { color: "#2d7ff9", weight: 2 }));
+    (c.holes || []).forEach((h) => { if (h.length >= 3) addExclusionLayer(L.polygon(h.map((p) => [p.lat, p.lng]))); });
+    clearRoute();
+  }
+  // Multi-contour browse overlay (mirrors the saved-fields overview): draw every
+  // imported contour, tap one to work with it, or 🔗 to union a contiguous subset.
+  let importPickLayer = null, importPickBtn = null, importPickShowLbl = null, importPickHideLbl = null;
+  function clearImportPick() {
+    if (importPickShowLbl) { map.off("moveend zoomend", importPickShowLbl); map.off("movestart zoomstart", importPickHideLbl); importPickShowLbl = importPickHideLbl = null; }
+    if (importPickLayer) { map.removeLayer(importPickLayer); importPickLayer = null; }
+    if (importPickBtn && importPickBtn.parentNode) { importPickBtn.parentNode.removeChild(importPickBtn); importPickBtn = null; }
+  }
+  function showImportedContours(contours) {
+    clearImportPick();
+    if (typeof builder !== "undefined" && builder.cancel) builder.cancel(true);
+    importPickLayer = L.layerGroup().addTo(map);
+    const selected = new Set();          // indices the user has tapped
+    const UNSEL = { color: "#2d7ff9", weight: 2, fillOpacity: 0.10 };
+    const SEL = { color: "#2d7ff9", weight: 4, fillOpacity: 0.42 };   // same accent, clearly filled
+    const areas = contours.map((c) => _haOf(c.ring));     // precompute once â geodesicArea is not cheap
+    const polys = new Array(contours.length), centers = new Array(contours.length), labels = new Array(contours.length).fill(null);
+    const LABEL_CAP = 50;                // guard vs a pathological huge file; normal multi-field files show all labels when idle
+    let bounds = null;
+    function labelIcon(i) {
+      const on = selected.has(i);
+      return L.divIcon({ className: "area-label field", html: "<span>" + (on ? "✓ " : "") + "<b>" + esc(contours[i].name) + "</b><br>" + areas[i].toFixed(2) + " га</span>", iconSize: [150, 38], iconAnchor: [75, 19] });
+    }
+    function paint(i) {
+      polys[i].setStyle(selected.has(i) ? SEL : UNSEL);
+      if (labels[i]) labels[i].setIcon(labelIcon(i));       // keep an existing label's check-mark in sync
+    }
+    // Perf: only labels for contours in view (or selected) exist as DOM markers; off-screen
+    // ones are removed so panning/zooming a 40-field import stays smooth. Zoomed out so far
+    // that too many are in view -> keep only the selected labels (the rest are unreadable anyway).
+    function refreshLabels() {
+      if (!importPickLayer) return;
+      const vb = map.getBounds();
+      const inView = [];
+      for (let i = 0; i < contours.length; i++) if (selected.has(i) || vb.contains(centers[i])) inView.push(i);
+      const show = inView.length <= LABEL_CAP ? new Set(inView) : new Set(selected);
+      for (let i = 0; i < contours.length; i++) {
+        if (show.has(i) && !labels[i]) labels[i] = L.marker(centers[i], { icon: labelIcon(i), interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(importPickLayer);
+        else if (!show.has(i) && labels[i]) { importPickLayer.removeLayer(labels[i]); labels[i] = null; }
+      }
+    }
+    contours.forEach((c, i) => {
+      const ll = c.ring.map((p) => [p.lat, p.lng]);
+      const poly = L.polygon(ll, UNSEL).addTo(importPickLayer);
+      polys[i] = poly;
+      const pb = poly.getBounds(); centers[i] = pb.getCenter();
+      bounds = bounds ? bounds.extend(pb) : pb;
+      (c.holes || []).forEach((h) => { if (h.length >= 3) L.polygon(h.map((p) => [p.lat, p.lng]), { color: "#ff4d4d", weight: 1.5, fillOpacity: 0.18, dashArray: "4 4", interactive: false }).addTo(importPickLayer); });
+      poly.bindTooltip("«" + esc(c.name) + "» — " + areas[i].toFixed(2) + " га · торкнись, щоб вибрати");
+      poly.on("click", (e) => { L.DomEvent.stop(e); if (selected.has(i)) selected.delete(i); else selected.add(i); paint(i); refreshLabels(); updateBtn(); });
+    });
+    if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
+    function hideLabels() { for (let k = 0; k < labels.length; k++) if (labels[k]) { importPickLayer.removeLayer(labels[k]); labels[k] = null; } }
+    importPickShowLbl = refreshLabels; importPickHideLbl = hideLabels;
+    map.on("moveend zoomend", refreshLabels);
+    map.on("movestart zoomstart", hideLabels);   // labels vanish DURING an active pan/zoom (no per-frame DOM reposition -> smooth), reappear when the map settles
+    refreshLabels();
+
+    // One adaptive action button: pick the single selected field, or union several.
+    const b = document.createElement("button");
+    b.style.cssText = "position:absolute;z-index:1000;left:50%;bottom:16px;transform:translateX(-50%);padding:12px 20px;border-radius:10px;border:none;color:#fff;font-size:15px;box-shadow:0 2px 10px rgba(0,0,0,.45);transition:opacity .15s";
+    function updateBtn() {
+      const n = selected.size;
+      b.textContent = n === 0 ? "Торкнись контуру на карті" : n === 1 ? "Працювати з полем" : "Об'єднати " + n + " контурів у одне";
+      b.disabled = n === 0;
+      b.style.opacity = n === 0 ? "0.55" : "1";
+      b.style.background = "#2d7ff9";
+    }
+    b.addEventListener("click", () => {
+      const idxs = Array.from(selected);
+      if (!idxs.length) return;
+      if (idxs.length === 1) {
+        const c = contours[idxs[0]]; clearImportPick(); adoptContour(c); currentFieldName = c.name;
+        setMsg("Обрано «" + c.name + "». Автозбереження — при заливці в дрон.", "ok"); return;
+      }
+      if (!window.ClipperLib) { setMsg("Модуль об'єднання недоступний.", "error"); return; }
+      const u = unionContours(idxs.map((n) => contours[n]));
+      if (!u.ok) { setMsg(u.error, "error"); return; }
+      if (u.outers.length !== 1) { setMsg("Вибрані контури не суміжні — в одне суцільне поле не зливаються (" + u.outers.length + " окремих частин). Обери контури, що торкаються.", "error"); return; }
+      clearImportPick();
+      adoptContour({ name: "Об'єднане поле", ring: u.outers[0], holes: u.holes });
+      currentFieldName = "Об'єднане поле";
+      setMsg("Об'єднано " + idxs.length + " контурів у одне поле.", "ok");
+    });
+    map.getContainer().appendChild(b); importPickBtn = b;
+    updateBtn();
+    setMsg(contours.length + " контурів у файлі — торкайся, щоб вибрати (один або кілька), далі кнопка знизу.", "ok");
+  }
+  // ---- Recent imported KMLs: remember the last few files so re-importing is one tap
+  // (the phone file picker buries KMLs deep — this saves the hunt). We store the file
+  // TEXT (KMLs are tiny), so a recent re-import works offline with no file re-access.
+  const RECENT_KML_KEY = "fmp_recent_kml", RECENT_KML_MAX = 8;
+  function recentKmlLoad() { try { return JSON.parse(localStorage.getItem(RECENT_KML_KEY) || "[]"); } catch (e) { return []; } }
+  function recentKmlPush(name, text) {
+    try {
+      if (text && text.length <= 800000) {              // don't bloat storage with huge files
+        let list = recentKmlLoad().filter((r) => r && r.text !== text);
+        list.unshift({ name: (name || "KML").slice(0, 40), text: text, ts: Date.now() });
+        localStorage.setItem(RECENT_KML_KEY, JSON.stringify(list.slice(0, RECENT_KML_MAX)));
+      }
+    } catch (e) { /* quota — ignore */ }
+    renderRecentKml();
+  }
+  function renderRecentKml() {
+    const box = $("recent-kml"); if (!box) return;
+    const list = recentKmlLoad();
+    box.innerHTML = "";
+    if (!list.length) { box.style.cssText = ""; return; }
+    box.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0";
+    const lbl = document.createElement("span"); lbl.className = "hint"; lbl.textContent = "Недавні:"; lbl.style.margin = "0 2px 0 0"; box.appendChild(lbl);
+    list.forEach((r) => {
+      const chip = document.createElement("button");
+      chip.className = "ghost"; chip.textContent = r.name;
+      chip.style.cssText = "padding:4px 10px;font-size:13px;flex:0 0 auto";
+      chip.title = "Переімпортувати " + r.name;
+      chip.addEventListener("click", () => importKmlText(r.text, r.name));
+      box.appendChild(chip);
+    });
+  }
+  // Entry point — also called by the native shells via window.__fmpImportKml(text[, name]).
+  function importKmlText(text, fileName) {
+    const res = parseKmlContours(text);
+    if (!res.ok) { setMsg(res.error, "error"); return; }
+    recentKmlPush(fileName || (res.contours[0] && res.contours[0].name) || "KML", text);
+    if (res.contours.length === 1) {
+      const c = res.contours[0];
+      adoptContour(c); currentFieldName = c.name;
+      setMsg("Імпортовано контур із .kml" + (c.holes.length ? " (+" + c.holes.length + " вирізів)" : "") + ".", "ok");
+    } else {
+      showImportedContours(res.contours);
+    }
+  }
+  window.__fmpImportKml = function (text, name) { try { importKmlText(String(text), name); } catch (e) { setMsg("Помилка читання KML: " + e, "error"); } };
+  // Native bridges (Android UDP/serial) push socket-level diagnostics here so a failed
+  // WiFi/MAVLink connection is visible in the app log (тап на версію → «Лог»).
+  window.__fmpNativeLog = function (s) { try { appLog(String(s)); } catch (e) {} };
   $("exp-kml").addEventListener("click", exportKml);
   $("import-kml").addEventListener("click", () => $("kml-file").click());
   $("kml-file").addEventListener("change", (ev) => {
     const f = ev.target.files && ev.target.files[0];
     if (!f) return;
     const r = new FileReader();
-    r.onload = () => { try { importKml(String(r.result)); } catch (e) { setMsg("Помилка читання KML: " + e, "error"); } };
+    r.onerror = () => setMsg("Не вдалося прочитати файл. Спробуй «Відкрити через FMP» з файлового менеджера.", "error");
+    r.onload = () => importKmlText(String(r.result), f.name);
     r.readAsText(f);
     ev.target.value = "";
   });
+  renderRecentKml();      // show any previously-imported files on load
 
   // Using the toolbar field-polygon tool cancels any pending exclusion draw,
   // so the next finished polygon is treated as the field, not an obstacle.
@@ -2246,17 +2518,36 @@
         res.turn_radius_set = pr.ok;
         appLog("round-turn: WP_RADIUS_M " + trm + "m -> " + (pr.ok ? "ok" : "FAILED"));
       }
+      // Fixed-wing arc-turn params (analog of the copter WP_RADIUS_M). MAVLink
+      // param-set only → ArduPilot. INAV is transmit-only: it flies the arc geometry
+      // natively, but nav_fw_wp_turn_smoothing must be set OFF once on the board.
+      const pp = p && p.plane_params;
+      if (pp && !isInav) {
+        for (const k in pp) {
+          const pr = await _mavLink.setParam(k, pp[k]);
+          appLog("plane-turn: " + k + "=" + pp[k] + " -> " + (pr && pr.ok ? "ok" : "FAILED"));
+        }
+        res.plane_params_set = true;
+      } else if (pp && isInav) {
+        appLog("plane-turn: INAV — параметри по MAVLink не залити; постав nav_fw_wp_turn_smoothing=OFF у Configurator (дуги летять нативно)");
+      }
       // Додому — КАМЕРОЮ ВПЕРЕД: дефолтний WP_YAW_BEHAVIOR=2 тримає останній
       // курс під час RTL (дрон вертається боком/хвостом — оператор не бачить
       // перешкод у камеру). 1 = ніс за курсом і в RTL теж. На проходи місії не
       // впливає (1 і 2 в місії ідентичні), діє і на ручний RTL з пульта/кнопки.
-      if (!isInav) {   // ArduPilot-only param
+      if (!isInav) {   // ArduPilot-only param (INAV has no WP_YAW_BEHAVIOR)
         const py = await _mavLink.setParam("WP_YAW_BEHAVIOR", 1);
         res.yaw_forward_set = py.ok;
+        appLog("камерою вперед у RTL: WP_YAW_BEHAVIOR=1 -> " + (py.ok ? "ok" : "FAILED"));
       }
-      appLog("камерою вперед у RTL: WP_YAW_BEHAVIOR=1 -> " + (py.ok ? "ok" : "FAILED"));
       if (!p || p.verify !== false) {
-        const v = await _mavLink.verifyMission(items);
+        // Default: fast count-only verify (one round-trip) — the upload already got
+        // MISSION_ACK (vehicle stored it) and every frame is CRC-gated, so re-reading
+        // every item just ~doubles the time on a narrow link. `verify:"full"` restores
+        // the byte-for-byte read-back on demand.
+        const v = (p && p.verify === "full")
+          ? await _mavLink.verifyMission(items)
+          : await _mavLink.verifyMissionCount(items.length);
         res.verify = v;
         if (v.ok && !v.verified) res.verify_warning = "Зчитана місія не збігається — перевір.";
       }
@@ -2536,6 +2827,10 @@
       if (!mavConnected || !a.mav_get_param) return;
       const st = await a.mav_status();
       if (st && st.armed) { appLog("[auto-ble] мотори увімкнені — відкладаю налаштування"); return; }
+      // INAV has no ArduPilot SERIALx_PROTOCOL params and ignores MAVLink param reads,
+      // so the probe can do nothing AND each read times out — holding the transfer lock
+      // for seconds and blocking the user's upload right after connect. Skip it entirely.
+      if (st && st.autopilot != null && st.autopilot !== 3) { appLog("[auto-ble] INAV — BT-UART так не налаштовується, пропускаю пробу"); return; }
       appLog("[auto-ble] проба BT-UART (проактивно)…");
       const ORDER = ["SERIAL4", "SERIAL6", "SERIAL1", "SERIAL3"];
       const states = {};
@@ -2582,7 +2877,7 @@
 
   // Follow-drone toggle (centers the map on the drone in flight).
   const _ff = $("mav-follow");
-  if (_ff) { mavFollow = _ff.checked; _ff.addEventListener("change", () => { mavFollow = _ff.checked; }); }
+  if (_ff) { mavFollow = _ff.checked; syncFollowBtn(); _ff.addEventListener("change", () => { mavFollow = _ff.checked; syncFollowBtn(); }); }
   updateMissionStatus();   // show initial mission status
 
   function mavConnString() {
@@ -2699,6 +2994,7 @@
     if (!mavConnected) return;
     if (!s || !s.ok) return;
     lastStatus = s;
+    if (s && s.vehicle_type === 1) { try { localStorage.setItem("fmp_is_plane", "1"); } catch (e) {} }
     missionProgressTick(s);      // резюме після заміни батареї: памʼятаємо точку
     flightRecTick(s);
     mavDetectPhase(s);
@@ -2837,27 +3133,36 @@
     try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) {}
   }
 
+  const GPS_GUARD_LABELS = {
+    off:    ["#6b7280", "Захист вимкнено"],
+    nolink: ["#6b7280", "Немає звʼязку з дроном"],
+    init:   ["#6b7280", "Очікую фікс GPS…"],
+    ok:     ["#3fb27f", "GPS у нормі"],
+    warn:   ["#ffd166", "Слабкий сигнал GPS"],
+    jam:    ["#ff3b30", "ГЛУШІННЯ GPS"],
+    spoof:  ["#ff3b30", "СПУФІНГ GPS"],
+  };
+  let _gpsGuardSig = null;
   function gpsGuardRender() {
-    const dot = $("gps-guard-dot"), txt = $("gps-guard-text"), det = $("gps-guard-detail");
-    const banner = $("gps-alarm"), breason = $("gps-alarm-reason"), btitle = $("gps-alarm-title");
     const lvl = !gpsGuard.enabled ? "off" : (!mavConnected ? "nolink" : gpsGuard.level);
-    const M = {
-      off:    ["#6b7280", "Захист вимкнено", ""],
-      nolink: ["#6b7280", "Немає звʼязку з дроном", ""],
-      init:   ["#6b7280", "Очікую фікс GPS…", ""],
-      ok:     ["#3fb27f", "GPS у нормі", ""],
-      warn:   ["#ffd166", "Слабкий сигнал GPS", gpsGuard.reason],
-      jam:    ["#ff3b30", "ГЛУШІННЯ GPS", gpsGuard.reason],
-      spoof:  ["#ff3b30", "СПУФІНГ GPS", gpsGuard.reason],
-    };
-    const [color, label, detail] = M[lvl] || M.init;
-    if (dot) dot.style.background = color;
-    if (txt) { txt.textContent = label; txt.style.color = color; }
-    if (det) det.textContent = (lvl === "ok" && mavConnected)
+    const base = GPS_GUARD_LABELS[lvl] || GPS_GUARD_LABELS.init;
+    const color = base[0], label = base[1];
+    const detail = (lvl === "warn" || lvl === "jam" || lvl === "spoof") ? gpsGuard.reason : "";
+    const detText = (lvl === "ok" && mavConnected)
       ? ("фікс " + (gpsGuard.level === "ok" ? "3D" : "?") + ", супутників " + (lastStatus && lastStatus.sats != null ? lastStatus.sats : "?")
          + (lastStatus && lastStatus.hdop != null ? ", HDOP " + lastStatus.hdop : ""))
       : detail;
     const showBanner = gpsGuard.enabled && (lvl === "jam" || lvl === "spoof") && !gpsGuard.acked;
+    // Skip all DOM writes when nothing visible changed (steady state at 2 Hz). The
+    // signature includes the live detail (sats/HDOP), so it still repaints on change.
+    const sig = lvl + "|" + color + "|" + label + "|" + detText + "|" + showBanner + "|" + (showBanner ? gpsGuard.reason : "");
+    if (sig === _gpsGuardSig) return;
+    _gpsGuardSig = sig;
+    const dot = $("gps-guard-dot"), txt = $("gps-guard-text"), det = $("gps-guard-detail");
+    const banner = $("gps-alarm"), breason = $("gps-alarm-reason"), btitle = $("gps-alarm-title");
+    if (dot) dot.style.background = color;
+    if (txt) { txt.textContent = label; txt.style.color = color; }
+    if (det) det.textContent = detText;
     if (banner) banner.style.display = showBanner ? "" : "none";
     if (showBanner && btitle) btitle.textContent = (lvl === "spoof") ? "СПУФІНГ GPS" : "ГЛУШІННЯ GPS";
     if (showBanner && breason) breason.textContent = gpsGuard.reason;
@@ -3157,6 +3462,24 @@
   // Live mission progress, driven off the UPLOADED mission (flownRoute), not the
   // editing buffer. The aircraft traverses: home → coverage wps → (home if RTL).
   // Mission seq layout is [home(0), takeoff(1), wp0(2), …, rtl(last)].
+  // Mission geometry (visited points + cumulative distance) is CONSTANT for an
+  // uploaded mission — cache it keyed on the flown* refs (reassigned only on upload/
+  // disconnect) so the 2 Hz progress poll is O(1) instead of rebuilding the array and
+  // re-summing every leg with haversine each time.
+  let _progCache = null;
+  function _progGeom() {
+    if (_progCache && _progCache.route === flownRoute && _progCache.home === flownHome
+        && _progCache.rtl === flownHasRtl) return _progCache;
+    const visited = [];
+    if (flownHome) visited.push([flownHome.lat, flownHome.lng]);
+    for (const p of flownRoute) visited.push(p);
+    if (flownHasRtl && flownHome) visited.push([flownHome.lat, flownHome.lng]);
+    const cum = [0];
+    for (let k = 0; k < visited.length - 1; k++)
+      cum.push(cum[k] + haversineM(visited[k][0], visited[k][1], visited[k + 1][0], visited[k + 1][1]));
+    _progCache = { route: flownRoute, home: flownHome, rtl: flownHasRtl, visited, cum };
+    return _progCache;
+  }
   function mavProgressData(s) {
     if (!flownRoute || !flownRoute.length || s.wp_current == null || s.lat == null) {
       mavClearTarget();
@@ -3164,11 +3487,8 @@
       return null;
     }
     const n = flownRoute.length;
-    // Ground points actually traversed, with home leading and (if RTL) trailing.
-    const visited = [];
-    if (flownHome) visited.push([flownHome.lat, flownHome.lng]);
-    for (const p of flownRoute) visited.push(p);
-    if (flownHasRtl && flownHome) visited.push([flownHome.lat, flownHome.lng]);
+    const _g = _progGeom();
+    const visited = _g.visited, cum = _g.cum;
     const homeOffset = flownHome ? 1 : 0;
 
     const c = s.wp_current;
@@ -3186,16 +3506,10 @@
     }
     targetIdx = Math.max(homeOffset, Math.min(targetIdx, visited.length - 1));
 
-    let totalLen = 0;
-    for (let k = 0; k < visited.length - 1; k++) {
-      totalLen += haversineM(visited[k][0], visited[k][1], visited[k + 1][0], visited[k + 1][1]);
-    }
+    const totalLen = cum[cum.length - 1];
     const target = visited[targetIdx];
     const dNext = haversineM(s.lat, s.lon, target[0], target[1]);
-    let remLegs = 0;
-    for (let k = targetIdx; k < visited.length - 1; k++) {
-      remLegs += haversineM(visited[k][0], visited[k][1], visited[k + 1][0], visited[k + 1][1]);
-    }
+    const remLegs = cum[cum.length - 1] - cum[targetIdx];
     const rem = dNext + remLegs;
     const pct = totalLen > 0
       ? Math.max(0, Math.min(100, Math.round((totalLen - rem) / totalLen * 100))) : 0;
@@ -3208,9 +3522,8 @@
     const lastCovIdx = visited.length - 1 - ((flownHasRtl && flownHome) ? 1 : 0);
     let finishDist = 0;
     if (targetIdx < lastCovIdx) {
-      finishDist = haversineM(s.lat, s.lon, visited[targetIdx][0], visited[targetIdx][1]);
-      for (let k = targetIdx; k < lastCovIdx; k++)
-        finishDist += haversineM(visited[k][0], visited[k][1], visited[k + 1][0], visited[k + 1][1]);
+      finishDist = haversineM(s.lat, s.lon, visited[targetIdx][0], visited[targetIdx][1])
+        + (cum[lastCovIdx] - cum[targetIdx]);
     }
     const descentS = (s.alt_rel != null ? s.alt_rel : 0) / DESCENT_RATE;
     const finishS = spd ? finishDist / spd : null;
@@ -3242,45 +3555,48 @@
   function mavUpdateHome(s) {
     if (s.home_lat == null || s.home_lon == null) return;
     const pos = [s.home_lat, s.home_lon];
-    const icon = L.divIcon({ className: "home-marker",
-      html: '<div class="home-marker"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12l8-7 8 7"/><path d="M6 10.5V20h12v-9.5"/></svg></div>',
-      iconSize: [20, 20], iconAnchor: [10, 18] });
     if (!liveHomeMarker) {
+      const icon = L.divIcon({ className: "home-marker",
+        html: '<div class="home-marker"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12l8-7 8 7"/><path d="M6 10.5V20h12v-9.5"/></svg></div>',
+        iconSize: [20, 20], iconAnchor: [10, 18] });
       liveHomeMarker = L.marker(pos, { icon }).addTo(map).bindTooltip("HOME дрона (точка arm)");
     } else {
       liveHomeMarker.setLatLng(pos);
     }
   }
 
+  let _lastDroneHdg = null;
   function mavUpdateMarker(s) {
     if (s.lat == null || s.lon == null) return;
     const pos = [s.lat, s.lon];
-    const hdg = s.heading || 0;
-    // ▲ points north (up) at rotate(0); MAVLink heading is CW from north, so a
-    // straight rotate(hdg) aligns it correctly.
-    const html = `<div style="transform:rotate(${hdg}deg);font-size:20px;line-height:20px;color:#ff3b30">▲</div>`;
-    const icon = L.divIcon({ className: "drone-marker", html, iconSize: [22, 22], iconAnchor: [11, 11] });
+    const rh = Math.round(s.heading || 0);           // ▲ CW from north
+    const makeIcon = () => L.divIcon({ className: "drone-marker",
+      html: `<div style="transform:rotate(${rh}deg);font-size:20px;line-height:20px;color:#ff3b30">▲</div>`,
+      iconSize: [22, 22], iconAnchor: [11, 11] });
     if (!droneMarker) {
-      droneMarker = L.marker(pos, { icon, zIndexOffset: 1000 }).addTo(map).bindTooltip("Дрон");
+      droneMarker = L.marker(pos, { icon: makeIcon(), zIndexOffset: 1000 }).addTo(map).bindTooltip("Дрон");
       droneTrack = L.polyline([pos], { color: "#ffd24a", weight: 2, opacity: 0.8 }).addTo(map);
+      _lastDroneHdg = rh;
       // Center on the drone the first time we see it, so it's never lost.
       map.setView(pos, Math.max(map.getZoom(), 16));
     } else {
       droneMarker.setLatLng(pos);
-      droneMarker.setIcon(icon);
-      // Grow the flown track only when the drone actually moved (>~2 m) and keep
-      // it bounded (≤5000 pts) — at 2 Hz an unbounded polyline would balloon
-      // memory + per-pan redraw cost over a multi-hour spray session.
+      // Rebuild the rotating icon only when heading changed (whole degrees) —
+      // setIcon tears down/rebuilds the marker DOM, so skipping it when flying
+      // straight removes steady 2 Hz DOM churn (marker micro-stutter on phones).
+      if (rh !== _lastDroneHdg) { droneMarker.setIcon(makeIcon()); _lastDroneHdg = rh; }
+      // Grow the flown track only when the drone moved (>~2 m); trim in batches so
+      // the cap doesn't force an O(n) copy + full re-stroke on every packet.
       const pts = droneTrack.getLatLngs();
       const last = pts.length ? pts[pts.length - 1] : null;
       if (!last || haversineM(last.lat, last.lng, pos[0], pos[1]) > 2) {
-        if (pts.length >= 5000) droneTrack.setLatLngs(pts.slice(-4999));
+        if (pts.length > 5200) droneTrack.setLatLngs(pts.slice(-5000));
         droneTrack.addLatLng(pos);
       }
-      // Follow: keep the drone on screen (pan only when it nears the edge, so the
-      // user can still look around without a fight).
-      if (mavFollow && !map.getBounds().pad(-0.2).contains(pos)) {
-        map.panTo(pos, { animate: true });
+      // Follow: camera FLOWS with the drone — center on it every packet with a
+      // smooth animated pan, so the world glides around the (centered) drone.
+      if (mavFollow) {
+        map.panTo(pos, { animate: true, duration: 0.7, easeLinearity: 0.25 });
       }
     }
   }
@@ -3288,6 +3604,13 @@
   async function mavUpload() {
     const a = mavApi();
     if (!a || !a.mav_upload_mission) { setMsg("API недоступний.", "error"); return; }
+    // Fixed-wing: the arc geometry is baked at BUILD time, but we only know for sure this
+    // is a plane once connected (here). Rebuild now — with the vehicle known — so the
+    // uploaded route carries the arcs even if the plan was made before connecting.
+    if (isPlaneVehicle() && $("round-turn") && $("round-turn").checked && lastRoute && lastRoute.length) {
+      appLog("plane-turn: перебудовую маршрут із дугами перед заливкою");
+      await buildRoute();
+    }
     setMsg("Заливаю місію в дрон…", null);
     appLog("upload start: " + (lastRoute ? lastRoute.length : 0) + " route pts");
     $("mav-upload").disabled = true;
@@ -3299,10 +3622,16 @@
       // autopilot's WP_RADIUS_M range). 0 = off → don't touch the drone's radius param.
       const _rt = $("round-turn") && $("round-turn").checked;
       const _sp = parseFloat($("spacing").value) || 20;
-      const turnRadiusM = _rt ? Math.max(1, Math.min(10, _sp / 2)) : 0;
+      // Fixed-wing: the mission already carries the arcs; push the autopilot params
+      // that make the plane FLY them (analog of the copter's WP_RADIUS_M). Copter
+      // path unchanged. INAV planes get the arc geometry but no MAVLink param push.
+      const _plane = isPlaneVehicle();
+      const planeParams = (_rt && _plane) ? planeTurnParams(_sp, parseFloat($("speed").value) || 12) : null;
+      const turnRadiusM = (_rt && !_plane) ? Math.max(1, Math.min(10, _sp / 2)) : 0;
       const r = await a.mav_upload_mission({
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
+        plane_params: planeParams,
       });
       // Log the FULL verify verdict — a red "не збігається" without the actual
       // mismatch list in the log is undebuggable from the field.
@@ -3579,7 +3908,8 @@
         setTimeout(() => URL.revokeObjectURL(url), 2000);
       } catch (e) {}
     }
-    setMsg("Лог (" + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : "на сервер не пішло — скопійовано в буфер") + ".", sent ? "ok" : "error");
+    const _aq = IS_ANDROID && !sent;   // Android queues offline logs and auto-resends
+    setMsg("Лог (" + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : _aq ? "збережено — надішлеться автоматично, коли зʼявиться інтернет (скопійовано в буфер)" : "на сервер не пішло — скопійовано в буфер") + ".", sent ? "ok" : _aq ? "ok" : "error");
   }
   $("mav-log").addEventListener("click", exportLog);
 
