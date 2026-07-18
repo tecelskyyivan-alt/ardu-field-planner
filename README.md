@@ -24,12 +24,16 @@
 **Offline-first ground-control station + coverage-mission planner for ArduCopter
 agricultural spraying.** Draw a field on a satellite map → generate a boustrophedon
 (“lawnmower”) coverage route → export a mission (`.plan` / `.waypoints`) or **upload it
-straight to the drone over MAVLink** and fly it with **live telemetry**. Works fully
-offline (self-hosted map + engine, no CDN). Bilingual UI (**Українська / English**).
+straight to the drone over MAVLink** and fly it with **live telemetry**. The app and
+planning engine are self-hosted (no CDN), so it loads and plans with **no connection** —
+only the satellite map needs internet, and you can **pre-cache it per field** to work
+fully offline in the area. Bilingual UI (**Українська / English**).
 
 Офлайн-планувальник маршрутів покриття поля + наземна станція (GCS) для ArduCopter.
 Малюєш контур поля → «змійка» покриття → експорт місії або **пряма заливка в дрон по
-MAVLink** (кабель / WiFi-ELRS) + жива телеметрія.
+MAVLink** (кабель / WiFi-ELRS) + жива телеметрія. Рушій і застосунок працюють **без
+мережі**; супутникова мапа потребує інтернету — або завчасно закешуй район, щоб працювало
+повністю офлайн у полі.
 
 ## Platforms / Платформи
 
@@ -42,9 +46,10 @@ MAVLink** (кабель / WiFi-ELRS) + жива телеметрія.
 
 ## Features / Можливості
 
-- 🛰️ **Satellite map** (Google / Esri) with layer switching and place/border labels.
-- ✏️ **Field contour** — draw a polygon, drag vertices (route rebuilds live). Fully
-  offline, manual (no cloud / no AI required).
+- 🛰️ **Satellite map** (Google / Esri) with layer switching and place/border labels;
+  **save tiles offline** for a field so it works later with no signal.
+- ✏️ **Field contour** — draw a polygon, drag vertices (route rebuilds live). Computed
+  locally — no cloud / no AI required.
 - 🌳 **Obstacles (cut-outs)** — draw polygons over trees / roads / ponds; cut from the
   route **and** added to the geofence; saved with the project.
 - 🔁 **Coverage** — pass spacing, angle (or **auto-angle** = least mission time / least
@@ -95,7 +100,8 @@ python3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-Leaflet and the planning engine are self-hosted (no CDN) — it runs fully offline.
+Leaflet and the planning engine are self-hosted (no CDN), so the app loads and plans
+with no connection; the satellite map still needs internet unless you pre-cache the area.
 
 ## Run / Запуск
 
