@@ -98,7 +98,7 @@
       </div>
 
       <label class="row">
-        <input id="viz-coverage" type="checkbox" />
+        <input id="viz-coverage" type="checkbox" checked />
         Показувати покриття та накладання
       </label>
       <button id="build" class="primary">Побудувати маршрут</button>
@@ -121,6 +121,7 @@
           <button id="import-kml" class="ghost">Імпорт .kml</button>
         </div>
         <input id="kml-file" type="file" accept=".kml,.xml" style="display:none" />
+        <div id="recent-kml"></div>
         <p class="hint">Проєкт (поле + параметри):</p>
         <div class="export-row">
           <button id="save-project" class="ghost">Зберегти проєкт</button>
@@ -192,8 +193,7 @@
       <button id="mav-upload" disabled>Завантажити місію в дрон</button>
       <div id="mission-status" class="mission-status">Маршрут не побудовано.</div>
       <button id="mav-check" class="ghost" disabled>Місія в дроні</button>
-      <label class="row"><input id="mav-follow" type="checkbox" />
-        Стежити за дроном (центрувати карту)</label>
+      <input id="mav-follow" type="checkbox" hidden />
       <div id="mav-hud" class="stats hidden"></div>
 
       <div class="step" style="margin-top:14px">Захист GPS (глушіння / спуфінг)
@@ -230,9 +230,7 @@
         <button id="mav-rtl" class="ghost" disabled>RTL</button>
       </div>
       <button id="mav-pause" class="ghost" disabled>Пауза місії</button>
-      <p class="hint">Пауза тримає дрон на маршруті й на висоті — продовження без ризику.
-        Якщо ж вийти з AUTO (LOITER/RTL) і повернути AUTO тумблером, ArduPilot полетить
-        до точки навскіс з поточної висоти — тоді продовжуй кнопкою «Старт місії» тут.</p>
+      <p class="hint">Пауза тримає дрон на маршруті й на висоті — продовження без ризику.</p>
       <label class="row"><input id="mission-resume" type="checkbox" />
         Продовжувати місію після заміни батареї</label>
       <p class="hint" id="resume-hint" style="display:none"></p>
@@ -311,6 +309,7 @@
   <script src="mav/mavlink.js"></script>
   <script src="mav/transport.js"></script>
   <script src="mav/link.js"></script>
+  <script src="vendor/clipper.min.js"></script>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
   <script src="sw-register.js"></script>

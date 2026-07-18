@@ -18,7 +18,7 @@
 (function (root) {
   "use strict";
   const DIR = new URL("./", location.href).href;
-  const MODULES = ["__init__", "geo", "coverage", "mission", "api", "flight_calib"];
+  const MODULES = ["__init__", "geo", "coverage", "plane_turns", "mission", "api", "flight_calib"];
   // Native APK: skip the worker entirely (its asset fetches don't get intercepted) and
   // go straight to main-thread Pyodide, which works offline.
   const IS_APK = /FMPAndroid/i.test(navigator.userAgent || "");
@@ -80,16 +80,18 @@
       });
     }
     report("loadPyodide…");
+    // Kick the .py fetches off NOW (network) so they overlap the WASM compile below.
+    const _modFetch = MODULES.map((m) => fetch(DIR + "engine/" + m + ".py").then((r) => {
+      if (!r.ok) throw new Error("engine module " + m + " -> HTTP " + r.status);
+      return r.text();
+    }));
     pyMain = await root.loadPyodide({ indexURL: DIR + "pyodide/" });
     report("loadPackage numpy+shapely…");
     await pyMain.loadPackage(["numpy", "shapely"]);
     report("mounting engine modules…");
     try { pyMain.FS.mkdir("/backend"); } catch (e) {}
-    for (const m of MODULES) {
-      const r = await fetch(DIR + "engine/" + m + ".py");
-      if (!r.ok) throw new Error("engine module " + m + " -> HTTP " + r.status);
-      pyMain.FS.writeFile("/backend/" + m + ".py", await r.text());
-    }
+    const _modTexts = await Promise.all(_modFetch);
+    MODULES.forEach((m, i) => pyMain.FS.writeFile("/backend/" + m + ".py", _modTexts[i]));
     pyMain.runPython("import sys; sys.path.insert(0, '/'); from backend.api import Api; _api = Api()");
     report("main-thread engine ready");
   }
@@ -104,7 +106,7 @@
     if (!IS_APK) {
       try {
         startWorker();
-        await callWorker("init", null, 25000);   // bounded so a hung worker can't block forever
+        await callWorker("init", null, 60000);   // 60s: a slow phone worker mustn't fall back to re-loading 28MB WASM on the main thread
         mode = "worker";
         readyDone = true;
         report("worker engine ready");

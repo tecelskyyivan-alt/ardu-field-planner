@@ -12,15 +12,17 @@ let py = null;
 let booting = null;
 
 async function boot() {
+  const _mods = ["__init__", "geo", "coverage", "plane_turns", "mission", "api", "flight_calib"];
+  const _modFetch = _mods.map((m) => fetch(DIR + "engine/" + m + ".py").then((r) => {
+    if (!r.ok) throw new Error("engine module " + m + " -> " + r.status);
+    return r.text();
+  }));                                                 // fetch in parallel with the WASM boot below
   importScripts(DIR + "pyodide/pyodide.js");            // defines loadPyodide
   py = await loadPyodide({ indexURL: DIR + "pyodide/" });
   await py.loadPackage(["numpy", "shapely"]);
   py.FS.mkdir("/backend");
-  for (const m of ["__init__", "geo", "coverage", "mission", "api", "flight_calib"]) {
-    const resp = await fetch(DIR + "engine/" + m + ".py");
-    if (!resp.ok) throw new Error("engine module " + m + " -> " + resp.status);
-    py.FS.writeFile("/backend/" + m + ".py", await resp.text());
-  }
+  const _modTexts = await Promise.all(_modFetch);
+  _mods.forEach((m, i) => py.FS.writeFile("/backend/" + m + ".py", _modTexts[i]));
   py.runPython("import sys; sys.path.insert(0, '/'); from backend.api import Api; _api = Api()");
 }
 

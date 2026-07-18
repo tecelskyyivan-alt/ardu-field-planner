@@ -21,6 +21,7 @@ from .coverage import (
     return_corridor_route, coverage_overlap_geo,
 )
 from .geo import centroid, path_length, haversine
+from .plane_turns import add_plane_turns, plane_turn_params
 from .mission import (
     to_waypoints, to_plan,
     to_geofence_plan, to_fence_mp, to_contour_geojson,
@@ -129,6 +130,10 @@ class Api:
             # OPT-IN (default off). The default planner minimizes overlap instead.
             sfa = bool(params.get("start_finish_anchor", False))
             optimize = params.get("optimize", "overlap")        # "overlap" | "length"
+            # Fixed-wing: replace each sharp pass-end U-turn with a contained arc
+            # (radius = spacing/2, passes shortened) so a plane — which can't pivot
+            # like a copter — turns INSIDE the field inset instead of overshooting.
+            plane_turn = bool(params.get("plane_turn", False))
 
             split = params.get("split") or {}
             # Manual sector split: one or MORE drawn lines cut the field into sub-
@@ -175,6 +180,8 @@ class Api:
                         # (the operator would think the whole field is sprayed). (bug-hunt #7)
                         return {"ok": False,
                                 "error": "Сектор замалий для покриття — змісти лінію поділу або зменши крок/відступ."}
+                    if plane_turn and len(w) >= 4:
+                        w = add_plane_turns(w, spacing)
                     flights.append(w)
                     wps.extend(w)
                     sec_angles.append(round(sec_ang, 1))
@@ -188,6 +195,8 @@ class Api:
                     return {"ok": False, "error": "Поле замале для цього кроку — зменши крок або відступ."}
                 if not wps:
                     return {"ok": False, "error": "Не вдалося побудувати проходи — спробуй менший крок або інший кут."}
+                if plane_turn and len(wps) >= 4:
+                    wps = add_plane_turns(wps, spacing)
                 flights = None
 
             home = (*centroid(boundary), 0.0)
@@ -258,6 +267,9 @@ class Api:
                 "cover": [{"lat": a, "lng": b} for a, b in cover],
                 "home": {"lat": home[0], "lng": home[1]},
                 "count": len(wps),
+                # Fixed-wing: autopilot params FMP should push at upload so the plane
+                # flies the planned arcs (None for copter / when plane_turn is off).
+                "plane_params": plane_turn_params(spacing, speed) if plane_turn else None,
                 "length_m": round(length, 1),
                 "area_ha": round(area, 3),
                 "sprayed_ha": round(sprayed, 3),
