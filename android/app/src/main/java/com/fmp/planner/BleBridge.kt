@@ -220,7 +220,7 @@ class BleBridge(private val act: MainActivity, private val web: WebView) {
             if (ch.uuid == notifyChar?.uuid) {
                 val v = ch.value ?: return
                 if (v.isNotEmpty()) {
-                    TelemetryHub.feed(v)   // pinned notification tap (#3) — no-op unless the service is running
+                    try { TelemetryHub.feed(v) } catch (_: Exception) {}   // notification tap (#3): must never kill the GATT callback
                     emit("window.__androidBleData", Base64.encodeToString(v, Base64.NO_WRAP))
                 }
             }

@@ -151,7 +151,7 @@ class SerialBridge(
     // ---- SerialInputOutputManager.Listener ----
     override fun onNewData(data: ByteArray) {
         if (data.isEmpty()) return
-        TelemetryHub.feed(data)     // pinned notification tap (#3) — no-op unless the service is running
+        try { TelemetryHub.feed(data) } catch (_: Exception) {}     // notification tap (#3): must never kill the serial read thread
         // JSON-quote the (remote, attacker-controlled) bytes instead of splicing them
         // into a '...' literal — injection-proof regardless of the encoder.
         val arg = JSONObject.quote(Base64.encodeToString(data, Base64.NO_WRAP))

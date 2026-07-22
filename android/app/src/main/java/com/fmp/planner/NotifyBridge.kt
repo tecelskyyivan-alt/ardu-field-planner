@@ -33,13 +33,12 @@ class NotifyBridge(private val act: MainActivity, @Suppress("unused") private va
 
     @JavascriptInterface
     fun start(): String {
-        act.requestNotifyPermission { _ ->
-            // Start the service regardless of the POST_NOTIFICATIONS result — a denial only
-            // means the pinned notification itself won't be visible; the foreground service
-            // (and thus the MAVLink bridges staying alive in the background) must still run.
-            startServiceNow()
-            maybeRequestBatteryExemption()
-        }
+        // Start the service IMMEDIATELY — its foreground protection (MAVLink bridges staying
+        // alive in the background) must not wait on the pilot noticing the permission dialog.
+        // POST_NOTIFICATIONS is requested fire-and-forget: a denial (or a dialog ignored for a
+        // minute) only means the pinned notification itself isn't visible. (review Important)
+        startServiceNow()
+        act.requestNotifyPermission { _ -> maybeRequestBatteryExemption() }
         return JSONObject().put("ok", true).put("pending", true).toString()
     }
 

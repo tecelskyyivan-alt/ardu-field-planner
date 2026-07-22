@@ -240,7 +240,8 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
                 dlog("rx: $rxPackets пакетів / $rxBytes байт, останній від ${pkt.address?.hostAddress}:${pkt.port}")
             }
             if (pkt.length > 0) {
-                TelemetryHub.feed(pkt.data.copyOf(pkt.length))   // pinned notification tap (#3) — no-op unless running
+                // notification tap (#3): gate the per-packet copy on `active` and never throw into the recv loop
+                if (TelemetryHub.active) try { TelemetryHub.feed(pkt.data.copyOf(pkt.length)) } catch (_: Exception) {}
                 // JSON-quote the (remote) bytes — injection-proof vs splicing into '...'.
                 val arg = JSONObject.quote(Base64.encodeToString(pkt.data, 0, pkt.length, Base64.NO_WRAP))
                 ui.post { web.evaluateJavascript("window.__androidUdpData&&window.__androidUdpData($arg)", null) }
