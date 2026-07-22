@@ -1934,6 +1934,9 @@
       let n = 1; while (names.has("Поле " + n)) n++;
       name = "Поле " + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
     }
+    // Propagate the (possibly just-minted) name into the work context so a flight armed after
+    // this upload — without a rebuild — credits THIS field (#8), not the stale generic "поле".
+    if (lastWorkContext) lastWorkContext.field = name;
     const prev = (recs || []).find((r) => r.name === name);
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
