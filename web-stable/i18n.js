@@ -70,6 +70,9 @@ window.FMP_TR = {
   "Завантажити місію в дрон": "Upload mission to drone",
   "Місія в дроні": "Mission on drone",
   "Стежити за дроном (центрувати карту)": "Follow the drone (center the map)",
+  "Геозона: залити межі поля в дрон": "Geofence: upload field boundary",
+  "Опційно: заливає межу поля (+ вирізи) як точки geofence. FENCE_ENABLE НЕ вмикається — увімкни сам, коли будеш готовий.":
+    "Optional: uploads the field boundary (+ cut-outs) as geofence points. FENCE_ENABLE is NOT switched on — enable it yourself when ready.",
 
   // ---- GPS guard ----
   "Захист GPS (глушіння / спуфінг)": "GPS guard (jamming / spoofing)",
@@ -259,6 +262,15 @@ Object.assign(window.FMP_TR, {
   "Спершу увімкни мотори: ARM (за потреби постав режим GUIDED).": "Arm the motors first: ARM (set GUIDED mode if needed).",
   "Місію завершено — остання точка досягнута.": "Mission complete — the last waypoint was reached.",
   "Посадка — апарат на землі (DISARM).": "Landed — the aircraft is on the ground (DISARM).",
+  // ---- geofence upload (#12p3, opt-in) ----
+  "Геозона залита: межа поля. Увімкни FENCE_ENABLE=1, коли будеш готовий.":
+    "Geofence uploaded: field boundary. Enable it yourself (FENCE_ENABLE=1) when ready.",
+  "Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.":
+    "Geofence uploaded: field boundary + {0} cut-outs. Enable it yourself (FENCE_ENABLE=1) when ready.",
+  "Геозону НЕ залито: {0}. Місія залита нормально.": "Geofence NOT uploaded: {0}. Mission uploaded fine.",
+  "Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.":
+    "Home is outside the field boundary — with the fence enabled, the drone will refuse to arm here.",
+  "невідома помилка": "unknown error",
   // update
   "Перевіряю оновлення на сервері…": "Checking the server for updates…",
   "Не вдалося перевірити оновлення (немає інтернету / сервер недоступний).": "Could not check for updates (no internet / server unavailable).",

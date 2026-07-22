@@ -197,7 +197,12 @@
     const values = unpackStruct(sp.tokens, new DataView(pay.buffer));
     const fields = {};
     sp.names.forEach((nm, k) => { fields[nm] = values[k]; });
-    return { msg: { name: sp.name, id: msgid, sysid, compid, seq, fields }, total };
+    // v2 flag: which FRAME (STX byte) carried this message, not which message it is.
+    // A v1 frame (0xFE) physically cannot carry a MAVLink2 extension field (e.g.
+    // mission_type) — callers that need to tell "legacy firmware" apart from "modern
+    // firmware legitimately using the non-INT message form" must key off THIS, not the
+    // message name (#12p3 fence dual-dialect fix).
+    return { msg: { name: sp.name, id: msgid, sysid, compid, seq, fields, v2 }, total };
   }
 
   function createParser() {
