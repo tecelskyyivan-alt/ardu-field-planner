@@ -81,6 +81,16 @@ console.log("== buildFenceItems: geometry ==");
   const closed = boundary.concat([boundary[0]]);
   const itemsClosed = MAV_LINK.buildFenceItems(closed, []);
   check("closing duplicate vertex dropped (still 4, not 5)", itemsClosed.length === 4);
+
+  // A degenerate boundary (<3 real vertices) must yield an EMPTY item list. This is the
+  // exact signal app.js's guard uses to skip the fence upload entirely (an empty upload
+  // would send COUNT=0/type=1, which CLEARS any fence already stored on the vehicle) —
+  // the guard itself is a plain `if (!fenceItems.length)` in app.js, so this geometry-level
+  // check is the cheap equivalent of "uploadMission is never called for a degenerate boundary".
+  const degenerate = [{ lat: 49.50, lng: 24.00 }, { lat: 49.50, lng: 24.01 }];
+  check("degenerate (<3 vertex) boundary yields an empty item list", MAV_LINK.buildFenceItems(degenerate, []).length === 0);
+  check("a degenerate EXCLUSION alone (valid boundary) still yields only the boundary's items",
+    MAV_LINK.buildFenceItems(boundary, [degenerate]).length === 4);
 }
 
 // Hand-roll a genuine MAVLink1 frame (STX 0xFE) for the "true v1 vehicle" scenario.
