@@ -107,7 +107,8 @@
     const prev = localStorage.getItem("fmp_log");
     if (prev) { LOG.push("=== попередня сесія ==="); for (const l of prev.split("\n").slice(-400)) if (l) LOG.push(l); LOG.push("=== нова сесія ==="); }
   } catch (e) {}
-  setInterval(() => { if (_logDirty) { try { localStorage.setItem("fmp_log", LOG.slice(-1000).join("\n")); } catch (e) {} _logDirty = false; } }, 4000);
+  function flushLog() { if (_logDirty) { try { localStorage.setItem("fmp_log", LOG.slice(-1000).join("\n")); } catch (e) {} _logDirty = false; } }
+  setInterval(flushLog, 10000);   // slower cadence (#6) — background/kill flush (visibilitychange/beforeunload) covers the tail
   if (typeof window !== "undefined") {
     // Full stack traces (not just message@file:line) so an uploaded log pinpoints
     // the exact failing call — the single most useful thing for remote diagnosis.
@@ -1525,7 +1526,7 @@
   }
   if ($("round-turn")) $("round-turn").addEventListener("change", syncRoundTurnHint);
   window.addEventListener("beforeunload", () => {
-    saveLastSettings(); saveLastField(); flightRecPersist(true);
+    saveLastSettings(); saveLastField(); flightRecPersist(true); flushLog();
     try { localStorage.setItem("fmp_current_field", currentFieldName || ""); } catch (e) {}
   });
   restoreLastSettings();          // pre-fill last session's settings before first render
@@ -3268,7 +3269,7 @@
   // Pause telemetry polling while the screen/app is hidden, resume on return —
   // saves battery + CPU in the field (the mission keeps running on the FC anyway).
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) { flightRecPersist(true); mavStopPolling(); }
+    if (document.hidden) { flushLog(); flightRecPersist(true); mavStopPolling(); }
     else if (mavConnected) mavStartPolling();
   });
 
@@ -3861,10 +3862,11 @@
   function hudSet(rows, key, value, color, show) {
     const r = rows[key];
     if (!r) return;
-    r.el.style.display = show ? "" : "none";
+    if (r.lastShow !== show) { r.el.style.display = show ? "" : "none"; r.lastShow = show; }   // diff (#6)
     if (!show) return;
     if (r.val.textContent !== value) r.val.textContent = value;   // textContent = intrinsic escaping
-    r.val.style.color = color || "";
+    const c = color || "";
+    if (r.lastColor !== c) { r.val.style.color = c; r.lastColor = c; }   // diff colour writes (#6)
   }
   function mavRenderHud(s, p) {
     const { rows } = mavHudEnsure();
