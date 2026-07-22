@@ -782,7 +782,18 @@
   // polygons are fed to the route engine as extra exclusions (and to #12 transit/fence).
   function hazardCorridors(halfWidthM) {
     const C = window.ClipperLib;
-    const hz = collectHazards().filter((m) => m.avoid !== false && m.geom && m.geom.length);
+    // Perf (verified finding): filter avoid===false layers OUT before the per-vertex _hzGeom
+    // extraction, not after — collectHazards() extracts full geometry for EVERY hazard
+    // (needed by its other callers: save/restore, the hazard-count list), but here only
+    // avoid:true ones are ever used. After an OSM power-line import (up to 800 objects,
+    // each possibly 100+ vertices, all avoid:false) buildRoute() runs this on EVERY live
+    // angle-drag rebuild (~7 Hz) — skipping the extraction for the ones we'd throw away
+    // anyway removes that allocation without changing which hazards end up in `hz` (same
+    // avoid!==false && geom.length filter as before).
+    const hz = hazardLayers()
+      .filter((l) => (l._hz || {}).avoid !== false)             // same default as collectHazards()'s m.avoid !== false
+      .map((l) => ({ geom: _hzGeom(l, (l._hz || {}).kind) }))
+      .filter((m) => m.geom && m.geom.length);
     if (!C || !hz.length || !(halfWidthM > 0)) { if (!C && hz.length) appLog("[hazard] ClipperLib відсутній — коридори уникання пропущено (небезпеки лишаються видимими)"); return []; }
     let la = 0, lo = 0, n = 0;
     hz.forEach((m) => m.geom.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
@@ -924,8 +935,38 @@
       const contour = boundaryFromPolygon();
       if (!contour || contour.length < 3) { localStorage.removeItem("fmp_last_field"); return; }
       const exclusions = exclusionItems.getLayers().map(ringOf).filter((r) => r.length >= 3);
-      localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: collectHazards() }));
-    } catch (e) { /* quota / private mode — ignore */ }
+      const hazards = collectHazards();
+      try {
+        localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards }));
+      } catch (e) {
+        // QuotaExceededError: an OSM power-line import (importOsmPowerLines, capped at 800
+        // WAYS but not vertices) can carry thousands of vertices per way and blow the ~5 MB
+        // localStorage budget on its own. OSM hazards are display-only (avoid:false,
+        // non-authoritative) and re-importable with one tap — drop THEM from this save first
+        // rather than lose the field contour/exclusions too (verified finding: the whole save
+        // was failing silently, so the next reopen restored NOTHING).
+        const trimmed = hazards.filter((h) => h.source !== "osm");
+        let saved = false;
+        if (trimmed.length !== hazards.length) {
+          try {
+            localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: trimmed }));
+            appLog("saveLastField: quota exceeded with " + (hazards.length - trimmed.length) +
+              " OSM hazard(s) — saved without them (contour/exclusions kept; re-import ЛЕП з OSM after reopen)");
+            saved = true;
+          } catch (e2) { /* still too big — fall through to the last-resort save below */ }
+        }
+        if (!saved) {
+          // Either no OSM hazards to drop, or it still doesn't fit — last resort: contour +
+          // exclusions only (the field itself is the one thing that must never silently vanish).
+          try {
+            localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: [] }));
+            appLog("saveLastField: quota exceeded — saved contour/exclusions only, ALL hazards dropped: " + e);
+          } catch (e3) {
+            appLog("saveLastField: FAILED even without hazards — field contour NOT persisted: " + e3);
+          }
+        }
+      }
+    } catch (e) { /* boundaryFromPolygon/collectHazards threw, or private-mode denies localStorage entirely — ignore */ }
   }
   function scheduleSaveField() {
     if (_fieldTimer) clearTimeout(_fieldTimer);
@@ -1177,6 +1218,7 @@
   }
   const httpApi = {
     build_route: (p) => postJSON("/api/build_route", p),
+    safe_transit: (p) => postJSON("/api/safe_transit", p),
     export: (fmt) => postJSON("/api/export", { fmt }),
     save_project: (p) => postJSON("/api/save_project", p),
     mav_ports: (p) => postJSON("/api/mav_ports", p || {}),
@@ -4535,12 +4577,16 @@
         ? "Натисни «Старт місії» — дрон підніметься вертикально на задану висоту і продовжить."
         : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить.";
       const rv = r.verify;
+      // tf()'s {0}/{1} template pattern (matching the full-upload verdicts above) instead of
+      // building the string by concatenation — setMsg's whole-string t() lookup can never
+      // match a concatenated string, so these mismatch/unverified warnings could never be
+      // translated even with i18n.js keys added (verified finding).
       if (rv && rv.ok && !rv.verified) {
-        setMsg("Залишок залито (" + r.count + " пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ("
-          + ((rv.mismatches || []).join("; ") || "розбіжності") + ") — перевір перед стартом.", "error");
+        setMsg(tf("Залишок залито ({0} пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ({1}) — перевір перед стартом.",
+          r.count, (rv.mismatches || []).join("; ") || t("розбіжності")), "error");
       } else if (rv && !rv.ok) {
-        setMsg("Залишок залито (" + r.count + " пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ("
-          + (rv.error || "таймаут") + ") — link заслабкий. " + tail, "warn");
+        setMsg(tf("Залишок залито ({0} пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({1}) — link заслабкий.",
+          r.count, rv.error || t("таймаут")) + " " + tail, "warn");
       } else {
         setMsg("Залишок залито (" + r.count + " пунктів). " + tail, "ok");
       }
