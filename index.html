@@ -306,6 +306,18 @@
       <p class="hint" id="install-pwa-hint" style="display:none">У Chrome: меню (⋮) → «Встановити додаток» / «Додати на головний екран».</p>
       <p class="hint">На <b>Android у браузері</b> — лише ПЛАНУВАННЯ (браузер Android не має доступу до USB).
         Для дрона на телефоні — <b>APK вище</b>.</p>
+
+      <div class="step">
+        Резервна копія (свій сервер)
+        <p class="hint">Опційно: зберігає поля, журнал польотів і параметри на твоєму сервері,
+          щоб не втратити їх при заміні або втраті телефону. Дані йдуть лише на твій сервер.</p>
+      </div>
+      <p class="hint" id="sync-status">вимкнено</p>
+      <label class="row"><input id="sync-on" type="checkbox" /> Автосинхронізація</label>
+      <div class="export-row">
+        <button id="sync-now" class="ghost">Синхронізувати зараз</button>
+        <button id="sync-restore" class="ghost">Відновити з сервера</button>
+      </div>
       </div><!-- /tab-app -->
 
       <div id="msg" class="msg"></div>
