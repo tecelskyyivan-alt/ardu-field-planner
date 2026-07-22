@@ -204,7 +204,10 @@ class Api:
             mo = mission_overlap(ov_home, wps, spacing, boundary, rtl=rtl)
             # Spray-footprint overlay (the swept swath + the double-sprayed area), only
             # when the UI asks for it — it is skipped on live angle drags to stay snappy.
-            spray_geo = (coverage_overlap_geo(ov_home, wps, spacing, rtl=rtl)
+            _boom = params.get("boom")
+            spray_geo = (coverage_overlap_geo(ov_home, wps, spacing, rtl=rtl,
+                             boundary=boundary, exclusions=exclusions, cover=cover,
+                             boom=(float(_boom) if _boom else None))
                          if params.get("viz") else None)
             # Realistic flight-time estimate (takeoff / lead-in / cruise / turn
             # deceleration / RTL / landing descent), optionally calibrated by the
@@ -267,6 +270,8 @@ class Api:
                 "outside_ha": mo["outside_ha"],        # spray that lands outside the field
                 "coverage_geo": (spray_geo or {}).get("coverage"),  # swept-swath rings (lat/lng)
                 "overlap_geo": (spray_geo or {}).get("overlap"),    # double-sprayed rings
+                "gap_geo": (spray_geo or {}).get("gaps"),           # unsprayed-between-passes rings (#9)
+                "gap_ha": (spray_geo or {}).get("gap_ha"),
                 "start_finish_anchor": sfa,
                 "liquid_l": round(liquid_l, 1),
                 "refills": refills,
