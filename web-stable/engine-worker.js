@@ -6,6 +6,7 @@
  *
  * Messages in:  {id, type:"init"}               -> {id, ok}
  *               {id, type:"build", params}      -> {id, ok, result}  (build_route)
+ *               {id, type:"safe_transit", params} -> {id, ok, result}  (safe_transit; #12)
  */
 const DIR = self.location.href.replace(/[^/]*$/, "");   // app root (works under /ai too)
 let py = null;
@@ -36,6 +37,11 @@ self.onmessage = async (e) => {
     } else if (type === "build") {
       py.globals.set("_pj", JSON.stringify(params));
       const out = py.runPython("import json as _j; _j.dumps(_api.build_route(_j.loads(_pj)))");
+      self.postMessage({ id, ok: true, result: JSON.parse(out) });
+    } else if (type === "safe_transit") {
+      // #12: safe ingress/egress legs for the last-built route (viz + mission splice callers).
+      py.globals.set("_pj", JSON.stringify(params));
+      const out = py.runPython("import json as _j; _j.dumps(_api.safe_transit(_j.loads(_pj)))");
       self.postMessage({ id, ok: true, result: JSON.parse(out) });
     } else {
       self.postMessage({ id, ok: false, error: "unknown message: " + type });

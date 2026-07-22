@@ -18,9 +18,10 @@ from .coverage import (
     generate_coverage, polygon_area_ha, inset_boundary, expand_exclusions, optimal_angle,
     split_route_by_time, split_route_by_area, covered_area_ha, estimate_mission_time,
     coverage_metrics, split_field_by_line, overlap_optimal_angle, mission_overlap,
-    return_corridor_route, coverage_overlap_geo,
+    return_corridor_route, coverage_overlap_geo, safe_transit,
 )
 from .geo import centroid, path_length, haversine
+from .plane_turns import add_plane_turns, plane_turn_params
 from .mission import (
     to_waypoints, to_plan,
     to_geofence_plan, to_fence_mp, to_contour_geojson,
@@ -100,6 +101,10 @@ class Api:
             takeoff_alt = max(alt, 2.0)
             rtl = bool(params.get("rtl", True))
             speed = max(float(params.get("speed", 12)), 0.1)
+            # Fixed-wing: replace each sharp pass-end U-turn with a contained arc
+            # (radius = spacing/2, passes shortened) so a plane — which can't pivot
+            # like a copter — turns INSIDE the field inset instead of overshooting.
+            plane_turn = bool(params.get("plane_turn", False))
             margin = max(float(params.get("margin", 0)), 0.0)
             auto_angle = bool(params.get("auto_angle", False))
             exclusions = [
@@ -175,6 +180,8 @@ class Api:
                         # (the operator would think the whole field is sprayed). (bug-hunt #7)
                         return {"ok": False,
                                 "error": "Сектор замалий для покриття — змісти лінію поділу або зменши крок/відступ."}
+                    if plane_turn and len(w) >= 4:
+                        w = add_plane_turns(w, spacing)
                     flights.append(w)
                     wps.extend(w)
                     sec_angles.append(round(sec_ang, 1))
@@ -188,6 +195,8 @@ class Api:
                     return {"ok": False, "error": "Поле замале для цього кроку — зменши крок або відступ."}
                 if not wps:
                     return {"ok": False, "error": "Не вдалося побудувати проходи — спробуй менший крок або інший кут."}
+                if plane_turn and len(wps) >= 4:
+                    wps = add_plane_turns(wps, spacing)
                 flights = None
 
             home = (*centroid(boundary), 0.0)
@@ -251,7 +260,7 @@ class Api:
                 "home": home, "takeoff_alt": takeoff_alt,
                 "waypoints": wps, "wp_alt": alt, "rtl": rtl,
                 "speed": speed, "contour": boundary, "flights": flights,
-                "exclusions": exclusions,
+                "exclusions": exclusions, "margin": margin,
             }
 
             return {
@@ -278,6 +287,9 @@ class Api:
                 "duration_s": round(duration_s),
                 "duration_breakdown": {k: round(v, 1) for k, v in time_est.items()},
                 "calibration": cal or None,
+                # Fixed-wing: autopilot params FMP should push at upload so the plane
+                # flies the planned arcs (None for copter / when plane_turn is off).
+                "plane_params": plane_turn_params(spacing, speed) if plane_turn else None,
                 "angle_used": round(angle, 1),
                 "margin": margin,
                 "flights": len(flights),
@@ -340,6 +352,40 @@ class Api:
             return {"ok": True, **LINK.status()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def safe_transit(self, params=None):
+        """Plan obstacle-free INGRESS/EGRESS legs for the last-built route (#12), so the drone
+        flies to the mission start and back home WITHOUT leaving the field or crossing an
+        exclusion. Reads field/route/exclusions from the last build_route; `home` defaults to that
+        route's home but the caller (JS) may override it with the live vehicle's home/GPS. Returns
+        {ok, ingress_ok, egress_ok, ingress:[{lat,lng}], egress:[{lat,lng}], home_inside, reason}.
+        FAIL-SAFE: any leg not PROVABLY inside the field free-space comes back ok'd but with its
+        *_ok False and an EMPTY list, so the caller flies a plain straight RTL (with a warning) and
+        never splices an obstacle-crossing waypoint into the mission."""
+        p = params or {}
+        s = self._state
+        if not s or not s.get("waypoints"):
+            return {"ok": False, "error": "Спочатку побудуй маршрут."}
+        try:
+            boundary = s.get("contour") or []
+            wps = s["waypoints"]
+            hp = p.get("home")
+            if hp and hp.get("lat") is not None and hp.get("lng") is not None:
+                home = (float(hp["lat"]), float(hp["lng"]))   # live vehicle home overrides
+            else:
+                h = s["home"]; home = (h[0], h[1])
+            margin = float(p.get("margin", s.get("margin", 0)) or 0)
+            exclusions = s.get("exclusions") or []
+            r = safe_transit(boundary, wps, home, exclusions=exclusions, margin=margin)
+            return {
+                "ok": True,
+                "ingress_ok": r["ingress_ok"], "egress_ok": r["egress_ok"],
+                "ingress": [{"lat": a, "lng": b} for a, b in r["ingress"]],
+                "egress": [{"lat": a, "lng": b} for a, b in r["egress"]],
+                "home_inside": r["home_inside"], "reason": r["reason"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     def _mission_items(self):
         """Build MAVLink mission items from the last-built route (or None).
