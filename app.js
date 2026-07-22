@@ -1948,12 +1948,23 @@
     try { return localStorage.getItem("fmp_is_plane") === "1"; } catch (e) { return false; }
   }
   // Autopilot params so a fixed-wing FLIES the planned R=spacing/2 arcs instead of
-  // cutting them (mirror of engine plane_turn_params): cap cruise so min turn radius
-  // V²/(g·tanφ) ≤ R; L1 look-ahead (NAVL1·V/π) ≈ 0.6·R to track the arc; small WP_RADIUS.
+  // cutting them (mirror of engine backend/plane_turns.py:plane_turn_params — keep the
+  // two in sync): cap cruise so min turn radius V²/(g·tanφ) ≤ R; L1 look-ahead
+  // (NAVL1·V/π) ≈ 0.6·R to track the arc; small WP_RADIUS.
+  //
+  // MIN_AIRSPEED is a floor below any real fixed-wing's minimum flying speed. At a
+  // tight enough spacing/turn radius, the R-feasible cruise (capped by vMax below) can
+  // fall BELOW that floor — audit finding: the old code then clamped it back UP to an
+  // arbitrary 1 m/s "safe-looking" positive number instead of admitting the arc is
+  // unflyable, which would have commanded a stall-adjacent AIRSPEED_CRUISE to the
+  // airframe. Return null instead — the caller must skip pushing plane params entirely
+  // (arcs stay untuned / effectively off) rather than fly an impossible cruise speed.
+  const PLANE_MIN_AIRSPEED = 12.0;
   function planeTurnParams(spacing, cruise) {
     const R = Math.max(spacing / 2, 1), g = 9.81, bank = 45;
     const vMax = Math.sqrt(0.4 * g * R * Math.tan(bank * Math.PI / 180));
-    const V = Math.max(1, Math.min(cruise || 12, vMax));
+    const V = Math.min(cruise || 12, vMax);
+    if (V < PLANE_MIN_AIRSPEED) return null;
     const navl1 = Math.max(6, Math.min(20, 0.6 * Math.PI * R / V));
     return {
       AIRSPEED_CRUISE: Math.round(V * 10) / 10,
@@ -4372,6 +4383,14 @@
       // path unchanged. INAV planes get the arc geometry but no MAVLink param push.
       const _plane = isPlaneVehicle();
       const planeParams = (_rt && _plane) ? planeTurnParams(_sp, parseFloat($("speed").value) || 12) : null;
+      // planeTurnParams returns null when the spacing-derived turn radius is too tight to
+      // fly at ANY airspeed the airframe can sustain (below PLANE_MIN_AIRSPEED) — round-turn
+      // params are then simply not pushed (see mav_upload_mission's `pp &&` guard); log why,
+      // since the toggle being ON with nothing sent otherwise looks like a silent no-op.
+      if (_rt && _plane && !planeParams) {
+        appLog("plane-turn: вимкнено — при кроці " + _sp + " м потрібна крейсерська швидкість нижча за безпечний мінімум (" +
+          PLANE_MIN_AIRSPEED + " м/с); дуги НЕ тюняться (параметри не залито).");
+      }
       const turnRadiusM = (_rt && !_plane) ? Math.max(1, Math.min(10, _sp / 2)) : 0;
       // Intent-marker for the ACK→flownSave window: if the app is killed after the FC stored the
       // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2). Keep
