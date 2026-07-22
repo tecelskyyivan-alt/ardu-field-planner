@@ -4850,7 +4850,39 @@
     const data = {};
     SYNC_KEYS.forEach((k) => { try { const v = localStorage.getItem(k); if (v != null) data[k] = v; } catch (e) {} });
     try { const f = await fldAll(); if (f) data.fmp_fields_idb = JSON.stringify(f); } catch (e) {}
-    try { const l = await flogAll(); if (l && l.length) data.fmp_flightlog_idb = JSON.stringify(l); } catch (e) {}
+    // Sync flight SUMMARIES only. Every flogPut() record (app.js ~flightRecFinalize) also
+    // carries the full 1 Hz `samples` track — it's only ever read at finalize time to derive
+    // `actual` above; nothing re-reads it back from storage afterwards (no replay feature),
+    // and renderFlightStats/flogSummary only touch actual/planned/partial/field/date. Shipping
+    // the raw track here is pure bloat: FLOG_MAX_FLIGHTS=300 records can reach 20-30 MB,
+    // blowing past serve.py's 4 MB /api/sync cap and forcing an expensive main-thread
+    // double-stringify (boot/disarm/online — disarm runs while telemetry is still polling)
+    // for a payload that then gets rejected anyway (verified finding).
+    try {
+      const all = await flogAll();                // ascending by started_at (oldest first)
+      if (all && all.length) {
+        // Strip `samples`, and pre-size each stripped record ONCE (not the whole array
+        // repeatedly) so the payload-cap guard below is a cheap subtraction loop, not a
+        // repeated multi-MB re-stringify — that would recreate the very main-thread-freeze
+        // problem this fix is for.
+        let total = 0;
+        const sizes = new Array(all.length);
+        const stripped = all.map((r, i) => {
+          const c = Object.assign({}, r); delete c.samples;
+          const s = JSON.stringify(c); sizes[i] = s.length; total += s.length;
+          return c;
+        });
+        // Total-payload guard: even sample-free, a long flight history can still approach
+        // the server cap — drop the OLDEST records until it fits, rather than fail the sync
+        // outright. Recent flights are what matters most after losing/replacing a phone.
+        const MAX_BYTES = 3.5 * 1024 * 1024;
+        let start = 0;
+        while (start < stripped.length - 1 && total > MAX_BYTES) { total -= sizes[start]; start++; }
+        if (start > 0) appLog("sync: dropped " + start + " oldest flight summar" + (start === 1 ? "y" : "ies") +
+          " to stay under the " + (MAX_BYTES / 1e6).toFixed(1) + " MB sync payload cap");
+        data.fmp_flightlog_idb = JSON.stringify(stripped.slice(start));
+      }
+    } catch (e) {}
     return { device: deviceId(), ts: Date.now(), app_version: APP_VERSION, data };
   }
   // Applies a server snapshot as an HONEST OVERWRITE (matches the confirm() text the
