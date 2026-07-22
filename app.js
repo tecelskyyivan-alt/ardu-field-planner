@@ -1824,16 +1824,6 @@
       });
     } catch (e) { return null; }     // null = IDB unavailable -> caller uses localStorage
   }
-  async function fldGet(name) {       // one record by keyPath (null if missing / IDB unavailable)
-    try {
-      const db = await fldOpen();
-      return await new Promise((res, rej) => {
-        const rq = db.transaction(FLD_STORE, "readonly").objectStore(FLD_STORE).get(name);
-        rq.onsuccess = () => res(rq.result || null);
-        rq.onerror = () => rej(rq.error);
-      });
-    } catch (e) { return null; }
-  }
   async function fldDelete(name) {
     try {
       const db = await fldOpen();
@@ -3461,12 +3451,15 @@
   async function fieldProgressCredit(fr, coveredHa, covComplete) {
     const name = (fr.work && fr.work.field) || "";
     if (!name || name === "поле" || coveredHa == null) return;   // raw/no-plan flight or unnamed → skip
-    const rec = await fldGet(name);
+    const recs = await fldAll();                                 // null → IDB unavailable, use localStorage
+    const useLp = recs === null;
+    const rec = useLp ? lpAll()[name] : (recs || []).find((r) => r.name === name);
     if (!rec) return;                                            // never-saved contour → nothing to credit
     const upd = window.GEO_COVER.applyFieldCredit(rec, coveredHa, covComplete);
     upd.last_flight_at = Date.now();
     upd.updated = Date.now();                                    // #10 LWW: keep this progress on a later sync
-    await fldPut(upd);
+    const ok = useLp ? false : await fldPut(upd);
+    if (!ok) { try { lpSave(name, upd); } catch (e) {} }          // mirror the localStorage fallback used elsewhere
   }
   function flightRecAbort() { if (flightRec) flightRecFinalize(lastStatus, true); }
   loadFlightSummaries();          // warm the in-memory cache on startup
