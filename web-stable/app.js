@@ -3852,6 +3852,7 @@
     setMsg("Заливаю місію в дрон…", null);
     appLog("upload start: " + (lastRoute ? lastRoute.length : 0) + " route pts");
     $("mav-upload").disabled = true;
+    let _prevFlownRaw = null;                 // restore the previous flown snapshot if the upload fails
     try {
       // Live progress so a slow link (ELRS/RF) doesn't look frozen — the user sees
       // points climbing instead of guessing whether it timed out. Only the in-browser
@@ -3867,7 +3868,9 @@
       const planeParams = (_rt && _plane) ? planeTurnParams(_sp, parseFloat($("speed").value) || 12) : null;
       const turnRadiusM = (_rt && !_plane) ? Math.max(1, Math.min(10, _sp / 2)) : 0;
       // Intent-marker for the ACK→flownSave window: if the app is killed after the FC stored the
-      // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2).
+      // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2). Keep
+      // the previous snapshot so a KNOWN failure below undoes the marker (never lose last-good state).
+      try { _prevFlownRaw = localStorage.getItem(FLOWN_KEY); } catch (e) {}
       try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: lastRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
@@ -3923,9 +3926,12 @@
         }
       } else {
         setMsg((r && r.error) || t("Не вдалося залити місію."), "error");
+        // upload rejected → drone still holds its previous mission; undo the intent-marker
+        try { _prevFlownRaw != null ? localStorage.setItem(FLOWN_KEY, _prevFlownRaw) : localStorage.removeItem(FLOWN_KEY); } catch (e) {}
       }
     } catch (e) {
       setMsg("Помилка заливки: " + e, "error");
+      try { _prevFlownRaw != null ? localStorage.setItem(FLOWN_KEY, _prevFlownRaw) : localStorage.removeItem(FLOWN_KEY); } catch (e2) {}
     } finally {
       $("mav-upload").disabled = !mavConnected;
     }
