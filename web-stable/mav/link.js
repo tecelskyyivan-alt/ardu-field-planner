@@ -481,7 +481,10 @@
               // Before the vehicle first engages: re-announce COUNT. It RESETS the
               // vehicle's mission receiver, so throttle to safely exceed the ELRS
               // round-trip (an aggressive resend keeps resetting an in-flight transfer).
-              if (Date.now() - lastCount > 2000) { sendCount(); lastCount = Date.now(); }
+              // 3 s (was 2 s): a high-latency link where the vehicle takes ~2.5 s to send its
+              // first request must NOT be re-announced at — that resets a receiver that was
+              // simply slow, not one that lost the COUNT. Genuine COUNT loss still recovers in ~3 s.
+              if (Date.now() - lastCount > 3000) { sendCount(); lastCount = Date.now(); }
             } else if (isInav) {
               // INAV HARD-REJECTS any out-of-sequence item (MAV_MISSION_INVALID_SEQUENCE)
               // and never retransmits its own request. Re-sending the last item after INAV
