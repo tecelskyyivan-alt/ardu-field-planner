@@ -334,3 +334,8 @@ Object.assign(window.FMP_TR, {
 });
 
 Object.assign(window.FMP_TR, { "Пульт (EdgeTX/ELRS MAVLink)": "Handset (EdgeTX/ELRS MAVLink)" });
+
+Object.assign(window.FMP_TR, {
+  "Прогалини": "Gaps",
+  "Фактична ширина факела, м (порожньо = крок)": "Actual boom width, m (empty = spacing)",
+});
