@@ -319,6 +319,31 @@
     syncFollowBtn();
   }
   function toggleFollow() { setFollow(!mavFollow); }
+
+  // ---- on-map telemetry overlay toggle (#11) — top-left, below the follow button ----
+  let mavOverlayOn = true, _overlayBtn = null;
+  const OverlayControl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd: function () {
+      const div = L.DomUtil.create("div", "leaflet-bar leaflet-control overlay-ctl");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.title = "Телеметрія на карті"; a.setAttribute("role", "button");
+      a.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M3 5h18M3 12h13M3 19h9"/></svg>';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); toggleOverlay(); });
+      _overlayBtn = a;
+      return div;
+    },
+  });
+  map.addControl(new OverlayControl());
+  function syncOverlayBtn() { if (_overlayBtn) _overlayBtn.classList.toggle("active", !!mavOverlayOn); }
+  function setOverlay(v) {
+    mavOverlayOn = !!v; sessionPatch({ overlay: mavOverlayOn }); syncOverlayBtn();
+    if (_overlay && (!mavOverlayOn || !mavConnected)) _overlay.card.classList.add("hidden");
+  }
+  function toggleOverlay() { setOverlay(!mavOverlayOn); }
+  syncOverlayBtn();
+
   // User grabs the map to look around → stop following (re-enable via the button).
   map.on("dragstart", function () { if (mavFollow) setFollow(false); });
 
@@ -1394,6 +1419,7 @@
     }
     // Сесія закінчилась підключеною → тихо перепідключаємось самі (BLE/UDP/TCP/cable, #2).
     bootAutoReconnect(ss);
+    if (ss.overlay != null) { mavOverlayOn = !!ss.overlay; syncOverlayBtn(); }   // #11 overlay toggle (default ON)
     // Хуки збереження решти сесії.
     let _mvTimer = null;
     map.on("moveend zoomend", () => {
@@ -3065,6 +3091,7 @@
     if (droneMarker) { map.removeLayer(droneMarker); droneMarker = null; }
     if (droneTrack) { map.removeLayer(droneTrack); droneTrack = null; }
     mavClearTarget();
+    if (_overlay) _overlay.card.classList.add("hidden");   // #11: don't freeze the overlay on the last frame
     if (liveHomeMarker) { map.removeLayer(liveHomeMarker); liveHomeMarker = null; }
     if (droneMissionLayer) { map.removeLayer(droneMissionLayer); droneMissionLayer = null; }
     flightRecAbort();               // link dropped mid-flight -> save what we have (partial)
@@ -3127,7 +3154,9 @@
       appLog(`tlm mode=${s.mode} armed=${s.armed} alt=${s.alt_rel} fix=${s.fix_type} sats=${s.sats} `
         + `hasfix=${s.lat != null} batt=${s.battery_v} gs=${s.groundspeed} wp=${s.wp_current}/${s.wp_total}`);
     }
-    mavRenderHud(s);
+    const _p = mavProgressData(s);   // compute ONCE (side-effects: target marker + countdown) → fan out
+    mavRenderHud(s, _p);
+    mavOverlayRender(s, _p);
     mavUpdateMarker(s);
   }
 
@@ -3619,6 +3648,50 @@
     ["eta", "ETA"], ["finish", "До завершення"], ["land", "До посадки"], ["message", "Повідомл."],
   ];
   let _hud = null;
+  // ---- on-map telemetry overlay (#11): same data as the pinned notification, single source
+  // (lastStatus + the passed mavProgressData p). Child of the map container (like elev-badge);
+  // pointer-events:none so the map stays fully pannable in gloves. ----
+  let _overlay = null;
+  function mavOverlayEnsure() {
+    if (_overlay) return _overlay;
+    const card = L.DomUtil.create("div", "map-card mav-overlay hidden", map.getContainer());
+    card.innerHTML =
+      '<div class="mo-head"><span class="mo-link"></span><span class="mo-mode"></span><span class="mo-armed"></span></div>'
+      + '<div class="mo-prog"><div class="mo-bar"><i></i></div><span class="mo-pct"></span><span class="mo-wp"></span></div>'
+      + '<div class="mo-chips"><span class="mo-batt"></span><span class="mo-alt"></span><span class="mo-gs"></span></div>';
+    _overlay = { card,
+      link: card.querySelector(".mo-link"), mode: card.querySelector(".mo-mode"), armed: card.querySelector(".mo-armed"),
+      bar: card.querySelector(".mo-bar > i"), pct: card.querySelector(".mo-pct"), wp: card.querySelector(".mo-wp"),
+      batt: card.querySelector(".mo-batt"), alt: card.querySelector(".mo-alt"), gs: card.querySelector(".mo-gs"),
+      last: {} };
+    return _overlay;
+  }
+  function _moSet(o, key, el, text, color) {              // diff-guarded write (textContent = escaping)
+    const prev = o.last[key];
+    if (prev && prev.t === text && prev.c === color) return;
+    o.last[key] = { t: text, c: color };
+    el.textContent = text;
+    if (color !== undefined) el.style.color = color || "";
+  }
+  function mavOverlayRender(s, p) {
+    const o = mavOverlayEnsure();
+    if (!mavOverlayOn || !mavConnected) { o.card.classList.add("hidden"); return; }
+    o.card.classList.remove("hidden");
+    _moSet(o, "link", o.link, s.connected ? "●" : "○", s.connected ? "var(--ok)" : "var(--danger)");
+    _moSet(o, "mode", o.mode, s.mode || "—", null);
+    _moSet(o, "armed", o.armed, s.armed == null ? "?" : (s.armed ? "ARMED" : "disarmed"),
+      s.armed == null ? null : (s.armed ? "var(--danger)" : "var(--ok)"));
+    const battTxt = s.battery_v != null ? `${s.battery_v} В` + (s.battery_pct != null ? ` · ${s.battery_pct}%` : "") : "—";
+    const battCol = s.battery_pct == null ? null : (s.battery_pct > 50 ? "var(--ok)" : (s.battery_pct >= 20 ? "var(--warn)" : "var(--danger)"));
+    _moSet(o, "batt", o.batt, battTxt, battCol);
+    _moSet(o, "alt", o.alt, s.alt_rel != null ? `${s.alt_rel} м` : "—", null);
+    _moSet(o, "gs", o.gs, s.groundspeed != null ? `${s.groundspeed} м/с` : "—", null);
+    const pct = p ? Math.max(0, Math.min(100, Math.round(p.pct))) : null;   // distance-based (same as notification)
+    _moSet(o, "pct", o.pct, pct != null ? pct + "%" : "—", null);
+    _moSet(o, "wp", o.wp, "WP " + (s.wp_current != null ? `${s.wp_current} / ${s.wp_total || flownWpTotal || "—"}` : "—"), null);
+    const w = pct != null ? pct : 0;
+    if (o.last.barw !== w) { o.last.barw = w; o.bar.style.width = w + "%"; }
+  }
   function mavHudEnsure() {
     const container = $("mav-hud");
     if (_hud && _hud.container === container) return _hud;
@@ -3646,7 +3719,7 @@
     if (r.val.textContent !== value) r.val.textContent = value;   // textContent = intrinsic escaping
     r.val.style.color = color || "";
   }
-  function mavRenderHud(s) {
+  function mavRenderHud(s, p) {
     const { rows } = mavHudEnsure();
     hudSet(rows, "link", s.connected ? "● онлайн" : "○ немає heartbeat",
       s.connected ? "#5fd3a3" : "#ff7b72", true);
@@ -3671,7 +3744,6 @@
     hudSet(rows, "speed", s.groundspeed != null ? `${s.groundspeed} м/с` : "", null, s.groundspeed != null);
     hudSet(rows, "wp", s.wp_current != null
       ? `${s.wp_current}${s.wp_total ? " / " + s.wp_total : ""}` : "", null, s.wp_current != null);
-    const p = mavProgressData(s);
     hudSet(rows, "progress", p ? `${p.pct}%` + (p.phase ? ` · ${p.phase}` : "") : "", null, !!p);
     hudSet(rows, "tonext", p ? `${Math.round(p.dNext)} м` : "", null, !!p);
     hudSet(rows, "remaining", p ? `${(p.rem / 1000).toFixed(2)} км` : "", null, !!p);
