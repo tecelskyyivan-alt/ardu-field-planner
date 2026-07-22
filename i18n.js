@@ -143,6 +143,7 @@ window.FMP_TR = {
   "Перезаписати локальні дані копією з сервера? Застосунок перезавантажиться.":
     "Overwrite local data with the server copy? The app will reload.",
   "Відновлено з сервера. Перезавантаження…": "Restored from the server. Reloading…",
+  "Відновлено частково — перевір поля/статистику.": "Partially restored — check fields/stats.",
   "оновлюється з середини додатку": "updates from inside the app",
 
   // ---- fragmented help sentences (translated node-by-node) ----

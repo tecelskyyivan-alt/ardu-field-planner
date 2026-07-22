@@ -2057,6 +2057,19 @@
       return true;
     } catch (e) { return false; }
   }
+  // Wipe every saved field. Used ONLY by a backup-sync restore (#10 review I2) — an
+  // honest overwrite must not let a field deleted on another device resurrect here.
+  async function fldClearAll() {
+    try {
+      const db = await fldOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(FLD_STORE, "readwrite");
+        tx.objectStore(FLD_STORE).clear();
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      return true;
+    } catch (e) { return false; }
+  }
   async function migrateProjectsToIDB() {     // one-time, idempotent
     try {
       if (localStorage.getItem("fmp_fields_migrated")) return;
@@ -3595,7 +3608,8 @@
         tx.objectStore(FLOG_STORE).put(rec);
         tx.oncomplete = res; tx.onerror = () => rej(tx.error);
       });
-    } catch (e) { /* private mode / no IndexedDB — keep the in-memory summary only */ }
+      return true;
+    } catch (e) { return false; }   // private mode / no IndexedDB — keep the in-memory summary only
   }
   async function flogAll() {
     try {
@@ -3606,6 +3620,19 @@
         rq.onerror = () => rej(rq.error);
       });
     } catch (e) { return []; }
+  }
+  // Wipe the whole flight log. Used ONLY by a backup-sync restore (#10 review I2) —
+  // an honest overwrite must not let a flight deleted on another device resurrect.
+  async function flogClearAll() {
+    try {
+      const db = await flogOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(FLOG_STORE, "readwrite");
+        tx.objectStore(FLOG_STORE).clear();
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      return true;
+    } catch (e) { return false; }
   }
   const flogSummary = (r) => ({ started_at: r.started_at, planned: r.planned || null,
     actual: r.actual || null, partial: !!r.partial });
@@ -4488,12 +4515,20 @@
     return out.concat(LOG).join("\n");
   }
   // A stable-ish per-device id so server-side logs from the same phone group.
+  let _sessionDeviceId = null;   // memoized fallback for this page load only (see catch below)
   function deviceId() {
     try {
       let d = localStorage.getItem("fmp_device");
       if (!d) { d = "d" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); localStorage.setItem("fmp_device", d); }
       return d;
-    } catch (e) { return "anon"; }
+    } catch (e) {
+      // localStorage unavailable (private browsing): the fixed literal "anon" would
+      // collide across EVERY such device on the server (log files overwrite each
+      // other; sync snapshots would too). Mint one random id per page load instead —
+      // still collision-free, just not persisted across reloads (review M1).
+      if (!_sessionDeviceId) _sessionDeviceId = "s" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+      return _sessionDeviceId;
+    }
   }
   // Upload the log to the VPS so it can be read+analysed remotely. The PWA/desktop
   // POST same-origin (/api/log, the browser carries the basic-auth). The APK has no
@@ -4671,17 +4706,35 @@
     try { const l = await flogAll(); if (l && l.length) data.fmp_flightlog_idb = JSON.stringify(l); } catch (e) {}
     return { device: deviceId(), ts: Date.now(), app_version: APP_VERSION, data };
   }
+  // Applies a server snapshot as an HONEST OVERWRITE (matches the confirm() text the
+  // operator just accepted): the fields + flight-log IndexedDB stores are CLEARED
+  // before repopulating, so a field/flight deleted on another device before its last
+  // push doesn't resurrect here (review I2). Every write is individually accounted
+  // for (not swallowed) so the caller can tell a full restore from a partial one.
   async function applySyncSnapshot(snapshot) {
     const data = (snapshot && snapshot.data) || {};
+    let total = 0, failures = 0;
+    const note = (okFlag, what) => { total++; if (!okFlag) { failures++; appLog("sync: restore failed — " + what); } };
     SYNC_KEYS.forEach((k) => {
-      if (Object.prototype.hasOwnProperty.call(data, k)) { try { localStorage.setItem(k, data[k]); } catch (e) {} }
+      if (!Object.prototype.hasOwnProperty.call(data, k)) return;
+      try { localStorage.setItem(k, data[k]); note(true, k); }
+      catch (e) { note(false, k + ": " + e); }
     });
+    note(await fldClearAll(), "clear fields store");
+    note(await flogClearAll(), "clear flight log store");
     if (data.fmp_fields_idb) {
-      try { const recs = JSON.parse(data.fmp_fields_idb); for (const r of recs) await fldPut(r); } catch (e) {}
+      try {
+        const recs = JSON.parse(data.fmp_fields_idb);
+        for (const r of recs) note(await fldPut(r), "field " + ((r && r.name) || "?"));
+      } catch (e) { note(false, "parse fmp_fields_idb: " + e); }
     }
     if (data.fmp_flightlog_idb) {
-      try { const recs = JSON.parse(data.fmp_flightlog_idb); for (const r of recs) await flogPut(r); } catch (e) {}
+      try {
+        const recs = JSON.parse(data.fmp_flightlog_idb);
+        for (const r of recs) note(await flogPut(r), "flight " + ((r && r.started_at) || "?"));
+      } catch (e) { note(false, "parse fmp_flightlog_idb: " + e); }
     }
+    return { ok: failures === 0, total, failures };
   }
   function syncStatusText() {
     if (!syncEnabled()) return "вимкнено";
@@ -4755,8 +4808,13 @@
         "Перезаписати локальні дані копією з сервера? Застосунок перезавантажиться."
       );
       if (!ok) return;
-      await applySyncSnapshot(snap);
-      setMsg("Відновлено з сервера. Перезавантаження…", "ok");
+      const result = await applySyncSnapshot(snap);
+      if (result.ok) {
+        setMsg("Відновлено з сервера. Перезавантаження…", "ok");
+      } else {
+        appLog("sync: restore partial — " + result.failures + " of " + result.total + " writes failed");
+        setMsg("Відновлено частково — перевір поля/статистику.", "warn");
+      }
       setTimeout(() => location.reload(), 300);
     } catch (e) { setMsg("Помилка відновлення: " + e, "error"); }
   }
