@@ -3012,7 +3012,13 @@
                 ? { ok: true, count: fenceItems.length, exclusions: exclusions.length,
                     // HOME outside the boundary: an ENABLED fence would then refuse to arm
                     // right here — the caller folds this into its message.
-                    homeOutside: !window.GEO_COVER.pointInRing(home[0], home[1], boundary) }
+                    homeOutside: !window.GEO_COVER.pointInRing(home[0], home[1], boundary),
+                    // Lost-ACK "ok" (link.js:610): every item was SENT but the final ACK never
+                    // arrived — on the vehicle the transfer can time out with the last vertex
+                    // missing and get discarded, leaving whatever fence was stored BEFORE this
+                    // upload. Carry the warning through so the caller paints uncertainty, not
+                    // success (verified finding — do not drop this like the old code did).
+                    warning: fres.warning || null }
                 : { ok: false, error: fres.error };
             }
           }
@@ -4389,7 +4395,7 @@
                               diff: r.verify.mismatches },
         // #12p3: opt-in geofence outcome (undefined when the checkbox was off/not applicable)
         fence: r.fence && { ok: r.fence.ok, count: r.fence.count, exclusions: r.fence.exclusions,
-                            error: r.fence.error, homeOutside: r.fence.homeOutside } }));
+                            error: r.fence.error, homeOutside: r.fence.homeOutside, warning: r.fence.warning } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
         promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
@@ -4434,7 +4440,15 @@
         // with zero paint frames in between, silently hiding a fence failure from the
         // pilot (review finding). Never downgrade an already-worse verdict (error > warn > ok).
         if (r.fence) {
-          if (r.fence.ok) {
+          if (r.fence.ok && r.fence.warning) {
+            // Lost-ACK "ok" (link.js:610): every fence item was SENT but the final ACK never
+            // arrived. On the vehicle this can time out and discard the incomplete transfer,
+            // silently keeping whatever fence (possibly a stale one from an earlier field) was
+            // stored before — must NOT read as "stored", even though res.fence.ok is true
+            // (verified finding).
+            m += " " + t("Геозона: підтвердження не прийшло — перевір перед увімкненням FENCE_ENABLE.");
+            if (kind === "ok") kind = "warn";
+          } else if (r.fence.ok) {
             const nExcl = r.fence.exclusions || 0;
             m += " " + (nExcl
               ? tf("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.", nExcl)
