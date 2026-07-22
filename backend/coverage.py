@@ -1036,7 +1036,9 @@ def flown_path_length(home, waypoints, rtl=True):
     return d
 
 
-def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900):
+def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900,
+                         boundary=None, exclusions=None, cover=None, boom=None,
+                         gap_min_area=None, gap_feather=None):
     """Map-overlay geometry for the spray footprint. An always-on sprayer paints a
     swath of width ≈ spacing along the WHOLE flown path; this returns that swept band
     as `coverage`, and the ground it sprays a SECOND time (turns, lead-in, RTL, passes
@@ -1049,7 +1051,9 @@ def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900):
     lat0, lon0 = float(home[0]), float(home[1])
     path = [(lat0, lon0)] + wps + ([(lat0, lon0)] if rtl else [])
     local = [latlon_to_local(la, lo, lat0, lon0) for la, lo in path]
-    r = max(float(spacing), 0.5) / 2.0
+    # Physical spray half-width: `boom` (real footprint) if given, else `spacing` (stitched passes,
+    # no gaps possible). boom < spacing → visible gaps between passes; boom > spacing → overlap.
+    r = max(float(boom if boom else spacing), 0.5) / 2.0
     band = LineString(local).buffer(r, cap_style=2)            # the whole swept swath
 
     overlap_geom = None
@@ -1079,13 +1083,50 @@ def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900):
         for p in polys:
             if p.is_empty or p.area <= 0:
                 continue
+            p = p.simplify(max(0.5, 0.05 * float(spacing)))     # cap vertex count on big/OSM fields (#9)
+            if p.is_empty:
+                continue
             ring = []
             for x, y in p.exterior.coords:
                 la, lo = local_to_latlon(x, y, lat0, lon0)
                 ring.append({"lat": la, "lng": lo})
             out.append(ring)
         return out
-    return {"coverage": rings(band), "overlap": rings(overlap_geom)}
+    # Gaps (#9): unsprayed ground BETWEEN passes — meaningful only with a physical boom width
+    # (boom < spacing). Computed against the passes-only band (NOT lead-in/RTL — on plan-time
+    # home is the centroid, so those legs are fictitious), inside cover-minus-exclusions, eroded
+    # by a feather so the centred passes' own edge isn't flagged. All shapely guarded.
+    gap_geom = None
+    gap_ha = 0.0
+    try:
+        if cover and len(cover) >= 3 and len(wps) >= 2:
+            from shapely.geometry import Polygon as _Poly
+            cover_local = _Poly([latlon_to_local(la, lo, lat0, lon0) for la, lo in cover]).buffer(0)
+            excl_polys = []
+            for ex in (exclusions or []):
+                if ex and len(ex) >= 3:
+                    excl_polys.append(_Poly([latlon_to_local(la, lo, lat0, lon0) for la, lo in ex]).buffer(0))
+            excl_union = unary_union(excl_polys) if excl_polys else None
+            local_wps = [latlon_to_local(la, lo, lat0, lon0) for la, lo in wps]
+            gap_band = LineString(local_wps).buffer(r, cap_style=2)
+            feather = gap_feather if gap_feather is not None else min(0.3 * r, 2.0)
+            clip_e = cover_local.buffer(-feather)               # erode BEFORE subtracting exclusions
+            if excl_union is not None:
+                clip_e = clip_e.difference(excl_union)
+            clip_e = clip_e.buffer(0)
+            g = clip_e.difference(gap_band)
+            min_a = gap_min_area if gap_min_area is not None else max(1.0, 0.05 * float(spacing) * float(spacing))
+            if g and not g.is_empty:
+                polys = list(g.geoms) if g.geom_type == "MultiPolygon" else [g]
+                kept = [p for p in polys if (not p.is_empty and p.area >= min_a)]
+                if kept:
+                    gap_geom = unary_union(kept)
+                    gap_ha = gap_geom.area / 1e4
+    except Exception:
+        gap_geom = None
+        gap_ha = 0.0
+    return {"coverage": rings(band), "overlap": rings(overlap_geom),
+            "gaps": rings(gap_geom), "gap_ha": round(gap_ha, 3)}
 
 
 def overlap_optimal_angle(cover, spacing, home, field_boundary=None, exclusions=None,

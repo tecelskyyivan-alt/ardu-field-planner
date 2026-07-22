@@ -497,6 +497,7 @@
   let sectorsLayer = null;        // rendered sector sub-polygons
   let coverageLayer = null;       // sprayed-swath fill (spray footprint overlay)
   let overlapLayer = null;        // double-sprayed area (drawn over the swath)
+  let gapLayer = null;            // unsprayed gaps between passes (#9)
 
   const drawControl = new L.Control.Draw({
     draw: {
@@ -1127,6 +1128,7 @@
     if (!keepViz) {
       if (coverageLayer) { map.removeLayer(coverageLayer); coverageLayer = null; }
       if (overlapLayer) { map.removeLayer(overlapLayer); overlapLayer = null; }
+      if (gapLayer) { map.removeLayer(gapLayer); gapLayer = null; }
     }
     $("stats").classList.add("hidden");
     ["exp-wp", "exp-plan", "exp-fence", "exp-fencemp", "exp-geojson"]
@@ -1201,6 +1203,7 @@
     const params = {
       boundary,
       spacing: parseFloat($("spacing").value),
+      boom: (parseFloat(($("boom") || {}).value) || 0),   // #9: physical spray width (0/empty → engine uses spacing)
       angle: parseFloat($("angle").value),
       auto_angle: $("auto_angle").checked,
       // Auto-angle = FULL COVERAGE first, then minimum TIME (passes along the
@@ -1293,7 +1296,7 @@
     // Spray overlays (N swath + M double-spray polygons) are the heaviest paint.
     // Defer them a frame so the route line + markers + stats appear FIRST; they fill
     // in after and the route is lifted back on top. Guard drops a superseded build.
-    if ((res.coverage_geo && res.coverage_geo.length) || (res.overlap_geo && res.overlap_geo.length)) {
+    if ((res.coverage_geo && res.coverage_geo.length) || (res.overlap_geo && res.overlap_geo.length) || (res.gap_geo && res.gap_geo.length)) {
       setTimeout(() => {
         if (myToken !== buildSeq) return;
         if (res.coverage_geo && res.coverage_geo.length) {
@@ -1309,6 +1312,13 @@
               color: "#c0392b", weight: 0.5, opacity: 0.55,
               fillColor: "#ff3b30", fillOpacity: 0.3, interactive: false,
             }))).addTo(map).bindTooltip("Накладання — подвійне внесення");
+        }
+        if (res.gap_geo && res.gap_geo.length) {
+          gapLayer = L.featureGroup(res.gap_geo.map((ring) =>
+            L.polygon(ring.map((p) => [p.lat, p.lng]), {
+              color: "#b8860b", weight: 1, opacity: 0.9,
+              fillColor: "#ffd166", fillOpacity: 0.4, interactive: false,
+            }))).addTo(map).bindTooltip("Прогалини — пропущено (не оброблено)");
         }
         if (routeLayer && routeLayer.bringToFront) routeLayer.bringToFront();
         if (routeMarkers && routeMarkers.bringToFront) routeMarkers.bringToFront();
@@ -1354,6 +1364,7 @@
       row("Довжина", (res.length_m / 1000).toFixed(2) + " км") +
       row("Орієнт. час", fmtDuration(res.duration_s)) +
       (res.coverage_pct != null ? row("Покриття поля", res.coverage_pct + "%") : "") +
+      (res.gap_ha > 0.001 ? row("Прогалини", res.gap_ha.toFixed(3) + " га") : "") +
       (res.overlap_pct != null ? row("Перекриття", res.overlap_pct + "%") : "") +
       row("Кут проходів", res.angle_used + "°" + ($("auto_angle").checked ? " (авто)" : "")) +
       row("Відступ", res.margin + " м") +
@@ -1873,6 +1884,7 @@
   function collectParams() {
     return {
       spacing: parseFloat($("spacing").value),
+      boom: parseFloat($("boom").value) || "",
       angle: parseFloat($("angle").value),
       auto_angle: $("auto_angle").checked,
       margin: parseFloat($("margin").value) || 0,
@@ -1911,7 +1923,7 @@
   function applyParams(p) {
     if (!p) return;
     const set = (id, v) => { if (v !== undefined && v !== null && $(id)) $(id).value = v; };
-    set("spacing", p.spacing); set("angle", p.angle); set("margin", p.margin);
+    set("spacing", p.spacing); set("boom", p.boom); set("angle", p.angle); set("margin", p.margin);
     set("alt", p.alt); set("speed", p.speed);
     if ($("auto_angle")) $("auto_angle").checked = !!p.auto_angle;
     if ($("rtl")) $("rtl").checked = p.rtl !== false;
