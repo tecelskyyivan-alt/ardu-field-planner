@@ -2149,6 +2149,25 @@
   }
   if ($("show-saved")) $("show-saved").addEventListener("click", showSavedFields);
 
+  // Cheap contour-identity heuristic for the promoteFieldOnUpload guard below: same
+  // centroid (within GPS/redraw noise) AND comparable area. Good enough to tell "this is a
+  // WHOLE DIFFERENT field" apart from "the same field, re-surveyed/nudged a bit" without
+  // an expensive polygon-overlap computation.
+  function sameFieldGeometry(a, b) {
+    if (!a || !b || a.length < 3 || b.length < 3) return false;
+    const centroid = (r) => {
+      let la = 0, lo = 0; r.forEach((p) => { la += p.lat; lo += p.lng; });
+      return { lat: la / r.length, lng: lo / r.length };
+    };
+    const ca = centroid(a), cb = centroid(b);
+    if (haversineM(ca.lat, ca.lng, cb.lat, cb.lng) > 250) return false;   // centroids far apart -> different field
+    const areaA = _haOf(a), areaB = _haOf(b);
+    if (areaA > 0 && areaB > 0) {
+      const ratio = areaA > areaB ? areaA / areaB : areaB / areaA;
+      if (ratio > 1.75) return false;                                    // wildly different size -> different field
+    }
+    return true;
+  }
   // On upload: promote the current contour to a persistent named record (the promise
   // "Автозбереження — при заливці в дрон"). UPSERT by name so a re-upload of the same field
   // updates rather than duplicates; a freshly-drawn (unnamed) field mints "Поле N" ONCE and
@@ -2168,7 +2187,24 @@
     // Propagate the (possibly just-minted) name into the work context so a flight armed after
     // this upload — without a rebuild — credits THIS field (#8), not the stale generic "поле".
     if (lastWorkContext) lastWorkContext.field = name;
-    const prev = (recs || []).find((r) => r.name === name);
+    let prev = (recs || []).find((r) => r.name === name);
+    // Guard (verified finding): fmp_current_field is only persisted on beforeunload and
+    // right here — NOT on a field switch (showSavedFields tap / load-project), so an
+    // Android kill between switching fields and this upload can leave currentFieldName
+    // pointing at a DIFFERENT saved record than what's actually on screen now. UPSERTing
+    // blindly by that stale name would silently overwrite an unrelated field's saved
+    // contour/params/hazards with THIS field's geometry. If the existing record under
+    // `name` looks nothing like the contour we're about to save, treat it as a stale
+    // pairing — mint a fresh name instead of clobbering it.
+    if (prev && prev.field && prev.field.length >= 3 && !sameFieldGeometry(prev.field, field)) {
+      appLog("promoteFieldOnUpload: currentFieldName «" + name + "» geometry doesn't match its saved record " +
+             "(stale fmp_current_field after a kill/restore?) — minting a new name instead of UPSERT-clobbering it");
+      const names = new Set((recs || []).map((r) => r.name));
+      let n = 1; while (names.has("Поле " + n)) n++;
+      name = "Поле " + n; currentFieldName = name;
+      if (lastWorkContext) lastWorkContext.field = name;
+      prev = null;
+    }
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(), hazards: collectHazards(),
       created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now,
