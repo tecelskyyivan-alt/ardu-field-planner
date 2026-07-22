@@ -481,7 +481,13 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     def do_POST(self):
-        n = int(self.headers.get("Content-Length", 0) or 0)
+        try:
+            n = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            n = -1
+        if n < 0:   # negative/garbage Content-Length must not reach rfile.read (audit: security)
+            self._send(400, json.dumps({"ok": False, "error": "bad Content-Length"}))
+            return
         # Body cap: /api/import_photo несе base64-скріншот (~1–6 МБ) → 8 МБ;
         # /api/sync несе весь бекап полів+журналу польотів (#10) → 4 МБ; решті
         # лишається жорсткий 1 МБ (legit /api/log body ~600 KB). Захист від
