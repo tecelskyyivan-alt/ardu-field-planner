@@ -623,7 +623,12 @@
           // coordinates by up to ~0.5 m. The old 3-unit (3 cm!) gate flagged EVERY
           // waypoint of a perfectly-stored mission (field log 2026-07-13). 1 m is
           // spray-grade honest — real corruption is metres-to-kilometres off.
-          if (Math.abs(ex - a.x) > 100 || Math.abs(ey - a.y) > 100) mismatches.push(`#${e.seq}: координати розійшлись`);
+          if (Math.abs(ex - a.x) > 100 || Math.abs(ey - a.y) > 100) {
+            // metre magnitude for the operator: 1e-7° ≈ 1.113e-2 m; scale longitude by cos(lat)
+            // (~0.66 at 49° N) or the east-west delta is overstated ~1.5×. Pass/fail gate above is unchanged.
+            const dm = Math.hypot((ex - a.x) * 1.113e-2, (ey - a.y) * 1.113e-2 * Math.cos(e.lat * Math.PI / 180));
+            mismatches.push(`#${e.seq}: координати розійшлись (~${dm.toFixed(1)} м)`);
+          }
           else if (Math.abs(Number(e.alt) - Number(a.z)) > 1.0) mismatches.push(`#${e.seq}: висота ${e.alt}≠${Math.round(a.z * 10) / 10}`);
         }
       }

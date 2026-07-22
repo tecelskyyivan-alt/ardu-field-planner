@@ -175,5 +175,22 @@ console.log("\n== readback dialect: unknown autopilot must use legacy MISSION_RE
   link.disconnect();
 }
 
+console.log("\n== mismatch message carries a metre delta (cos-lat scaled) ==");
+{
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps, 30, true, 7);
+  const stored = toStored(exp);
+  // shift ONE real waypoint east by ~5.5 m (500 units of 1e-7° lon) — well past the 1.1 m gate
+  const wpIdx = stored.findIndex((s) => s.command === 16 && s.seq !== 0);
+  stored[wpIdx].y += 500;
+  const t = makeMissionVehicle(stored, {});
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const v = await link.verifyMission(exp, 4000);
+  check("[metres] verdict is a real mismatch", v.ok === true && v.verified === false);
+  const line = (v.mismatches || []).find((s) => s.includes("координати"));
+  check("[metres] coord mismatch names a metre delta", !!line && /~\d+(\.\d+)?\s*м/.test(line));
+  link.disconnect(); t._stopHb();
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);
