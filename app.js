@@ -1933,7 +1933,10 @@
     const prev = (recs || []).find((r) => r.name === name);
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
-      created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now };
+      created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now,
+      // MERGE-preserve #8 cycle progress across re-uploads (else every upload zeroes it)
+      done_ha: (prev && +prev.done_ha) || 0, completed_count: (prev && prev.completed_count) || 0,
+      last_flight_at: (prev && prev.last_flight_at) || null };
     const ok = useLp ? false : await fldPut(rec);
     if (!ok) { try { lpSave(name, rec); } catch (e) {} }
     try { localStorage.setItem("fmp_current_field", name); } catch (e) {}   // for boot restore (Task 7)
@@ -1951,7 +1954,8 @@
     const name = "Поле " + n;
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
-      created: now, updated: now, area_ha: lastFieldAreaHa || 0 };
+      created: now, updated: now, area_ha: lastFieldAreaHa || 0,
+      done_ha: 0, completed_count: 0, last_flight_at: null };
     const ok = await fldPut(rec);
     if (!ok) { try { lpSave(name, rec); } catch (e) { setMsg("Не вдалося зберегти: " + e, "error"); return; } }
     currentFieldName = name;
@@ -3437,9 +3441,23 @@
     };
     await flogPut(rec);
     await flogTrim(FLOG_MAX_FLIGHTS);
+    await fieldProgressCredit(fr, covered_ha, comp.covComplete);   // #8: credit this flight to its contour
     flightSummaries.push(flogSummary(rec));
     const mins = Math.round(actual_duration / 60);
     setMsg(`Політ записано (${mins} хв${rec.partial ? ", частковий" : ""}). Оцінки часу відкалібруються.`, "ok");
+  }
+  // #8: credit a finished flight to its field's cycle counters. Field is the one snapshotted
+  // at ARM time (fr.work.field), not currentFieldName (which may change between upload and disarm).
+  // complete → completed_count++ and reset done_ha; partial → accumulate done_ha (spec §B.8, §8).
+  async function fieldProgressCredit(fr, coveredHa, covComplete) {
+    const name = (fr.work && fr.work.field) || "";
+    if (!name || name === "поле" || coveredHa == null) return;   // raw/no-plan flight or unnamed → skip
+    const rec = await fldGet(name);
+    if (!rec) return;                                            // never-saved contour → nothing to credit
+    const upd = window.GEO_COVER.applyFieldCredit(rec, coveredHa, covComplete);
+    upd.last_flight_at = Date.now();
+    upd.updated = Date.now();                                    // #10 LWW: keep this progress on a later sync
+    await fldPut(upd);
   }
   function flightRecAbort() { if (flightRec) flightRecFinalize(lastStatus, true); }
   loadFlightSummaries();          // warm the in-memory cache on startup
