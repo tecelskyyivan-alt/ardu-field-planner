@@ -3709,6 +3709,7 @@
         route: rem.rest,
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: _rt ? Math.max(1, Math.min(10, _sp / 2)) : 0,
+        verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full",
       });
       appLog("[resume] результат заливки: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error }));
       if (!r || !r.ok) { setMsg((r && r.error) || "Не вдалося залити залишок.", "error"); return; }
@@ -3721,9 +3722,19 @@
       redrawRouteLayer(rem.rest);
       updateMissionStatus();
       const air = lastStatus && lastStatus.alt_rel != null && lastStatus.alt_rel > 1.5;
-      setMsg("Залишок залито (" + r.count + " пунктів). " + (air
+      const tail = air
         ? "Натисни «Старт місії» — дрон підніметься вертикально на задану висоту і продовжить."
-        : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить."), "ok");
+        : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить.";
+      const rv = r.verify;
+      if (rv && rv.ok && !rv.verified) {
+        setMsg("Залишок залито (" + r.count + " пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ("
+          + ((rv.mismatches || []).join("; ") || "розбіжності") + ") — перевір перед стартом.", "error");
+      } else if (rv && !rv.ok) {
+        setMsg("Залишок залито (" + r.count + " пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ("
+          + (rv.error || "таймаут") + ") — link заслабкий. " + tail, "warn");
+      } else {
+        setMsg("Залишок залито (" + r.count + " пунктів). " + tail, "ok");
+      }
     } finally {
       $("mav-start").disabled = !mavConnected;
     }
