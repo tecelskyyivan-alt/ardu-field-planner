@@ -533,6 +533,8 @@
       return;
     }
     adoptField(e.layer);
+    currentFieldName = "";        // a freshly-drawn contour is a NEW unnamed field → mint a name on
+                                  // upload, never UPSERT over the previously-loaded field's record
     setMsg("Контур поля задано.", "ok");
   });
   // Reset the "next polygon is an exclusion" flag whenever a draw ends (finish or
@@ -825,7 +827,7 @@
       lastFieldAreaHa = res.area_ha || 0;
       lastWorkContext = { field: currentFieldName || "поле", area_ha: res.area_ha || 0,
         sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1,
-        swath_m: parseFloat($("spacing").value) || 0, boundary: null };   // restore path: no live field ring
+        swath_m: parseFloat($("spacing").value) || 0, boundary: boundaryFromPolygon() || null };   // field already adopted by restoreLastField
       if (res.calibration) lastCalibration = res.calibration;
       routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
       routeMarkers = L.featureGroup([
@@ -1357,9 +1359,9 @@
     try { _routeSnap = localStorage.getItem("fmp_last_route"); } catch (e) {}
     _bootRestoring = true;
     try {
-      restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
-      restoreLastRoute(_routeSnap); // маршрут — зі знімка, без перерахунку
       try { const _cf = localStorage.getItem("fmp_current_field"); if (_cf) currentFieldName = _cf; } catch (e) {}
+      restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
+      restoreLastRoute(_routeSnap); // маршрут — зі знімка (будує lastWorkContext.field з currentFieldName)
     } finally { _bootRestoring = false; }
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
