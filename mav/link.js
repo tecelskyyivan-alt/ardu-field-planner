@@ -559,7 +559,11 @@
         // first request is easily lost over a lossy ELRS link (a one-shot request
         // made "Що залито в дрон" / verify fail intermittently over the backpack).
         let cm = null, _rlN = 0;
-        const listDeadline = Date.now() + Math.max(stallMs, 8000);
+        // hardCapMs bounds the WHOLE call (list retries + item stream), NOT each phase — else the
+        // two phases' budgets add up to ~2x the intended cap. Standalone download (no cap) → the
+        // generous 10-min ceiling; the list phase still gets at most its Math.max(stallMs,8000) floor.
+        const overallDeadline = Date.now() + (hardCapMs || 600000);
+        const listDeadline = Math.min(overallDeadline, Date.now() + Math.max(stallMs, 8000));
         while (!cm && Date.now() < listDeadline) {
           _rlN++; this._log("mission read: REQUEST_LIST sent (#" + _rlN + ")");
           this._send("MISSION_REQUEST_LIST", { target_system: ts, target_component: tc, mission_type: 0 });
@@ -570,11 +574,10 @@
         const n = cm.fields.count;
         const items = {};
         let seq = 0, lastReq = 0, lastProgress = Date.now();
-        // Standalone "Що залито в дрон" keeps the generous 10-min ceiling; verify passes a
-        // short hardCapMs so a weak/slow-but-alive link yields VERIFY-INCOMPLETE instead of
-        // freezing the HUD (streams are paused) for the full read-back.
-        const deadline = Date.now() + (hardCapMs || 600000);
-        while (seq < n && Date.now() < deadline) {
+        // Item phase shares the SAME overall deadline set before the list loop — do NOT reset the
+        // clock here, or verify's cap would only bound the second half of the call (the HUD-freeze
+        // fix the cap exists for). Standalone download's overallDeadline is the 10-min ceiling.
+        while (seq < n && Date.now() < overallDeadline) {
           if (Date.now() - lastProgress > stallMs) break;
           if (Date.now() - lastReq > 1000) {
             // INAV has NO MISSION_REQUEST_INT handler — it only answers the legacy
