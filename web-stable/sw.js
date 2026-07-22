@@ -13,13 +13,13 @@
  *     fully offline even if the user never built one while online.
  *   • /api/* , /downloads/* and non-GET requests are never cached.
  */
-const SHELL_CACHE = "fmp-shell-v106";         // bump this on every app deploy
+const SHELL_CACHE = "fmp-shell-v107";         // bump this on every app deploy
 const PYO_VERSION = "0.26.4";                // == pyodide-lock.json info.version
 const PYO_CACHE = "fmp-pyodide-" + PYO_VERSION;
 
 // Mutable app code (incl. the backend engine modules the Pyodide worker mounts).
 const SHELL = [
-  "./", "index.html", "app.js", "geo-cover.js", "vendor/clipper.min.js", "sw-register.js", "style.css", "manifest.json",
+  "./", "index.html", "app.js", "geo-cover.js", "i18n.js", "vendor/clipper.min.js", "sw-register.js", "style.css", "manifest.json",
   "icon-192.png", "icon-512.png",
   "engine.js", "engine-worker.js", "mav/mavlink.js", "mav/transport.js", "mav/link.js", "mav/specs.json",
   "engine/__init__.py", "engine/geo.py", "engine/coverage.py", "engine/plane_turns.py", "engine/mission.py", "engine/api.py", "engine/flight_calib.py",
