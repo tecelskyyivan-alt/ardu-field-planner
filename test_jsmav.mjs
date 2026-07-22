@@ -91,7 +91,8 @@ function makeMissionVehicle(stored, opts = {}) {
   t.write = (bytes) => {
     for (const m of veh.push(bytes)) {
       if (m.name === "MISSION_REQUEST_LIST") {
-        send("MISSION_COUNT", { target_system: 255, target_component: 0, count: stored.length, mission_type: 0 });
+        const c = () => send("MISSION_COUNT", { target_system: 255, target_component: 0, count: stored.length, mission_type: 0 });
+        opts.countDelay ? setTimeout(c, opts.countDelay) : c();   // slow list phase (late COUNT)
       } else if (m.name === "MISSION_REQUEST_INT") {
         if (opts.legacyOnly) continue;            // legacy-only приймач не має _INT-хендлера
         const seq = m.fields.seq; opts.itemDelay ? setTimeout(() => sendItem(seq), opts.itemDelay) : sendItem(seq);
@@ -207,6 +208,22 @@ console.log("\n== verify has its own short cap → VERIFY-INCOMPLETE, not a 10-m
   const dtMs = Date.now() - t0;
   check("[cap] verify returned incomplete (ok:false)", v.ok === false && v.verified === false);
   check("[cap] verify honoured the cap (< 2 s, not the full trickle)", dtMs < 2000);
+  link.disconnect(); t._stopHb();
+}
+
+console.log("\n== verify cap bounds the WHOLE call (list retries + items), not each phase ==");
+{
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps, 30, true, 7);
+  // COUNT arrives late (list phase eats ~500 ms), THEN items trickle and never finish in time.
+  // A per-phase cap would allow ~500 ms (list) + ~700 ms (items) ≈ 1.2 s; a whole-call cap ≈ 700 ms.
+  const t = makeMissionVehicle(toStored(exp), { countDelay: 500, itemDelay: 150 });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const t0 = Date.now();
+  const v = await link.verifyMission(exp, 700);      // 700 ms cap for the WHOLE call
+  const dtMs = Date.now() - t0;
+  check("[cap-whole] verify returned incomplete", v.ok === false);
+  check("[cap-whole] bounded by the whole-call cap (< 1.1 s, not additive ~1.2 s)", dtMs < 1100);
   link.disconnect(); t._stopHb();
 }
 

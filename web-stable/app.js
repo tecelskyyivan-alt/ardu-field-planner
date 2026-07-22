@@ -3646,6 +3646,7 @@
       // Log the FULL verify verdict — a red "не збігається" without the actual
       // mismatch list in the log is undebuggable from the field.
       appLog("upload result: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error, warning: r.warning,
+        verify_threw: r.verify_incomplete,   // verify raised (vs a clean ok:false return) — field-diagnostic
         verify: r.verify && { ok: r.verify.ok, verified: r.verify.verified, err: r.verify.error,
                               n_exp: r.verify.count_expected, n_act: r.verify.count_actual,
                               diff: r.verify.mismatches } }));
