@@ -337,7 +337,7 @@ button.active { background: var(--accent); color: #fff; border-color: var(--acce
   border: 1px solid rgba(63, 128, 255, .5); box-shadow: 0 1px 5px rgba(0, 0, 0, .45);
   text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
 }
-.area-label.field span { font-size: 12.5px; border-color: rgba(63, 128, 255, .65); }
+.area-label.field span { font-size: 11px; font-weight: 600; line-height: 1.25; white-space: normal; border-color: rgba(63, 128, 255, .65); }
 
 .ver-chip { opacity: 0.65; font-size: 0.82em; cursor: pointer; }
 

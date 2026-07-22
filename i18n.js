@@ -312,3 +312,8 @@ Object.assign(window.FMP_TR, {
   "усе": "All",
   "Немає польотів за обраний період.": "No flights in the selected period.",
 });
+
+Object.assign(window.FMP_TR, {
+  "зроблено {0} · лишилось {1} га": "done {0} · left {1} ha",
+  "виконано {0} {1}": "completed {0} {1}",
+});
