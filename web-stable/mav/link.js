@@ -481,7 +481,10 @@
               // Before the vehicle first engages: re-announce COUNT. It RESETS the
               // vehicle's mission receiver, so throttle to safely exceed the ELRS
               // round-trip (an aggressive resend keeps resetting an in-flight transfer).
-              if (Date.now() - lastCount > 2000) { sendCount(); lastCount = Date.now(); }
+              // 3 s (was 2 s): a high-latency link where the vehicle takes ~2.5 s to send its
+              // first request must NOT be re-announced at — that resets a receiver that was
+              // simply slow, not one that lost the COUNT. Genuine COUNT loss still recovers in ~3 s.
+              if (Date.now() - lastCount > 3000) { sendCount(); lastCount = Date.now(); }
             } else if (isInav) {
               // INAV HARD-REJECTS any out-of-sequence item (MAV_MISSION_INVALID_SEQUENCE)
               // and never retransmits its own request. Re-sending the last item after INAV
@@ -549,7 +552,7 @@
     }
 
     // ---- mission download (REQUEST_LIST → COUNT → ITEM_INT → ACK) ----
-    async downloadMission(timeout) {
+    async downloadMission(timeout, hardCapMs) {
       if (!this._t) return { ok: false, error: "Немає звʼязку." };
       const stallMs = timeout || 15000;        // no-progress window (slow-RF tolerant)
       return this._withBusy(async () => {
@@ -559,7 +562,11 @@
         // first request is easily lost over a lossy ELRS link (a one-shot request
         // made "Що залито в дрон" / verify fail intermittently over the backpack).
         let cm = null, _rlN = 0;
-        const listDeadline = Date.now() + Math.max(stallMs, 8000);
+        // hardCapMs bounds the WHOLE call (list retries + item stream), NOT each phase — else the
+        // two phases' budgets add up to ~2x the intended cap. Standalone download (no cap) → the
+        // generous 10-min ceiling; the list phase still gets at most its Math.max(stallMs,8000) floor.
+        const overallDeadline = Date.now() + (hardCapMs || 600000);
+        const listDeadline = Math.min(overallDeadline, Date.now() + Math.max(stallMs, 8000));
         while (!cm && Date.now() < listDeadline) {
           _rlN++; this._log("mission read: REQUEST_LIST sent (#" + _rlN + ")");
           this._send("MISSION_REQUEST_LIST", { target_system: ts, target_component: tc, mission_type: 0 });
@@ -570,13 +577,17 @@
         const n = cm.fields.count;
         const items = {};
         let seq = 0, lastReq = 0, lastProgress = Date.now();
-        const deadline = Date.now() + 600000;
-        while (seq < n && Date.now() < deadline) {
+        // Item phase shares the SAME overall deadline set before the list loop — do NOT reset the
+        // clock here, or verify's cap would only bound the second half of the call (the HUD-freeze
+        // fix the cap exists for). Standalone download's overallDeadline is the 10-min ceiling.
+        while (seq < n && Date.now() < overallDeadline) {
           if (Date.now() - lastProgress > stallMs) break;
           if (Date.now() - lastReq > 1000) {
             // INAV has NO MISSION_REQUEST_INT handler — it only answers the legacy
             // MISSION_REQUEST (and replies with MISSION_ITEM). ArduPilot handles both.
-            const reqT = (this._tlm.autopilot == null || this._tlm.autopilot === 3) ? "MISSION_REQUEST_INT" : "MISSION_REQUEST";
+            // Unknown/bridge-only (autopilot == null) → LEGACY MISSION_REQUEST: it's the one
+            // dialect BOTH ArduPilot and INAV answer. INT is asked only when we KNOW it's ArduPilot.
+            const reqT = (this._tlm.autopilot === 3) ? "MISSION_REQUEST_INT" : "MISSION_REQUEST";
             this._send(reqT, { target_system: ts, target_component: tc, seq, mission_type: 0 }); lastReq = Date.now();
           }
           const im = await this._recv(["MISSION_ITEM_INT", "MISSION_ITEM"], 1000);
@@ -598,7 +609,7 @@
 
     // ---- read-back verify (download + compare to what we meant to upload) ----
     async verifyMission(expected, timeout) {
-      const dl = await this.downloadMission(timeout);
+      const dl = await this.downloadMission(timeout, timeout || 60000);
       if (!dl.ok) return { ok: false, verified: false, error: dl.error, count_expected: expected.length };
       const actual = dl.items;
       // INAV has no home slot: seq 0 IS the first waypoint, so verify its coords too
@@ -621,7 +632,12 @@
           // coordinates by up to ~0.5 m. The old 3-unit (3 cm!) gate flagged EVERY
           // waypoint of a perfectly-stored mission (field log 2026-07-13). 1 m is
           // spray-grade honest — real corruption is metres-to-kilometres off.
-          if (Math.abs(ex - a.x) > 100 || Math.abs(ey - a.y) > 100) mismatches.push(`#${e.seq}: координати розійшлись`);
+          if (Math.abs(ex - a.x) > 100 || Math.abs(ey - a.y) > 100) {
+            // metre magnitude for the operator: 1e-7° ≈ 1.113e-2 m; scale longitude by cos(lat)
+            // (~0.66 at 49° N) or the east-west delta is overstated ~1.5×. Pass/fail gate above is unchanged.
+            const dm = Math.hypot((ex - a.x) * 1.113e-2, (ey - a.y) * 1.113e-2 * Math.cos(e.lat * Math.PI / 180));
+            mismatches.push(`#${e.seq}: координати розійшлись (~${dm.toFixed(1)} м)`);
+          }
           else if (Math.abs(Number(e.alt) - Number(a.z)) > 1.0) mismatches.push(`#${e.seq}: висота ${e.alt}≠${Math.round(a.z * 10) / 10}`);
         }
       }

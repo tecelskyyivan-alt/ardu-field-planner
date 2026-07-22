@@ -914,7 +914,7 @@
     t.className = "toast show" + (kind ? " " + kind : "");
     t.style.transform = ""; t.style.opacity = "";
     if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
-    if (!/…\s*$/.test(text)) _toastTimer = setTimeout(hideToast, kind === "error" ? 8000 : 4000);
+    if (!/…\s*$/.test(text)) _toastTimer = setTimeout(hideToast, (kind === "error" || kind === "warn") ? 8000 : 4000);
   }
   function hideToast() {
     const t = $("toast");
@@ -2540,16 +2540,23 @@
         res.yaw_forward_set = py.ok;
         appLog("камерою вперед у RTL: WP_YAW_BEHAVIOR=1 -> " + (py.ok ? "ok" : "FAILED"));
       }
-      if (!p || p.verify !== false) {
-        // Default: fast count-only verify (one round-trip) — the upload already got
-        // MISSION_ACK (vehicle stored it) and every frame is CRC-gated, so re-reading
-        // every item just ~doubles the time on a narrow link. `verify:"full"` restores
-        // the byte-for-byte read-back on demand.
-        const v = (p && p.verify === "full")
-          ? await _mavLink.verifyMission(items)
-          : await _mavLink.verifyMissionCount(items.length);
-        res.verify = v;
-        if (v.ok && !v.verified) res.verify_warning = "Зчитана місія не збігається — перевір.";
+      // Verify FULL by default (geometry read-back) — count-only proves the RIGHT NUMBER of
+      // points but a mission with shifted coordinates would pass. `verify:'count'` = informed
+      // opt-out (marginal ELRS link); `verify:false` = explicit skip. Wrapped in try/catch so a
+      // flaky read-back never paints a successfully-stored mission red: the mission was ACK'd
+      // (res.ok stays true) → a verify throw becomes VERIFY-INCOMPLETE (amber), not a failure.
+      const mode = (!p || p.verify === undefined) ? "full" : p.verify;
+      if (mode !== false) {
+        try {
+          const v = (mode === "count")
+            ? await _mavLink.verifyMissionCount(items.length)
+            : await _mavLink.verifyMission(items, 60000);
+          res.verify = v;
+          if (v.ok && !v.verified) res.verify_warning = "Зчитана місія не збігається — перевір.";
+        } catch (e) {
+          res.verify = { ok: false, verified: false, error: (e && e.message) || String(e) };
+          res.verify_incomplete = true;
+        }
       }
       return res;
     },
@@ -3632,10 +3639,14 @@
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
         plane_params: planeParams,
+        // Default FULL geometry read-back; the opt-out checkbox falls back to count-only for
+        // a knowingly-marginal ELRS link.
+        verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full",
       });
       // Log the FULL verify verdict — a red "не збігається" without the actual
       // mismatch list in the log is undebuggable from the field.
       appLog("upload result: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error, warning: r.warning,
+        verify_threw: r.verify_incomplete,   // verify raised (vs a clean ok:false return) — field-diagnostic
         verify: r.verify && { ok: r.verify.ok, verified: r.verify.verified, err: r.verify.error,
                               n_exp: r.verify.count_expected, n_act: r.verify.count_actual,
                               diff: r.verify.mismatches } }));
@@ -3665,6 +3676,10 @@
         } else if (v && v.ok && !v.verified) {
           m += " " + tf("Зчитана місія НЕ збігається ({0}).", (v.mismatches || []).join("; ") || t("розбіжності"));
           setMsg(m, "error");
+        } else if (v && !v.ok) {
+          // AMBER: mission stored (ACK'd) but read-back could not complete on this link.
+          setMsg(m + " " + tf("Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB.",
+            (v.error || t("таймаут"))), "warn");
         } else {
           if (r.warning) m += " " + r.warning;
           setMsg(m, "ok");
@@ -3695,6 +3710,7 @@
         route: rem.rest,
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: _rt ? Math.max(1, Math.min(10, _sp / 2)) : 0,
+        verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full",
       });
       appLog("[resume] результат заливки: " + JSON.stringify(r && { ok: r.ok, count: r.count, error: r.error }));
       if (!r || !r.ok) { setMsg((r && r.error) || "Не вдалося залити залишок.", "error"); return; }
@@ -3707,9 +3723,19 @@
       redrawRouteLayer(rem.rest);
       updateMissionStatus();
       const air = lastStatus && lastStatus.alt_rel != null && lastStatus.alt_rel > 1.5;
-      setMsg("Залишок залито (" + r.count + " пунктів). " + (air
+      const tail = air
         ? "Натисни «Старт місії» — дрон підніметься вертикально на задану висоту і продовжить."
-        : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить."), "ok");
+        : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить.";
+      const rv = r.verify;
+      if (rv && rv.ok && !rv.verified) {
+        setMsg("Залишок залито (" + r.count + " пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ("
+          + ((rv.mismatches || []).join("; ") || "розбіжності") + ") — перевір перед стартом.", "error");
+      } else if (rv && !rv.ok) {
+        setMsg("Залишок залито (" + r.count + " пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ("
+          + (rv.error || "таймаут") + ") — link заслабкий. " + tail, "warn");
+      } else {
+        setMsg("Залишок залито (" + r.count + " пунктів). " + tail, "ok");
+      }
     } finally {
       $("mav-start").disabled = !mavConnected;
     }

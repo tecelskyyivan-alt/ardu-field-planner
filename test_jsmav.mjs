@@ -17,7 +17,7 @@ import vm from "vm";
 import { fileURLToPath } from "url";
 import path from "path";
 
-const MAVDIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "web", "mav");
+const MAVDIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "web-stable", "mav");
 vm.runInThisContext(fs.readFileSync(path.join(MAVDIR, "mavlink.js"), "utf8"));
 vm.runInThisContext(fs.readFileSync(path.join(MAVDIR, "link.js"), "utf8"));
 const { MAVLINK, MAV_LINK } = globalThis;
@@ -75,6 +75,39 @@ function makeVehicle(opts = {}) {
   return t;
 }
 
+// Fake vehicle that STORES a mission and serves it for download/verify.
+//   stored: [{seq,command,frame,x,y,z}] — x,y are int32 1e-7°, z is metres.
+//   opts.legacyOnly: answer ONLY MISSION_REQUEST (ignore MISSION_REQUEST_INT) — INAV / bridge dialect
+//   opts.itemDelay:  ms before answering each item request (slow RF link)
+function makeMissionVehicle(stored, opts = {}) {
+  const veh = MAVLINK.createParser();
+  const t = { ondata: null, close() {} };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  const sendItem = (seq) => {
+    const it = stored[seq]; if (!it) return;
+    send("MISSION_ITEM_INT", { target_system: 255, target_component: 0, seq, frame: it.frame, command: it.command,
+      current: 0, autocontinue: 1, param1: 0, param2: 0, param3: 0, param4: 0, x: it.x, y: it.y, z: it.z, mission_type: 0 });
+  };
+  t.write = (bytes) => {
+    for (const m of veh.push(bytes)) {
+      if (m.name === "MISSION_REQUEST_LIST") {
+        const c = () => send("MISSION_COUNT", { target_system: 255, target_component: 0, count: stored.length, mission_type: 0 });
+        opts.countDelay ? setTimeout(c, opts.countDelay) : c();   // slow list phase (late COUNT)
+      } else if (m.name === "MISSION_REQUEST_INT") {
+        if (opts.legacyOnly) continue;            // legacy-only приймач не має _INT-хендлера
+        const seq = m.fields.seq; opts.itemDelay ? setTimeout(() => sendItem(seq), opts.itemDelay) : sendItem(seq);
+      } else if (m.name === "MISSION_REQUEST") {
+        const seq = m.fields.seq; opts.itemDelay ? setTimeout(() => sendItem(seq), opts.itemDelay) : sendItem(seq);
+      }
+    }
+  };
+  const hb = setInterval(() => send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 4, system_status: 3, mavlink_version: 3 }), 200);
+  t._stopHb = () => clearInterval(hb);
+  return t;
+}
+// Convert built (lat/lon/alt) items → stored MISSION_ITEM_INT field objects.
+const toStored = (exp) => exp.map((e) => ({ seq: e.seq, command: e.command, frame: e.frame, x: Math.round(e.lat * 1e7), y: Math.round(e.lon * 1e7), z: e.alt }));
+
 const wps = Array.from({ length: 60 }, (_, i) => [49.49 + i * 1e-4, 24.0 + i * 1e-4]);
 const items = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps, 30, true, 7);
 
@@ -126,6 +159,71 @@ console.log("\n== telemetry self-heals: 1st stream request dropped, RE-request m
   check("[log] recorded the autopilot heartbeat source", logs.some((l) => l.includes("heartbeat src") && l.includes("autopilot")));
   const st = link.getStats();
   check("[log] getStats counts received messages", st.msgCounts.HEARTBEAT > 0 && st.msgCounts.GPS_RAW_INT > 0);
+  link.disconnect(); t._stopHb();
+}
+
+console.log("\n== readback dialect: unknown autopilot must use legacy MISSION_REQUEST ==");
+{
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps, 30, true, 7);
+  const t = makeMissionVehicle(toStored(exp), { legacyOnly: true });   // vehicle only answers legacy REQUEST
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  t._stopHb();                        // stop heartbeats so the override below survives
+  link._tlm.autopilot = null;         // simulate a bridge that forwards but never revealed the autopilot
+  const dl = await link.downloadMission(3000);
+  check("[dialect] download completed over legacy-only link", dl.ok === true);
+  check("[dialect] read back all items", dl.ok && dl.count === exp.length);
+  link.disconnect();
+}
+
+console.log("\n== mismatch message carries a metre delta (cos-lat scaled) ==");
+{
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps, 30, true, 7);
+  const stored = toStored(exp);
+  // shift ONE real waypoint east by ~5.5 m (500 units of 1e-7° lon) — well past the 1.1 m gate
+  const wpIdx = stored.findIndex((s) => s.command === 16 && s.seq !== 0);
+  stored[wpIdx].y += 500;
+  const t = makeMissionVehicle(stored, {});
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const v = await link.verifyMission(exp, 4000);
+  check("[metres] verdict is a real mismatch", v.ok === true && v.verified === false);
+  const line = (v.mismatches || []).find((s) => s.includes("координати"));
+  check("[metres] coord mismatch names a metre delta", !!line && /~\d+(\.\d+)?\s*м/.test(line));
+  link.disconnect(); t._stopHb();
+}
+
+console.log("\n== verify has its own short cap → VERIFY-INCOMPLETE, not a 10-min hang ==");
+{
+  const wpsC = Array.from({ length: 24 }, (_, i) => [49.49 + i * 1e-4, 24.0 + i * 1e-4]);
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wpsC, 30, true, 7);
+  // Items trickle IN-progress (150 ms < the 700 ms stall window, so the stall never fires),
+  // but the full read-back would take ~4 s — the cap must cut it WHILE progress is happening,
+  // proving it's the hard cap, not the stall window. Without the cap: runs to completion → ok:true.
+  const t = makeMissionVehicle(toStored(exp), { itemDelay: 150 });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const t0 = Date.now();
+  const v = await link.verifyMission(exp, 700);                       // 700 ms cap for the test
+  const dtMs = Date.now() - t0;
+  check("[cap] verify returned incomplete (ok:false)", v.ok === false && v.verified === false);
+  check("[cap] verify honoured the cap (< 2 s, not the full trickle)", dtMs < 2000);
+  link.disconnect(); t._stopHb();
+}
+
+console.log("\n== verify cap bounds the WHOLE call (list retries + items), not each phase ==");
+{
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps, 30, true, 7);
+  // COUNT arrives late (list phase eats ~500 ms), THEN items trickle and never finish in time.
+  // A per-phase cap would allow ~500 ms (list) + ~700 ms (items) ≈ 1.2 s; a whole-call cap ≈ 700 ms.
+  const t = makeMissionVehicle(toStored(exp), { countDelay: 500, itemDelay: 150 });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const t0 = Date.now();
+  const v = await link.verifyMission(exp, 700);      // 700 ms cap for the WHOLE call
+  const dtMs = Date.now() - t0;
+  check("[cap-whole] verify returned incomplete", v.ok === false);
+  check("[cap-whole] bounded by the whole-call cap (< 1.1 s, not additive ~1.2 s)", dtMs < 1100);
   link.disconnect(); t._stopHb();
 }
 
