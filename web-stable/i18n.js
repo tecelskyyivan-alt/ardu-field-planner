@@ -373,3 +373,45 @@ Object.assign(window.FMP_TR, {
   "Прогалини": "Gaps",
   "Фактична ширина факела, м (порожньо = крок)": "Actual boom width, m (empty = spacing)",
 });
+
+// ---- release-hygiene: EN entries missing for release 2.5.72 features (audit fix wave) ----
+Object.assign(window.FMP_TR, {
+  // "Швидка перевірка" verify-fast checkbox (label + tooltip)
+  "Швидка перевірка (лише кількість точок)": "Fast verify (point count only)",
+  "Лише кількість точок — швидше на слабкому ELRS, але НЕ звіряє координати":
+    "Count only — faster on a weak ELRS link, but does NOT compare coordinates",
+  // amber (verify-incomplete) verdict on a full upload + its "таймаут" fallback
+  "Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB.":
+    "Mission uploaded, but READ-BACK VERIFICATION FAILED ({0}) — the link is too weak. Move closer / connect USB.",
+  "таймаут": "timeout",
+  // resume (battery-swap remainder) upload verify verdicts — now built with tf({0},{1})
+  "Залишок залито ({0} пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ({1}) — перевір перед стартом.":
+    "The remainder was uploaded ({0} waypoints), but the READ-BACK DOES NOT MATCH ({1}) — check before starting.",
+  "Залишок залито ({0} пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({1}) — link заслабкий.":
+    "The remainder was uploaded ({0} waypoints), but READ-BACK VERIFICATION FAILED ({1}) — the link is too weak.",
+  // fence lost-ACK "ok with warning" — must read as uncertain, not stored
+  "Геозона: підтвердження не прийшло — перевір перед увімкненням FENCE_ENABLE.":
+    "Geofence: confirmation did not arrive — check before enabling FENCE_ENABLE.",
+  // hazards (#13) dynamic action feedback
+  "Стовп додано.": "Pole added.",
+  "ЛЕП додано.": "Power line added.",
+  "Постав стовп на карті.": "Place the pole on the map.",
+  "Малюй лінію ЛЕП (подвійний клік = кінець).": "Draw the power line (double-click = end).",
+  "Спочатку задай поле — імпорт ЛЕП шукає в його межах.": "Set the field first — power-line import searches within its boundary.",
+  "Немає інтернету — імпорт ЛЕП недоступний офлайн.": "No internet — power-line import is unavailable offline.",
+  "Шукаю ЛЕП в OSM…": "Searching OSM for power lines…",
+  "Overpass недоступний — спробуй пізніше (планування не заблоковано).": "Overpass is unavailable — try again later (planning is not blocked).",
+  "ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима!":
+    "No power lines found in OSM for this field — this is NOT proof there are none. Verify with your eyes!",
+  "Підтягнуто {0} об'єктів ЛЕП з OSM (лише показ — перевір очима; уникання вимкнено за замовч.).":
+    "Imported {0} power-line objects from OSM (display only — verify with your eyes; avoidance is off by default).",
+  // safe-transit (#12) degradation warnings + map tooltip
+  "Безпечний шлях на старт / додому": "Safe path to the start / home",
+  "Безпечний шлях до старту не побудовано — політ напряму. Перевір межу поля та вирізи.":
+    "Safe path to the start could not be built — flying straight. Check the field boundary and cut-outs.",
+  "Безпечний шлях додому не побудовано — політ напряму. Перевір межу поля та вирізи.":
+    "Safe path home could not be built — flying straight. Check the field boundary and cut-outs.",
+  "Безпечний шлях до старту не побудовано — зліт напряму до першої точки.":
+    "Safe path to the start could not be built — taking off straight to the first waypoint.",
+  "Безпечний шлях додому не побудовано — RTL напряму.": "Safe path home could not be built — RTL straight.",
+});
