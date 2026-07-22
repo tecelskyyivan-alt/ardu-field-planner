@@ -914,7 +914,7 @@
     t.className = "toast show" + (kind ? " " + kind : "");
     t.style.transform = ""; t.style.opacity = "";
     if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
-    if (!/…\s*$/.test(text)) _toastTimer = setTimeout(hideToast, kind === "error" ? 8000 : 4000);
+    if (!/…\s*$/.test(text)) _toastTimer = setTimeout(hideToast, (kind === "error" || kind === "warn") ? 8000 : 4000);
   }
   function hideToast() {
     const t = $("toast");
@@ -3639,6 +3639,9 @@
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
         plane_params: planeParams,
+        // Default FULL geometry read-back; the opt-out checkbox falls back to count-only for
+        // a knowingly-marginal ELRS link.
+        verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full",
       });
       // Log the FULL verify verdict — a red "не збігається" without the actual
       // mismatch list in the log is undebuggable from the field.
@@ -3672,6 +3675,10 @@
         } else if (v && v.ok && !v.verified) {
           m += " " + tf("Зчитана місія НЕ збігається ({0}).", (v.mismatches || []).join("; ") || t("розбіжності"));
           setMsg(m, "error");
+        } else if (v && !v.ok) {
+          // AMBER: mission stored (ACK'd) but read-back could not complete on this link.
+          setMsg(m + " " + tf("Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB.",
+            (v.error || t("таймаут"))), "warn");
         } else {
           if (r.warning) m += " " + r.warning;
           setMsg(m, "ok");

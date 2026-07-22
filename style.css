@@ -190,6 +190,7 @@ button.active { background: var(--accent); color: #fff; border-color: var(--acce
 .msg { margin-top: 14px; font-size: 12.5px; line-height: 1.45; min-height: 16px; color: var(--text-dim); }
 .msg.error { color: var(--danger); }
 .msg.ok { color: var(--ok); }
+.msg.warn { color: var(--warn); }
 
 /* Transient popup toast at the top of the map: shows the running process + result,
    then AUTO-HIDES; dismiss early by tap or swipe. Slides + fades. Hidden by default. */
@@ -208,6 +209,7 @@ button.active { background: var(--accent); color: #fff; border-color: var(--acce
 .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .toast.error { color: var(--danger); border-color: #572a2a; }
 .toast.ok { color: var(--ok); border-color: #285644; }
+.toast.warn { color: var(--warn); border-color: #574a28; }
 
 #app-ver { margin-left: auto; opacity: .5; font-size: .8em; font-weight: 400; }
 
