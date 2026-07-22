@@ -317,3 +317,8 @@ Object.assign(window.FMP_TR, {
   "зроблено {0} · лишилось {1} га": "done {0} · left {1} ha",
   "виконано {0} {1}": "completed {0} {1}",
 });
+
+Object.assign(window.FMP_TR, {
+  "Остання відома місія (з пам'яті) — підключись і перевір, чи вона ще в дроні.":
+    "Last known mission (from memory) — connect and verify it's still on the drone.",
+});

@@ -1372,6 +1372,8 @@
       restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
       restoreLastRoute(_routeSnap); // маршрут — зі знімка (будує lastWorkContext.field з currentFieldName)
     } finally { _bootRestoring = false; }
+    flownRestore();               // "що залито в дрон" — щоб статус місії й прогрес пережили reopen (#2)
+    updateMissionStatus();
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
     if (ss.map && ss.map.z != null) {
@@ -1389,12 +1391,8 @@
     if (ss.tab && ss.tab !== "plan") {
       try { const b = document.querySelector('.tab[data-tab="' + ss.tab + '"]'); if (b) b.click(); } catch (e) {}
     }
-    // Сесія закінчилась підключеною по BLE → тихо перепідключаємось самі.
-    if (ss.wasConnected && ss.connType === "ble" && window.AndroidBle && window.__fmpBleAutoReconnect) {
-      let mac = "";
-      try { mac = localStorage.getItem("fmp_ble_last") || ""; } catch (e) {}
-      if (mac) { appLog("[restore] авто-реконект BLE до " + mac); window.__fmpBleAutoReconnect(mac, 2500); }
-    }
+    // Сесія закінчилась підключеною → тихо перепідключаємось самі (BLE/UDP/TCP/cable, #2).
+    bootAutoReconnect(ss);
     // Хуки збереження решти сесії.
     let _mvTimer = null;
     map.on("moveend zoomend", () => {
@@ -2280,6 +2278,8 @@
 
   // ---- MAVLink: live link to the drone (connect, telemetry, upload) --------
   let mavConnected = false;
+  let mavConnecting = false;       // synchronous guard: true from the top of mavConnect until it settles
+  let _autoReconnectTimer = null;  // pending boot auto-reconnect timer (cleared on manual connect/disconnect)
   let mavPollTimer = null;
   let droneMarker = null;
   let droneTrack = null;          // flown-path polyline
@@ -2292,6 +2292,8 @@
   let flownRoute = null;          // [[lat,lng],…] coverage waypoints uploaded
   let flownHome = null;           // {lat,lng}
   let flownHasRtl = true;
+  let flownWpTotal = 0;           // total mission items uploaded (progress/completion)
+  let flownRestored = false;      // flown snapshot came from disk (unverified) → not green until re-checked
   let targetMarker = null;        // ring on the active (next) waypoint
   let targetLine = null;          // dashed line drone -> next waypoint
   let liveHomeMarker = null;      // ArduPilot's actual HOME (arm point)
@@ -2313,6 +2315,18 @@
   function resumeOn() { const c = $("mission-resume"); return !!(c && c.checked); }
   function resumeLoad() { try { return JSON.parse(localStorage.getItem(RESUME_KEY) || "null"); } catch (e) { return null; } }
   function flownLoad() { try { return JSON.parse(localStorage.getItem(FLOWN_KEY) || "null"); } catch (e) { return null; } }
+  // Restore "what's uploaded to the drone" on boot so mission-status + the progress overlay
+  // survive a reopen. Marked flownRestored: after a kill/reboot the drone could be power-cycled/
+  // reflashed/a different airframe, so this is NOT trusted like a fresh read-back-verified upload.
+  function flownRestore() {
+    const f = flownLoad();
+    if (!f || !f.route || !f.route.length) return;
+    flownRoute = f.route;
+    flownHome = f.home || null;
+    flownHasRtl = (f.rtl != null ? f.rtl : true);
+    flownWpTotal = f.wpTotal || 0;
+    flownRestored = true;              // disk-restored → mission-status shows "verify", never green
+  }
   function resumeClear() {
     try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
     resumeHint();
@@ -2320,10 +2334,13 @@
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
   function missionLead() { return 2 + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0); }
-  function flownSave(route) {
+  function flownSave(route, home, hasRtl, status) {
     try {
       localStorage.setItem(FLOWN_KEY, JSON.stringify({
-        route: route, rtl: $("rtl").checked, lead: missionLead(), ts: Date.now(),
+        route: route, home: home || null,
+        rtl: (hasRtl != null ? hasRtl : $("rtl").checked),
+        lead: missionLead(), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
+        status: status || "confirmed", ts: Date.now(),
       }));
     } catch (e) {}
   }
@@ -2390,6 +2407,11 @@
       el.textContent = t("Маршрут не побудовано."); el.className = "mission-status";
     } else if (!flown) {
       el.textContent = t("Маршрут НЕ залито в дрон. Натисни «Залити місію».");
+      el.className = "mission-status warn";
+    } else if (flownRestored) {
+      // Disk-restored flown snapshot — never route it into the same green pill as a fresh
+      // read-back-verified upload (the drone may have changed since). Connect + re-check first.
+      el.textContent = t("Остання відома місія (з пам'яті) — підключись і перевір, чи вона ще в дроні.");
       el.className = "mission-status warn";
     } else if (plan === flown) {
       el.textContent = tf("У дроні поточна місія: {0} точок.", lastRoute.length);
@@ -2954,10 +2976,13 @@
   }
 
   async function mavConnect() {
+    if (mavConnected || mavConnecting) return;   // re-entrancy: block the boot-timer↔manual double-connect race
     const a = mavApi();
     if (!a || !a.mav_connect) { setMsg("API недоступний.", "error"); return; }
     const conn = mavConnString();
     if (!conn) { setMsg("Обери COM-порт або введи адресу.", "error"); return; }
+    mavConnecting = true;
+    if (_autoReconnectTimer) { clearTimeout(_autoReconnectTimer); _autoReconnectTimer = null; }
     setMsg("Підключаюсь до дрона…", null);
     appLog("connect → " + conn + " baud=" + $("mav-baud").value);
     $("mav-connect").disabled = true;
@@ -2994,10 +3019,39 @@
     } catch (e) {
       $("mav-connect").disabled = false;
       setMsg("Помилка підключення: " + e, "error");
+    } finally {
+      mavConnecting = false;
     }
+  }
+  // Boot auto-reconnect dispatcher (#2): re-open the last session's link with no user action.
+  // BLE branch is byte-for-byte the previous behaviour; UDP/TCP/cable added. Desktop WebSerial is
+  // skipped (port indices don't survive a reload). Guarded by mavConnecting so it can't race a manual tap.
+  function bootAutoReconnect(ss) {
+    if (!ss || !ss.wasConnected) return;
+    const conn = ss.connType;
+    if (conn === "ble") {
+      if (!(window.AndroidBle && window.__fmpBleAutoReconnect)) return;
+      let mac = "";
+      try { mac = localStorage.getItem("fmp_ble_last") || ""; } catch (e) {}
+      if (mac) { appLog("[restore] авто-реконект BLE до " + mac); window.__fmpBleAutoReconnect(mac, 2500); }
+      return;
+    }
+    if (conn === "cable" && !IS_ANDROID) return;                 // desktop WebSerial: no auto-open (needs a gesture)
+    if (conn !== "cable" && conn !== "udp" && conn !== "tcp") return;
+    try {
+      const tsel = $("mav-conn-type");
+      if (tsel && tsel.querySelector('option[value="' + conn + '"]')) { tsel.value = conn; mavSyncRows(); }
+    } catch (e) {}
+    if (ss.addr && $("mav-address")) { try { $("mav-address").value = ss.addr; } catch (e) {} }
+    appLog("[restore] авто-реконект " + conn + (ss.addr ? " → " + ss.addr : ""));
+    _autoReconnectTimer = setTimeout(() => {
+      _autoReconnectTimer = null;
+      if (!mavConnected && !mavConnecting) mavConnect();
+    }, 1200);
   }
 
   async function mavDisconnect() {
+    if (_autoReconnectTimer) { clearTimeout(_autoReconnectTimer); _autoReconnectTimer = null; }
     const a = mavApi();
     mavStopPolling();
     try { if (a && a.mav_disconnect) await a.mav_disconnect(); } catch (e) { /* ignore */ }
@@ -3798,6 +3852,7 @@
     setMsg("Заливаю місію в дрон…", null);
     appLog("upload start: " + (lastRoute ? lastRoute.length : 0) + " route pts");
     $("mav-upload").disabled = true;
+    let _prevFlownRaw = null;                 // restore the previous flown snapshot if the upload fails
     try {
       // Live progress so a slow link (ELRS/RF) doesn't look frozen — the user sees
       // points climbing instead of guessing whether it timed out. Only the in-browser
@@ -3812,6 +3867,11 @@
       const _plane = isPlaneVehicle();
       const planeParams = (_rt && _plane) ? planeTurnParams(_sp, parseFloat($("speed").value) || 12) : null;
       const turnRadiusM = (_rt && !_plane) ? Math.max(1, Math.min(10, _sp / 2)) : 0;
+      // Intent-marker for the ACK→flownSave window: if the app is killed after the FC stored the
+      // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2). Keep
+      // the previous snapshot so a KNOWN failure below undoes the marker (never lose last-good state).
+      try { _prevFlownRaw = localStorage.getItem(FLOWN_KEY); } catch (e) {}
+      try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: lastRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
@@ -3830,13 +3890,11 @@
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
         promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
-        resumeClear();          // нова місія в дроні → стара точка продовження недійсна
         // Snapshot exactly what we uploaded — progress is computed off this, so
         // editing/rebuilding the route afterwards can't corrupt the live HUD.
         flownRoute = lastRoute ? lastRoute.slice() : null;
-        if (flownRoute) flownSave(flownRoute);   // для продовження після заміни батареї
         // HOME = the drone's actual home (arm point), matching ArduPilot — so the
-        // RTL leg in progress/ETA returns to where the drone really is.
+        // RTL leg in progress/ETA returns to where the drone really is. Set BEFORE flownSave.
         if (lastStatus && lastStatus.home_lat != null) {
           flownHome = { lat: lastStatus.home_lat, lng: lastStatus.home_lon };
         } else if (lastStatus && lastStatus.lat != null) {
@@ -3845,6 +3903,10 @@
           flownHome = lastHome;
         }
         flownHasRtl = lastRtl;
+        flownWpTotal = r.count || 0;
+        flownRestored = false;                   // fresh read-back-verified upload → trusted
+        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed");
+        resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
         let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
         const v = r.verify;
@@ -3864,9 +3926,12 @@
         }
       } else {
         setMsg((r && r.error) || t("Не вдалося залити місію."), "error");
+        // upload rejected → drone still holds its previous mission; undo the intent-marker
+        try { _prevFlownRaw != null ? localStorage.setItem(FLOWN_KEY, _prevFlownRaw) : localStorage.removeItem(FLOWN_KEY); } catch (e) {}
       }
     } catch (e) {
       setMsg("Помилка заливки: " + e, "error");
+      try { _prevFlownRaw != null ? localStorage.setItem(FLOWN_KEY, _prevFlownRaw) : localStorage.removeItem(FLOWN_KEY); } catch (e2) {}
     } finally {
       $("mav-upload").disabled = !mavConnected;
     }
@@ -3895,8 +3960,14 @@
       // Тепер у дроні саме залишок: план на карті і «залито» — це він.
       lastRoute = rem.rest.slice();
       flownRoute = rem.rest.slice();
+      // Derive home from the drone's live position — resume can be the first upload after a reopen,
+      // where without this flownHome=null and _progGeom builds no RTL-leg/countdown (§4.2).
+      if (lastStatus && lastStatus.home_lat != null) flownHome = { lat: lastStatus.home_lat, lng: lastStatus.home_lon };
+      else if (lastStatus && lastStatus.lat != null) flownHome = { lat: lastStatus.lat, lng: lastStatus.lon };
       flownHasRtl = $("rtl").checked;
-      flownSave(rem.rest);
+      flownWpTotal = r.count || 0;
+      flownRestored = false;
+      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed");
       promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
