@@ -1647,6 +1647,7 @@
     if (disc) disc.addEventListener("click", () => sessionPatch({ wasConnected: false }));
     document.querySelectorAll(".tab").forEach((b) =>
       b.addEventListener("click", () => sessionPatch({ tab: b.getAttribute("data-tab") })));
+    scheduleAutoSync("boot");        // #10: opt-in backup-sync — try once after boot restore settles
   }, 0);
   syncAngleEnabled();
   $("build").addEventListener("click", () => buildRoute());
@@ -2054,6 +2055,19 @@
       await new Promise((res, rej) => {
         const tx = db.transaction(FLD_STORE, "readwrite");
         tx.objectStore(FLD_STORE).delete(name);
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      return true;
+    } catch (e) { return false; }
+  }
+  // Wipe every saved field. Used ONLY by a backup-sync restore (#10 review I2) — an
+  // honest overwrite must not let a field deleted on another device resurrect here.
+  async function fldClearAll() {
+    try {
+      const db = await fldOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(FLD_STORE, "readwrite");
+        tx.objectStore(FLD_STORE).clear();
         tx.oncomplete = res; tx.onerror = () => rej(tx.error);
       });
       return true;
@@ -3631,7 +3645,8 @@
         tx.objectStore(FLOG_STORE).put(rec);
         tx.oncomplete = res; tx.onerror = () => rej(tx.error);
       });
-    } catch (e) { /* private mode / no IndexedDB — keep the in-memory summary only */ }
+      return true;
+    } catch (e) { return false; }   // private mode / no IndexedDB — keep the in-memory summary only
   }
   async function flogAll() {
     try {
@@ -3642,6 +3657,19 @@
         rq.onerror = () => rej(rq.error);
       });
     } catch (e) { return []; }
+  }
+  // Wipe the whole flight log. Used ONLY by a backup-sync restore (#10 review I2) —
+  // an honest overwrite must not let a flight deleted on another device resurrect.
+  async function flogClearAll() {
+    try {
+      const db = await flogOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(FLOG_STORE, "readwrite");
+        tx.objectStore(FLOG_STORE).clear();
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      return true;
+    } catch (e) { return false; }
   }
   const flogSummary = (r) => ({ started_at: r.started_at, planned: r.planned || null,
     actual: r.actual || null, partial: !!r.partial });
@@ -3850,6 +3878,7 @@
     await flogTrim(FLOG_MAX_FLIGHTS);
     await fieldProgressCredit(fr, covered_ha, comp.covComplete);   // #8: credit this flight to its contour
     flightSummaries.push(flogSummary(rec));
+    scheduleAutoSync("flight");      // #10: opt-in backup-sync — a finished flight is worth protecting
     const mins = Math.round(actual_duration / 60);
     setMsg(`Політ записано (${mins} хв${rec.partial ? ", частковий" : ""}). Оцінки часу відкалібруються.`, "ok");
   }
@@ -4543,12 +4572,20 @@
     return out.concat(LOG).join("\n");
   }
   // A stable-ish per-device id so server-side logs from the same phone group.
+  let _sessionDeviceId = null;   // memoized fallback for this page load only (see catch below)
   function deviceId() {
     try {
       let d = localStorage.getItem("fmp_device");
       if (!d) { d = "d" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); localStorage.setItem("fmp_device", d); }
       return d;
-    } catch (e) { return "anon"; }
+    } catch (e) {
+      // localStorage unavailable (private browsing): the fixed literal "anon" would
+      // collide across EVERY such device on the server (log files overwrite each
+      // other; sync snapshots would too). Mint one random id per page load instead —
+      // still collision-free, just not persisted across reloads (review M1).
+      if (!_sessionDeviceId) _sessionDeviceId = "s" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+      return _sessionDeviceId;
+    }
   }
   // Upload the log to the VPS so it can be read+analysed remotely. The PWA/desktop
   // POST same-origin (/api/log, the browser carries the basic-auth). The APK has no
@@ -4700,6 +4737,155 @@
     } catch (e) { location.reload(); }
   }
   if ($("check-update")) $("check-update").addEventListener("click", checkUpdate);
+
+  // ---- Backup-sync (opt-in, OFF by default): push/pull key app state to Ivan's own
+  // server (#10) — protects fields / flight stats / settings against a lost or
+  // replaced phone (everything else lives ONLY in this device's storage). Transport
+  // mirrors uploadLogToServer above: a plain same-origin fetch, no native bridge for
+  // v1. VPS_BASE (empty in this repo) lets a self-hoster's APK point sync at an
+  // absolute server URL when there's no local same-origin server to fetch against.
+  const SYNC_BASE = VPS_BASE || API_BASE;
+  // Plain localStorage keys synced as-is. Fields (fmp_fields IndexedDB) and the
+  // flight log (fmp_flightlog IndexedDB) are dumped separately below — see fldAll/
+  // flogAll above — into synthetic keys so the server stays a dumb {key: string} blob.
+  // Excluded on purpose: fmp_log (diagnostic, big), fmp_ble_* (device-specific
+  // pairing), fmp_device (identifies THIS device, not data to restore).
+  const SYNC_KEYS = ["fmp_projects", "fmp_current_field", "fmp_last_field",
+    "fmp_last_settings", "fmp_last_route", "fmp_is_plane", "fmp_lang"];
+  function syncEnabled() { try { return localStorage.getItem("fmp_sync_on") === "1"; } catch (e) { return false; } }
+  // No native bridge in v1: Android/iOS can only sync when a self-hoster has baked
+  // their own absolute VPS_BASE into the build (no same-origin server to fetch there).
+  function syncConfigured() { return !((IS_ANDROID || IS_IOS) && !VPS_BASE); }
+  async function buildSyncPayload() {
+    const data = {};
+    SYNC_KEYS.forEach((k) => { try { const v = localStorage.getItem(k); if (v != null) data[k] = v; } catch (e) {} });
+    try { const f = await fldAll(); if (f) data.fmp_fields_idb = JSON.stringify(f); } catch (e) {}
+    try { const l = await flogAll(); if (l && l.length) data.fmp_flightlog_idb = JSON.stringify(l); } catch (e) {}
+    return { device: deviceId(), ts: Date.now(), app_version: APP_VERSION, data };
+  }
+  // Applies a server snapshot as an HONEST OVERWRITE (matches the confirm() text the
+  // operator just accepted): the fields + flight-log IndexedDB stores are CLEARED
+  // before repopulating, so a field/flight deleted on another device before its last
+  // push doesn't resurrect here (review I2). Every write is individually accounted
+  // for (not swallowed) so the caller can tell a full restore from a partial one.
+  async function applySyncSnapshot(snapshot) {
+    const data = (snapshot && snapshot.data) || {};
+    let total = 0, failures = 0;
+    const note = (okFlag, what) => { total++; if (!okFlag) { failures++; appLog("sync: restore failed — " + what); } };
+    SYNC_KEYS.forEach((k) => {
+      if (!Object.prototype.hasOwnProperty.call(data, k)) return;
+      try { localStorage.setItem(k, data[k]); note(true, k); }
+      catch (e) { note(false, k + ": " + e); }
+    });
+    note(await fldClearAll(), "clear fields store");
+    note(await flogClearAll(), "clear flight log store");
+    if (data.fmp_fields_idb) {
+      try {
+        const recs = JSON.parse(data.fmp_fields_idb);
+        for (const r of recs) note(await fldPut(r), "field " + ((r && r.name) || "?"));
+      } catch (e) { note(false, "parse fmp_fields_idb: " + e); }
+    }
+    if (data.fmp_flightlog_idb) {
+      try {
+        const recs = JSON.parse(data.fmp_flightlog_idb);
+        for (const r of recs) note(await flogPut(r), "flight " + ((r && r.started_at) || "?"));
+      } catch (e) { note(false, "parse fmp_flightlog_idb: " + e); }
+    }
+    return { ok: failures === 0, total, failures };
+  }
+  function syncStatusText() {
+    if (!syncEnabled()) return "вимкнено";
+    let ts = 0; try { ts = +localStorage.getItem("fmp_sync_last") || 0; } catch (e) {}
+    return ts ? tf("остання синхронізація: {0}", new Date(ts).toLocaleString()) : "синхронізацій ще не було";
+  }
+  function renderSyncStatus() { const el = $("sync-status"); if (el) el.textContent = t(syncStatusText()); }
+  let _syncPushing = false, _syncAutoLastAttempt = 0;
+  async function syncPush(manual) {
+    if (!syncConfigured()) { if (manual) setMsg("Сервер не налаштовано.", "error"); return false; }
+    if (_syncPushing) return false;                 // one push in flight at a time
+    _syncPushing = true;
+    try {
+      const payload = await buildSyncPayload();
+      const r = await fetch(SYNC_BASE + "/api/sync", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload), credentials: "include",
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) {
+        appLog("sync: push failed HTTP " + r.status);
+        if (manual) setMsg("Не вдалося синхронізувати із сервером.", "error");
+        return false;
+      }
+      try { localStorage.setItem("fmp_sync_last", String(j.ts || Date.now())); } catch (e) {}
+      renderSyncStatus();
+      if (manual) setMsg("Синхронізовано із сервером.", "ok");
+      return true;
+    } catch (e) {
+      appLog("sync: push error " + e);
+      if (manual) setMsg("Не вдалося синхронізувати: " + e, "error");
+      return false;
+    } finally { _syncPushing = false; }
+  }
+  // Auto-sync triggers (only when the toggle is ON): boot, back-online, after a flight
+  // is saved (see call sites above). Debounced to >=60s between AUTOMATIC attempts;
+  // fire-and-forget — failures are silent in the UI (no red banner mid-fieldwork) but
+  // land in appLog for later diagnosis.
+  function scheduleAutoSync(reason) {
+    if (!syncEnabled() || !syncConfigured()) return;
+    const now = Date.now();
+    if (now - _syncAutoLastAttempt < 60000) return;
+    _syncAutoLastAttempt = now;
+    appLog("sync: auto trigger (" + reason + ")");
+    syncPush(false);
+  }
+  window.addEventListener("online", () => scheduleAutoSync("online"));
+  async function syncRestore() {
+    if (!syncConfigured()) { setMsg("Сервер не налаштовано.", "error"); return; }
+    setMsg("Отримую копію з сервера…", null);
+    try {
+      const r = await fetch(SYNC_BASE + "/api/sync_get", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device: deviceId() }), credentials: "include",
+      });
+      const j = await r.json().catch(() => null);
+      if (!j || !j.ok) { setMsg((j && j.error) || "Немає копії на сервері.", "error"); return; }
+      const snap = j.snapshot || {};
+      let localFields = 0;
+      try { const recs = await fldAll(); localFields = recs ? recs.length : Object.keys(lpAll()).length; } catch (e) {}
+      let serverFields = 0;
+      try {
+        const sd = snap.data || {};
+        if (sd.fmp_fields_idb) serverFields = JSON.parse(sd.fmp_fields_idb).length;
+        else if (sd.fmp_projects) serverFields = Object.keys(JSON.parse(sd.fmp_projects)).length;
+      } catch (e) {}
+      const when = snap.ts ? new Date(snap.ts).toLocaleString() : "?";
+      const ok = confirm(
+        tf("Копія на сервері від {0}, полів: {1}.", when, serverFields) + "\n" +
+        tf("Локально зараз полів: {0}.", localFields) + "\n\n" +
+        "Перезаписати локальні дані копією з сервера? Застосунок перезавантажиться."
+      );
+      if (!ok) return;
+      const result = await applySyncSnapshot(snap);
+      if (result.ok) {
+        setMsg("Відновлено з сервера. Перезавантаження…", "ok");
+      } else {
+        appLog("sync: restore partial — " + result.failures + " of " + result.total + " writes failed");
+        setMsg("Відновлено частково — перевір поля/статистику.", "warn");
+      }
+      setTimeout(() => location.reload(), 300);
+    } catch (e) { setMsg("Помилка відновлення: " + e, "error"); }
+  }
+  if ($("sync-on")) {
+    $("sync-on").checked = syncEnabled();
+    $("sync-on").addEventListener("change", (e) => {
+      try { localStorage.setItem("fmp_sync_on", e.target.checked ? "1" : "0"); } catch (e2) {}
+      renderSyncStatus();
+      if (e.target.checked) scheduleAutoSync("toggle-on");
+    });
+  }
+  if ($("sync-now")) $("sync-now").addEventListener("click", () => syncPush(true));
+  if ($("sync-restore")) $("sync-restore").addEventListener("click", syncRestore);
+  renderSyncStatus();
 
   // Download the mission ACTUALLY stored on the drone and DRAW it on the map
   // (cyan), so the operator sees exactly what the drone will fly.
