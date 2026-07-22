@@ -2540,16 +2540,23 @@
         res.yaw_forward_set = py.ok;
         appLog("камерою вперед у RTL: WP_YAW_BEHAVIOR=1 -> " + (py.ok ? "ok" : "FAILED"));
       }
-      if (!p || p.verify !== false) {
-        // Default: fast count-only verify (one round-trip) — the upload already got
-        // MISSION_ACK (vehicle stored it) and every frame is CRC-gated, so re-reading
-        // every item just ~doubles the time on a narrow link. `verify:"full"` restores
-        // the byte-for-byte read-back on demand.
-        const v = (p && p.verify === "full")
-          ? await _mavLink.verifyMission(items)
-          : await _mavLink.verifyMissionCount(items.length);
-        res.verify = v;
-        if (v.ok && !v.verified) res.verify_warning = "Зчитана місія не збігається — перевір.";
+      // Verify FULL by default (geometry read-back) — count-only proves the RIGHT NUMBER of
+      // points but a mission with shifted coordinates would pass. `verify:'count'` = informed
+      // opt-out (marginal ELRS link); `verify:false` = explicit skip. Wrapped in try/catch so a
+      // flaky read-back never paints a successfully-stored mission red: the mission was ACK'd
+      // (res.ok stays true) → a verify throw becomes VERIFY-INCOMPLETE (amber), not a failure.
+      const mode = (!p || p.verify === undefined) ? "full" : p.verify;
+      if (mode !== false) {
+        try {
+          const v = (mode === "count")
+            ? await _mavLink.verifyMissionCount(items.length)
+            : await _mavLink.verifyMission(items, 60000);
+          res.verify = v;
+          if (v.ok && !v.verified) res.verify_warning = "Зчитана місія не збігається — перевір.";
+        } catch (e) {
+          res.verify = { ok: false, verified: false, error: (e && e.message) || String(e) };
+          res.verify_incomplete = true;
+        }
       }
       return res;
     },
