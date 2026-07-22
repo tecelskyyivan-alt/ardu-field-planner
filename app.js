@@ -3437,12 +3437,14 @@
     try {
       localStorage.setItem(FLIGHTREC_KEY, JSON.stringify({
         started_at: flightRec.started_at, planned: flightRec.planned, work: flightRec.work,
-        bp_start: flightRec.bp_start, samples: flightRec.samples.slice(-600),
+        // Keep the WHOLE track for realistic flights (1 h @ ~1 Hz) — a tail-cap would truncate the
+        // early track while actual_duration still uses started_at → understated distance/covered/speed.
+        bp_start: flightRec.bp_start, samples: flightRec.samples.slice(-3600),
         sawComplete: flightRec.sawComplete, wp_reached: flightRec.wp_reached, wp_total: flightRec.wp_total,
       }));
     } catch (e) {}
   }
-  function flightRecClearPersist() { try { localStorage.removeItem(FLIGHTREC_KEY); } catch (e) {} }
+  function flightRecClearPersist() { _flightRecPersistTs = 0; try { localStorage.removeItem(FLIGHTREC_KEY); } catch (e) {} }
   async function flogHas(startedAt) {
     try {
       const db = await flogOpen();
@@ -3457,6 +3459,7 @@
   // continuity has no value — this is only stats/calibration). flogHas dedup prevents re-finalizing
   // (same started_at key) a flight that already reached the log with a good complete record.
   async function flightRecRestore() {
+    if (flightRec) return;        // a live recording already started (defensive vs a fast reconnect race)
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(FLIGHTREC_KEY) || "null"); } catch (e) {}
     if (!saved || !saved.started_at || !saved.samples || !saved.samples.length) { flightRecClearPersist(); return; }
