@@ -1357,7 +1357,7 @@
   }
   if ($("round-turn")) $("round-turn").addEventListener("change", syncRoundTurnHint);
   window.addEventListener("beforeunload", () => {
-    saveLastSettings(); saveLastField();
+    saveLastSettings(); saveLastField(); flightRecPersist(true);
     try { localStorage.setItem("fmp_current_field", currentFieldName || ""); } catch (e) {}
   });
   restoreLastSettings();          // pre-fill last session's settings before first render
@@ -1374,6 +1374,7 @@
     } finally { _bootRestoring = false; }
     flownRestore();               // "що залито в дрон" — щоб статус місії й прогрес пережили reopen (#2)
     updateMissionStatus();
+    flightRecRestore();           // згорнути перерваний kill-ом запис польоту в журнал (як partial) (#2)
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
     if (ss.map && ss.map.z != null) {
@@ -3093,7 +3094,7 @@
   // Pause telemetry polling while the screen/app is hidden, resume on return —
   // saves battery + CPU in the field (the mission keeps running on the FC anyway).
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) mavStopPolling();
+    if (document.hidden) { flightRecPersist(true); mavStopPolling(); }
     else if (mavConnected) mavStartPolling();
   });
 
@@ -3425,6 +3426,44 @@
     _bindStatsChips();
   }
 
+  // --- in-flight record persistence: survive an app kill mid-flight (#2, stats/calibration only) ---
+  const FLIGHTREC_KEY = "fmp_flightrec_active";
+  let _flightRecPersistTs = 0;
+  function flightRecPersist(force) {
+    if (!flightRec) return;
+    const now = Date.now();
+    if (!force && now - _flightRecPersistTs < 10000) return;   // ~10 s throttle
+    _flightRecPersistTs = now;
+    try {
+      localStorage.setItem(FLIGHTREC_KEY, JSON.stringify({
+        started_at: flightRec.started_at, planned: flightRec.planned, work: flightRec.work,
+        bp_start: flightRec.bp_start, samples: flightRec.samples.slice(-600),
+        sawComplete: flightRec.sawComplete, wp_reached: flightRec.wp_reached, wp_total: flightRec.wp_total,
+      }));
+    } catch (e) {}
+  }
+  function flightRecClearPersist() { try { localStorage.removeItem(FLIGHTREC_KEY); } catch (e) {} }
+  async function flogHas(startedAt) {
+    try {
+      const db = await flogOpen();
+      return await new Promise((res, rej) => {
+        const rq = db.transaction(FLOG_STORE, "readonly").objectStore(FLOG_STORE).get(startedAt);
+        rq.onsuccess = () => res(rq.result != null);
+        rq.onerror = () => rej(rq.error);
+      });
+    } catch (e) { return false; }
+  }
+  // On boot: an active record left by a kill mid-flight is finalized ONCE as partial (flight-control
+  // continuity has no value — this is only stats/calibration). flogHas dedup prevents re-finalizing
+  // (same started_at key) a flight that already reached the log with a good complete record.
+  async function flightRecRestore() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(FLIGHTREC_KEY) || "null"); } catch (e) {}
+    if (!saved || !saved.started_at || !saved.samples || !saved.samples.length) { flightRecClearPersist(); return; }
+    if (await flogHas(saved.started_at)) { flightRecClearPersist(); return; }   // already finalized → dedup
+    flightRec = Object.assign({ _last: 0 }, saved);          // rehydrate as the active record
+    await flightRecFinalize(null, true);                     // ALWAYS partial (finalize clears the mirror)
+  }
   // Start recording when the drone arms in AUTO; sample ~1 Hz; finalize on disarm.
   function flightRecTick(s) {
     const armed = !!s.armed, auto = (s.mode || "").toUpperCase() === "AUTO";
@@ -3445,6 +3484,7 @@
       flightRec.samples.push({ t: now, lat: s.lat, lon: s.lon, alt: s.alt_rel,
         gs: s.groundspeed, bv: s.battery_v, bp: s.battery_pct, wp: s.wp_current });
     }
+    flightRecPersist();                                // throttled disk mirror (survives an app kill)
     if (s.wp_total && s.wp_current != null && s.wp_current >= s.wp_total - 1) flightRec.sawComplete = true;
     if (s.wp_current != null) flightRec.wp_reached = Math.max(flightRec.wp_reached, s.wp_current);
     if (!armed) flightRecFinalize(s, false);           // disarmed -> flight over
@@ -3459,6 +3499,7 @@
   }
   async function flightRecFinalize(s, partial) {
     const fr = flightRec; flightRec = null;
+    flightRecClearPersist();                           // finalized → the active mirror is stale
     if (!fr || !fr.samples.length) return;
     const last = fr.samples[fr.samples.length - 1];
     const actual_duration = (last.t - fr.started_at) / 1000;
