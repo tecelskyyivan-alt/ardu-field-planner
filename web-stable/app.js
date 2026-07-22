@@ -1230,6 +1230,15 @@
     args.forEach((a, i) => { s = s.split("{" + i + "}").join(String(a)); });
     return s;
   }
+  // Pluralise a count word: UA раз/рази/разів, EN time/times.
+  function plurCount(n) {
+    if (LANG === "en") return n === 1 ? "time" : "times";
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return "разів";
+    if (b === 1) return "раз";
+    if (b >= 2 && b <= 4) return "рази";
+    return "разів";
+  }
 
   // Escape HTML before putting any untrusted string into innerHTML. The drone's
   // STATUSTEXT / mode strings flow into the HUD, so a spoofed or malformed
@@ -1879,10 +1888,14 @@
           { color: "#ff4d4d", weight: 1.5, fillOpacity: 0.18, dashArray: "4 4", interactive: false }).addTo(overviewLayer);
       });
       const ha = (L.GeometryUtil.geodesicArea(ll.map((c) => L.latLng(c[0], c[1]))) / 1e4) || 0;
+      const doneHa = +(r.done_ha) || 0, areaHa = r.area_ha || ha, cc = r.completed_count | 0;
+      const leftHa = Math.max(0, areaHa - doneHa);            // done_ha NOT capped (cumulative partials)
       L.marker(poly.getBounds().getCenter(), { interactive: false, keyboard: false, zIndexOffset: 500,
         icon: L.divIcon({ className: "area-label field",
-          html: "<span><b>" + esc(r.name || "Поле") + "</b><br>" + ha.toFixed(2) + " га</span>",
-          iconSize: [140, 38], iconAnchor: [70, 19] }) }).addTo(overviewLayer);
+          html: "<span><b>" + esc(r.name || "Поле") + "</b><br>" + ha.toFixed(2) + " га<br>"
+            + tf("зроблено {0} · лишилось {1} га", doneHa.toFixed(1), leftHa.toFixed(1)) + "<br>"
+            + tf("виконано {0} {1}", cc, plurCount(cc)) + "</span>",
+          iconSize: [178, 62], iconAnchor: [89, 31] }) }).addTo(overviewLayer);
       poly.bindTooltip("Натисни, щоб працювати з «" + esc(r.name || "Поле") + "»");
       poly.on("click", (e) => {
         L.DomEvent.stop(e); clearSavedOverview();
@@ -1911,10 +1924,16 @@
       let n = 1; while (names.has("Поле " + n)) n++;
       name = "Поле " + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
     }
+    // Propagate the (possibly just-minted) name into the work context so a flight armed after
+    // this upload — without a rebuild — credits THIS field (#8), not the stale generic "поле".
+    if (lastWorkContext) lastWorkContext.field = name;
     const prev = (recs || []).find((r) => r.name === name);
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
-      created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now };
+      created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now,
+      // MERGE-preserve #8 cycle progress across re-uploads (else every upload zeroes it)
+      done_ha: (prev && +prev.done_ha) || 0, completed_count: (prev && prev.completed_count) || 0,
+      last_flight_at: (prev && prev.last_flight_at) || null };
     const ok = useLp ? false : await fldPut(rec);
     if (!ok) { try { lpSave(name, rec); } catch (e) {} }
     try { localStorage.setItem("fmp_current_field", name); } catch (e) {}   // for boot restore (Task 7)
@@ -1932,7 +1951,8 @@
     const name = "Поле " + n;
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
-      created: now, updated: now, area_ha: lastFieldAreaHa || 0 };
+      created: now, updated: now, area_ha: lastFieldAreaHa || 0,
+      done_ha: 0, completed_count: 0, last_flight_at: null };
     const ok = await fldPut(rec);
     if (!ok) { try { lpSave(name, rec); } catch (e) { setMsg("Не вдалося зберегти: " + e, "error"); return; } }
     currentFieldName = name;
@@ -1949,7 +1969,9 @@
     const list = recs.map((r, i) => {
       const ha = r.area_ha ? ` · ${r.area_ha} га` : "";
       const d = r.updated ? " · " + new Date(r.updated).toISOString().slice(0, 10) : "";
-      return `${i + 1}. ${r.name}${ha}${d}`;
+      const dn = +(r.done_ha) || 0, cc = r.completed_count | 0;
+      const prog = (dn > 0 || cc > 0) ? ` · зроблено ${dn.toFixed(1)} га · ×${cc}` : "";
+      return `${i + 1}. ${r.name}${ha}${prog}${d}`;
     }).join("\n");
     const ans = (prompt(`Поля на цьому пристрої:\n${list}\n\nНОМЕР — відкрити · «del N» — видалити · «file» — з файлу:`) || "").trim();
     if (!ans) return;
@@ -3418,9 +3440,26 @@
     };
     await flogPut(rec);
     await flogTrim(FLOG_MAX_FLIGHTS);
+    await fieldProgressCredit(fr, covered_ha, comp.covComplete);   // #8: credit this flight to its contour
     flightSummaries.push(flogSummary(rec));
     const mins = Math.round(actual_duration / 60);
     setMsg(`Політ записано (${mins} хв${rec.partial ? ", частковий" : ""}). Оцінки часу відкалібруються.`, "ok");
+  }
+  // #8: credit a finished flight to its field's cycle counters. Field is the one snapshotted
+  // at ARM time (fr.work.field), not currentFieldName (which may change between upload and disarm).
+  // complete → completed_count++ and reset done_ha; partial → accumulate done_ha (spec §B.8, §8).
+  async function fieldProgressCredit(fr, coveredHa, covComplete) {
+    const name = (fr.work && fr.work.field) || "";
+    if (!name || name === "поле" || coveredHa == null) return;   // raw/no-plan flight or unnamed → skip
+    const recs = await fldAll();                                 // null → IDB unavailable, use localStorage
+    const useLp = recs === null;
+    const rec = useLp ? lpAll()[name] : (recs || []).find((r) => r.name === name);
+    if (!rec) return;                                            // never-saved contour → nothing to credit
+    const upd = window.GEO_COVER.applyFieldCredit(rec, coveredHa, covComplete);
+    upd.last_flight_at = Date.now();
+    upd.updated = Date.now();                                    // #10 LWW: keep this progress on a later sync
+    const ok = useLp ? false : await fldPut(upd);
+    if (!ok) { try { lpSave(name, upd); } catch (e) {} }          // mirror the localStorage fallback used elsewhere
   }
   function flightRecAbort() { if (flightRec) flightRecFinalize(lastStatus, true); }
   loadFlightSummaries();          // warm the in-memory cache on startup

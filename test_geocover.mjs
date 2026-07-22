@@ -43,5 +43,21 @@ check("coveredHa: partial = dist*swath/1e4", near(G.coveredHa({ covComplete: fal
 check("coveredHa: partial capped at area_ha", G.coveredHa({ covComplete: false, areaHa: 3, swathM: 20, distM: 5000 }) === 3);
 check("coveredHa: no swath → null", G.coveredHa({ covComplete: false, areaHa: 100, swathM: 0, distM: 5000 }) === null);
 
+// applyFieldCredit: partial accumulates, complete resets + increments the counter.
+{
+  let r = { done_ha: 0, completed_count: 0 };
+  r = G.applyFieldCredit(r, 2.5, false);
+  check("credit: partial accumulates done_ha", r.done_ha === 2.5 && r.completed_count === 0);
+  r = G.applyFieldCredit(r, 1.5, false);
+  check("credit: second partial adds up", r.done_ha === 4.0 && r.completed_count === 0);
+  r = G.applyFieldCredit(r, 0, true);
+  check("credit: complete resets cycle + bumps count", r.done_ha === 0 && r.completed_count === 1);
+  r = G.applyFieldCredit(r, 3.0, false);
+  check("credit: next cycle starts fresh", r.done_ha === 3.0 && r.completed_count === 1);
+  const orig = { done_ha: 5, completed_count: 2 };
+  G.applyFieldCredit(orig, 1, false);
+  check("credit: does not mutate the input record", orig.done_ha === 5 && orig.completed_count === 2);
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);
