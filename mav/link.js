@@ -576,7 +576,9 @@
           if (Date.now() - lastReq > 1000) {
             // INAV has NO MISSION_REQUEST_INT handler — it only answers the legacy
             // MISSION_REQUEST (and replies with MISSION_ITEM). ArduPilot handles both.
-            const reqT = (this._tlm.autopilot == null || this._tlm.autopilot === 3) ? "MISSION_REQUEST_INT" : "MISSION_REQUEST";
+            // Unknown/bridge-only (autopilot == null) → LEGACY MISSION_REQUEST: it's the one
+            // dialect BOTH ArduPilot and INAV answer. INT is asked only when we KNOW it's ArduPilot.
+            const reqT = (this._tlm.autopilot === 3) ? "MISSION_REQUEST_INT" : "MISSION_REQUEST";
             this._send(reqT, { target_system: ts, target_component: tc, seq, mission_type: 0 }); lastReq = Date.now();
           }
           const im = await this._recv(["MISSION_ITEM_INT", "MISSION_ITEM"], 1000);
