@@ -2569,6 +2569,20 @@
     flownHasRtl = (f.rtl != null ? f.rtl : true);
     flownWpTotal = f.wpTotal || 0;
     flownRestored = true;              // disk-restored → mission-status shows "verify", never green
+    // Intent-marker safety (verified finding): mavUpload() overwrites FLOWN_KEY with
+    // {route:NEW route, status:"uploading"} the INSTANT an upload starts, before the
+    // transfer is confirmed — so an app kill mid-upload leaves this bare marker on disk.
+    // RESUME_KEY, however, was recorded against whatever mission was flying BEFORE this
+    // upload attempt (a different route). Pairing that stale wp-progress with the marker's
+    // NEW route (as resumeRemaining() would, unchecked) can offer "continue from wp N" at
+    // an index that has nothing to do with this route — silently skipping a large, real
+    // stretch of never-flown coverage if accepted. We don't know what's actually on the
+    // drone after an unconfirmed upload, so drop the stale progress rather than risk
+    // pairing it with the wrong route; the operator re-verifies/re-uploads from scratch.
+    if (f.status === "uploading") {
+      try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
+      appLog("flownRestore: marker left mid-upload (killed before confirm) — cleared stale resume progress");
+    }
   }
   function resumeClear() {
     try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
