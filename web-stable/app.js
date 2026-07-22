@@ -498,6 +498,7 @@
   let coverageLayer = null;       // sprayed-swath fill (spray footprint overlay)
   let overlapLayer = null;        // double-sprayed area (drawn over the swath)
   let gapLayer = null;            // unsprayed gaps between passes (#9)
+  let transitLayer = null;        // safe ingress/egress detour legs (#12, viz only)
 
   const drawControl = new L.Control.Draw({
     draw: {
@@ -1129,6 +1130,10 @@
       if (coverageLayer) { map.removeLayer(coverageLayer); coverageLayer = null; }
       if (overlapLayer) { map.removeLayer(overlapLayer); overlapLayer = null; }
       if (gapLayer) { map.removeLayer(gapLayer); gapLayer = null; }
+      // #12: safe-path viz, like the overlays above, is only (re)computed on a full
+      // (non-live) build — drop the stale one here; the async safe_transit call below
+      // repaints it once it resolves.
+      if (transitLayer) { map.removeLayer(transitLayer); transitLayer = null; }
     }
     $("stats").classList.add("hidden");
     ["exp-wp", "exp-plan", "exp-fence", "exp-fencemp", "exp-geojson"]
@@ -1331,6 +1336,40 @@
     lastRtl = $("rtl").checked;
     updateMissionStatus();           // plan changed -> "not uploaded / re-upload"
     routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
+
+    // #12: draw the safe ingress/egress detour — PURE VISUALIZATION (the actual splice
+    // into the uploaded mission happens independently in mav_upload_mission). Only
+    // worth computing when exclusions exist (a straight hop only risks cutting through
+    // one of those); skip on every live angle-drag to keep dragging snappy. Runs async
+    // and never blocks the rest of the build — a newer build's higher myToken drops a
+    // stale result, and any failure here is purely cosmetic (upload has its own splice).
+    if (!live && exclLayers().length > 0) {
+      (async () => {
+        try {
+          const tParams = { home: lastHome ? { lat: lastHome.lat, lng: lastHome.lng } : undefined };
+          const t = (!IS_QT && eng && eng.available())
+            ? await eng.safeTransit(tParams)
+            : await api().safe_transit(tParams);
+          if (myToken !== buildSeq) return;   // a newer build superseded this one
+          if (transitLayer) { map.removeLayer(transitLayer); transitLayer = null; }
+          if (t && t.ok) {
+            const legs = [];
+            if (t.ingress_ok && t.ingress.length > 1) legs.push(L.polyline(t.ingress.map((p) => [p.lat, p.lng]),
+              { color: "#2ecc71", weight: 3, opacity: 0.9, dashArray: "6 6", interactive: false }));
+            if (t.egress_ok && t.egress.length > 1) legs.push(L.polyline(t.egress.map((p) => [p.lat, p.lng]),
+              { color: "#2f80ed", weight: 3, opacity: 0.9, dashArray: "6 6", interactive: false }));
+            if (legs.length) transitLayer = L.featureGroup(legs).addTo(map)
+              .bindTooltip("Безпечний шлях на старт / додому");
+            if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — політ напряму. Перевір межу поля та вирізи.", "warn");
+            if (!t.egress_ok) setMsg("Безпечний шлях додому не побудовано — політ напряму. Перевір межу поля та вирізи.", "warn");
+          }
+          // !t.ok (or an engine that lacks safe_transit) → no detour drawn, no warning —
+          // this is cosmetic-only; the upload path makes its own independent decision.
+        } catch (e) {
+          console.error("safe_transit viz failed:", e);
+        }
+      })();
+    }
 
     // start/end markers — in their OWN FeatureGroup on the map. (A polyline has
     // no addLayer, so `.addTo(routeLayer)` would throw and abort the whole build.)
@@ -2763,9 +2802,38 @@
       // items). Pick the builder by the detected autopilot (3 = ArduPilot).
       const _wps = route.map((pt) => [pt[0], pt[1]]);
       const isInav = st && st.autopilot != null && st.autopilot !== 3;
+      // #12: splice a provably-safe ingress/egress detour (around the field edge and any
+      // exclusions) onto the flown mission — ArduPilot only (INAV path below is untouched).
+      // FAIL-SAFE (safety-critical, do not weaken): a safe_transit failure, an {ok:false},
+      // an unavailable engine, or ANY exception here must DEGRADE to the plain `_wps`
+      // mission (today's behaviour) — this must never throw out of the upload, and must
+      // never prepend/append a leg whose *_ok is false.
+      let flown = _wps;
+      if (!isInav) {
+        try {
+          const tParams = { home: { lat: home[0], lng: home[1] } };
+          const eng = window.FMP_ENGINE;
+          const t = (!IS_QT && eng && eng.available())
+            ? await eng.safeTransit(tParams)
+            : await api().safe_transit(tParams);
+          if (t && t.ok) {
+            // slice(0,-1)/slice(1) drop the shared endpoint (ingress ends at _wps[0],
+            // egress starts at _wps[last]) so it isn't duplicated in `flown`.
+            const pre  = t.ingress_ok ? t.ingress.slice(0, -1).map((p) => [p.lat, p.lng]) : [];
+            const post = t.egress_ok  ? t.egress.slice(1).map((p) => [p.lat, p.lng])       : [];
+            flown = [...pre, ..._wps, ...post];
+            if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", null);
+            if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", null);
+          }
+          // on !t.ok or engine unavailable → flown stays = _wps (NEVER block the upload; just no detour)
+        } catch (e) {
+          appLog("safe_transit splice failed: " + ((e && e.message) || e) + " -> плоска місія без обходу");
+          // flown stays = _wps — degrade to the plain mission, never throw out of the upload
+        }
+      }
       const items = isInav
         ? MAV_LINK.buildMissionItemsInav(_wps, alt, rtl)
-        : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), _wps, alt, rtl, speed);
+        : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), flown, alt, rtl, speed);
       const res = await _mavLink.uploadMission(items, undefined, p && p.onProgress);
       if (!res.ok) return res;
       if (speed > 0 && !isInav) {   // INAV: MAVLink param-set is a stub; speed is a vehicle setting
@@ -4274,6 +4342,10 @@
     try {
       if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
       if (routeMarkers) { map.removeLayer(routeMarkers); routeMarkers = null; }
+      // #12: the drawn safe-path legs referred to the PREVIOUS full mission's start/end —
+      // after a resume-from-battery swap the flown remainder starts elsewhere, so the old
+      // detour lines would be misleading. Drop them; they are not recomputed here.
+      if (transitLayer) { map.removeLayer(transitLayer); transitLayer = null; }
       routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
       routeMarkers = L.featureGroup([
         L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 }).bindTooltip("Старт"),

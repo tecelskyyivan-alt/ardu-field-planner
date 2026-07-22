@@ -14,6 +14,7 @@
  *   window.FMP_ENGINE.isReady()          -> bool
  *   window.FMP_ENGINE.available()        -> bool (false only if BOTH modes failed)
  *   window.FMP_ENGINE.buildRoute(params) -> Promise<result>  (== /api/build_route)
+ *   window.FMP_ENGINE.safeTransit(params)-> Promise<result>  (== Api.safe_transit; #12)
  */
 (function (root) {
   "use strict";
@@ -100,6 +101,14 @@
     const out = pyMain.runPython("import json as _j; _j.dumps(_api.build_route(_j.loads(_pj)))");
     return JSON.parse(out);
   }
+  // #12: provably-safe ingress/egress legs around the last-built route's field/exclusions.
+  // Same shape as buildMain — a Python exception propagates to the caller, which decides
+  // (viz call and mission-splice call both wrap this in try/catch and degrade on failure).
+  function safeMain(params) {
+    pyMain.globals.set("_pj", JSON.stringify(params));
+    const out = pyMain.runPython("import json as _j; _j.dumps(_api.safe_transit(_j.loads(_pj)))");
+    return JSON.parse(out);
+  }
 
   // ---- init: worker first, fall back to main-thread -----------------------
   async function doInit() {
@@ -142,6 +151,11 @@
       await this.init();
       if (mode === "worker") return callWorker("build", params);
       return buildMain(params);
+    },
+    async safeTransit(params) {
+      await this.init();
+      if (mode === "worker") return callWorker("safe_transit", params);
+      return safeMain(params);
     },
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);
