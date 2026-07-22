@@ -2625,6 +2625,7 @@
   let flownHome = null;           // {lat,lng}
   let flownHasRtl = true;
   let flownWpTotal = 0;           // total mission items uploaded (progress/completion)
+  let flownSplicePost = 0;        // safe-transit EGRESS waypoints appended after coverage (#12) — HUD lead math
   let flownRestored = false;      // flown snapshot came from disk (unverified) → not green until re-checked
   let targetMarker = null;        // ring on the active (next) waypoint
   let targetLine = null;          // dashed line drone -> next waypoint
@@ -2657,6 +2658,7 @@
     flownHome = f.home || null;
     flownHasRtl = (f.rtl != null ? f.rtl : true);
     flownWpTotal = f.wpTotal || 0;
+    flownSplicePost = f.post || 0;
     flownRestored = true;              // disk-restored → mission-status shows "verify", never green
     // Intent-marker safety (verified finding): mavUpload() overwrites FLOWN_KEY with
     // {route:NEW route, status:"uploading"} the INSTANT an upload starts, before the
@@ -2687,12 +2689,13 @@
   // idx = wp - lead maps back to the right coverage waypoint (CRITICAL fix: previously only
   // missionLead() was stored, silently skipping `splicePre` never-flown waypoints on every
   // battery-swap resume of a spliced upload).
-  function flownSave(route, home, hasRtl, status, splicePre) {
+  function flownSave(route, home, hasRtl, status, splicePre, splicePost) {
     try {
       localStorage.setItem(FLOWN_KEY, JSON.stringify({
         route: route, home: home || null,
         rtl: (hasRtl != null ? hasRtl : $("rtl").checked),
         lead: missionLead() + (splicePre || 0), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
+        post: splicePost || 0,          // egress splice length (#12) — HUD lead math on restore
         status: status || "confirmed", ts: Date.now(),
       }));
     } catch (e) {}
@@ -2947,6 +2950,7 @@
       // on EVERY spliced upload, silently dropping the first `pre.length` coverage waypoints
       // of a battery-swap resume (verified finding — the duplicated Critical).
       let splicePre = 0;
+      let splicePost = 0;
       // Partial-route upload (resume after a battery swap passes p.route = the REMAINDER):
       // safe_transit plans against the engine's _state = the FULL last-built route, so its
       // ingress would target the ORIGINAL field start, not the mid-field resume point —
@@ -2966,6 +2970,7 @@
             const post = t.egress_ok  ? t.egress.slice(1).map((p) => [p.lat, p.lng])       : [];
             flown = [...pre, ..._wps, ...post];
             splicePre = pre.length;
+            splicePost = post.length;
             if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", "warn");
             if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", "warn");
           }
@@ -2983,6 +2988,7 @@
       // above. 0 for INAV/resume uploads (no splice attempted) and for a plain _wps
       // mission (no safe_transit ingress, or it failed/was unavailable).
       res.splice_pre = splicePre;
+      res.splice_post = splicePost;   // egress splice length — HUD lead math only (display)
       if (!res.ok) return res;
       if (speed > 0 && !isInav) {   // INAV: MAVLink param-set is a stub; speed is a vehicle setting
         let ps = await _mavLink.setParam("WP_SPD", speed);
@@ -4289,10 +4295,12 @@
     const homeOffset = flownHome ? 1 : 0;
 
     const c = s.wp_current;
-    // Leading non-coverage items = home + takeoff (+ optional DO_CHANGE_SPEED).
-    // Derive from the vehicle's total so the map stays correct whatever we added.
+    // Leading non-coverage items = home + takeoff (+ optional DO_CHANGE_SPEED) + the
+    // safe-transit INGRESS splice (#12). Derive from the vehicle's total, but subtract the
+    // EGRESS splice too (flownSplicePost) — those items sit AFTER coverage, so counting them
+    // into `lead` made the HUD target/ETA lag by `post` waypoints (audit residual, display-only).
     const total = s.wp_total || (n + 2 + (flownHasRtl ? 1 : 0));
-    const lead = Math.max(2, total - n - (flownHasRtl ? 1 : 0));
+    const lead = Math.max(2, total - n - (flownHasRtl ? 1 : 0) - (flownSplicePost || 0));
     let phase = "", targetIdx;
     if (c < lead) {                              // pre-AUTO / takeoff
       targetIdx = homeOffset; phase = "зліт";
@@ -4477,7 +4485,8 @@
         // #3: keep the notification's "WP x/y" denominator in sync with the real upload
         try { if (window.AndroidNotify && window.AndroidNotify.setMission) window.AndroidNotify.setMission(flownWpTotal); } catch (e) {}
         flownRestored = false;                   // fresh read-back-verified upload → trusted
-        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0);
+        flownSplicePost = r.splice_post || 0;
+        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
         resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
         let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
@@ -4567,7 +4576,8 @@
       // Resume uploads never splice (mav_upload_mission gates the splice off when p.route is
       // set — see its comment), so r.splice_pre is always 0 here; pass it through anyway for
       // consistency with the full-upload call site above.
-      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0);
+      flownSplicePost = r.splice_post || 0;      // always 0 (no splice on resume) — reset a stale value
+      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
       promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
