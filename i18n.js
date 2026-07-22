@@ -322,3 +322,13 @@ Object.assign(window.FMP_TR, {
   "Остання відома місія (з пам'яті) — підключись і перевір, чи вона ще в дроні.":
     "Last known mission (from memory) — connect and verify it's still on the drone.",
 });
+
+Object.assign(window.FMP_TR, {
+  "Небезпеки (ЛЕП / стовпи)": "Hazards (power lines / poles)",
+  "+ Стовп": "+ Pole",
+  "+ ЛЕП": "+ Power line",
+  "Запас обходу, м": "Avoidance clearance, m",
+  "Підтягнути ЛЕП з OSM (тест)": "Import power lines from OSM (test)",
+  "OSM може бути неповним — перевір очима, це НЕ гарантія.": "OSM may be incomplete — verify with your eyes, it is NOT a guarantee.",
+  "Небезпек: {0} (стовпів {1} · ліній {2})": "Hazards: {0} (poles {1} · lines {2})",
+});
