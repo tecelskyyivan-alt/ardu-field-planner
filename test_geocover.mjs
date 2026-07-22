@@ -1,0 +1,47 @@
+/* Headless unit tests for web-stable/geo-cover.js (pure covered-area geometry).
+ * Run: node test_geocover.mjs   (Node 18+, no DOM). */
+import fs from "fs";
+import vm from "vm";
+import { fileURLToPath } from "url";
+import path from "path";
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ctx = { window: {} };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(path.join(HERE, "web-stable", "geo-cover.js"), "utf8"), ctx);
+const G = ctx.window.GEO_COVER;
+let failed = 0;
+const check = (n, c) => { console.log((c ? "  OK  " : " FAIL ") + n); if (!c) failed++; };
+const near = (a, b, eps) => Math.abs(a - b) <= eps;
+
+// A ~100 m square ring near 49.49N (ring uses .lng).
+const ring = [
+  { lat: 49.4900, lng: 24.0000 }, { lat: 49.4900, lng: 24.0014 },
+  { lat: 49.4909, lng: 24.0014 }, { lat: 49.4909, lng: 24.0000 },
+];
+check("pointInRing: centre is inside", G.pointInRing(49.49045, 24.0007, ring) === true);
+check("pointInRing: far point is outside", G.pointInRing(49.60, 24.10, ring) === false);
+
+// distInField: a track that stays inside the ring returns > 0 (the {lat,lon} contract).
+const inside = [
+  { lat: 49.4902, lon: 24.0003 }, { lat: 49.4902, lon: 24.0011 }, { lat: 49.4907, lon: 24.0011 },
+];
+check("distInField: in-field track > 0 (lon/lng contract)", G.distInField(inside, ring) > 0);
+check("distInField: null ring → null (caller falls back)", G.distInField(inside, null) === null);
+// A track entirely outside contributes 0.
+const outside = [{ lat: 49.60, lon: 24.10 }, { lat: 49.61, lon: 24.11 }];
+check("distInField: out-of-field track = 0", G.distInField(outside, ring) === 0);
+
+// coverageCompletion: sawComplete / threshold / fraction.
+check("completion: sawComplete → covComplete", G.coverageCompletion({ sawComplete: true, wpReached: 0, wpTotal: 10, hasRtl: true }).covComplete === true);
+check("completion: >=90% → covComplete", G.coverageCompletion({ sawComplete: false, wpReached: 9, wpTotal: 11, hasRtl: true }).covComplete === true); // lastCoverageSeq=9, wr/9=1.0
+check("completion: 50% → not complete", G.coverageCompletion({ sawComplete: false, wpReached: 5, wpTotal: 21, hasRtl: true }).covComplete === false); // last=19, 5/19≈0.26
+check("completion: pct rounds", G.coverageCompletion({ sawComplete: false, wpReached: 10, wpTotal: 21, hasRtl: true }).completionPct === 53); // 10/19=0.526→53
+
+// coveredHa: complete → area_ha; partial → dist*swath/1e4 capped; no swath → null.
+check("coveredHa: complete → area_ha", G.coveredHa({ covComplete: true, areaHa: 12.5, swathM: 20, distM: 999 }) === 12.5);
+check("coveredHa: partial = dist*swath/1e4", near(G.coveredHa({ covComplete: false, areaHa: 100, swathM: 20, distM: 5000 }), 10, 1e-6)); // 5000*20/1e4=10
+check("coveredHa: partial capped at area_ha", G.coveredHa({ covComplete: false, areaHa: 3, swathM: 20, distM: 5000 }) === 3);
+check("coveredHa: no swath → null", G.coveredHa({ covComplete: false, areaHa: 100, swathM: 0, distM: 5000 }) === null);
+
+console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
+process.exit(failed ? 1 : 0);

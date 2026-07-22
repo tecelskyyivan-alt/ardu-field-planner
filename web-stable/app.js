@@ -533,6 +533,8 @@
       return;
     }
     adoptField(e.layer);
+    currentFieldName = "";        // a freshly-drawn contour is a NEW unnamed field → mint a name on
+                                  // upload, never UPSERT over the previously-loaded field's record
     setMsg("Контур поля задано.", "ok");
   });
   // Reset the "next polygon is an exclusion" flag whenever a draw ends (finish or
@@ -824,7 +826,8 @@
       lastBuildStats = { duration_s: res.duration_s, length_m: res.length_m, sprayed_ha: res.sprayed_ha };
       lastFieldAreaHa = res.area_ha || 0;
       lastWorkContext = { field: currentFieldName || "поле", area_ha: res.area_ha || 0,
-        sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1 };
+        sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1,
+        swath_m: parseFloat($("spacing").value) || 0, boundary: boundaryFromPolygon() || null };   // field already adopted by restoreLastField
       if (res.calibration) lastCalibration = res.calibration;
       routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
       routeMarkers = L.featureGroup([
@@ -1097,7 +1100,8 @@
     lastBuildStats = { duration_s: res.duration_s, length_m: res.length_m, sprayed_ha: res.sprayed_ha };
     lastFieldAreaHa = res.area_ha || 0;
     lastWorkContext = { field: currentFieldName || "поле", area_ha: res.area_ha || 0,
-      sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1 };
+      sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1,
+      swath_m: parseFloat($("spacing").value) || 0, boundary: boundary };   // field ring for covered-area (§8)
     if (res.calibration) lastCalibration = res.calibration;
 
     clearRoute(live);   // on a live rebuild keep the last spray overlay (viz isn't recomputed)
@@ -1253,6 +1257,7 @@
         b.classList.toggle("active", b === btn));
       document.querySelectorAll(".tab-pane").forEach((p) =>
         p.classList.toggle("active", p.id === "tab-" + name));
+      if (name === "stats" && typeof renderFlightStats === "function") renderFlightStats();
       // Leaflet needs a nudge after the panel content changes width/visibility.
       setTimeout(() => map.invalidateSize(), 50);
     });
@@ -1342,7 +1347,10 @@
     if (h && $("round-turn")) h.style.display = $("round-turn").checked ? "" : "none";
   }
   if ($("round-turn")) $("round-turn").addEventListener("change", syncRoundTurnHint);
-  window.addEventListener("beforeunload", () => { saveLastSettings(); saveLastField(); });
+  window.addEventListener("beforeunload", () => {
+    saveLastSettings(); saveLastField();
+    try { localStorage.setItem("fmp_current_field", currentFieldName || ""); } catch (e) {}
+  });
   restoreLastSettings();          // pre-fill last session's settings before first render
   // Deferred so ALL module-level `let`s (lastRoute, …) are initialized first —
   // adoptField()→clearRoute() touches them, which would hit a TDZ error if run inline.
@@ -1351,8 +1359,9 @@
     try { _routeSnap = localStorage.getItem("fmp_last_route"); } catch (e) {}
     _bootRestoring = true;
     try {
+      try { const _cf = localStorage.getItem("fmp_current_field"); if (_cf) currentFieldName = _cf; } catch (e) {}
       restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
-      restoreLastRoute(_routeSnap); // маршрут — зі знімка, без перерахунку
+      restoreLastRoute(_routeSnap); // маршрут — зі знімка (будує lastWorkContext.field з currentFieldName)
     } finally { _bootRestoring = false; }
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
@@ -1886,6 +1895,31 @@
   }
   if ($("show-saved")) $("show-saved").addEventListener("click", showSavedFields);
 
+  // On upload: promote the current contour to a persistent named record (the promise
+  // "Автозбереження — при заливці в дрон"). UPSERT by name so a re-upload of the same field
+  // updates rather than duplicates; a freshly-drawn (unnamed) field mints "Поле N" ONCE and
+  // adopts that name so subsequent uploads hit the same record.
+  async function promoteFieldOnUpload() {
+    const field = boundaryFromPolygon();
+    if (!field || field.length < 3) return;                 // nothing to save
+    let recs = await fldAll();
+    const useLp = recs === null;                            // IDB unavailable → localStorage fallback
+    if (useLp) { const o = lpAll(); recs = Object.keys(o).map((n) => Object.assign({ name: n }, o[n])); }
+    let name = currentFieldName;
+    if (!name) {
+      const names = new Set((recs || []).map((r) => r.name));
+      let n = 1; while (names.has("Поле " + n)) n++;
+      name = "Поле " + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
+    }
+    const prev = (recs || []).find((r) => r.name === name);
+    const now = Date.now();
+    const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
+      created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now };
+    const ok = useLp ? false : await fldPut(rec);
+    if (!ok) { try { lpSave(name, rec); } catch (e) {} }
+    try { localStorage.setItem("fmp_current_field", name); } catch (e) {}   // for boot restore (Task 7)
+    appLog("field promoted on upload: «" + name + "» (upsert)");
+  }
   $("save-project").addEventListener("click", async () => {
     const field = boundaryFromPolygon();
     if (!field || field.length < 3) { setMsg("Спочатку задай поле.", "error"); return; }
@@ -3224,9 +3258,95 @@
   }
   const flogSummary = (r) => ({ started_at: r.started_at, planned: r.planned || null,
     actual: r.actual || null, partial: !!r.partial });
+  const FLOG_MAX_FLIGHTS = 300;
+  async function flogTrim(cap) {
+    try {
+      const all = await flogAll();                 // getAll() → ascending by started_at key
+      if (all.length <= cap) return;
+      const excess = all.slice(0, all.length - cap);   // the oldest
+      const db = await flogOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(FLOG_STORE, "readwrite");
+        const st = tx.objectStore(FLOG_STORE);
+        excess.forEach((r) => st.delete(r.started_at));
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+    } catch (e) { /* private mode / quota — best-effort */ }
+  }
   async function loadFlightSummaries() {
     const all = await flogAll();
     flightSummaries = all.map(flogSummary);
+  }
+
+  // ---- flight statistics tab ----
+  let statsRange = "all";
+  function _statsRangeFloor(r) {                 // epoch-ms floor of the selected period (LOCAL time)
+    const d = new Date();
+    if (r === "hour") { d.setMinutes(0, 0, 0); return d.getTime(); }
+    if (r === "day") { d.setHours(0, 0, 0, 0); return d.getTime(); }
+    return 0;                                     // "all"
+  }
+  function _haPerMin(rec) {                       // Га/хв = covered_ha / duration_min
+    const ac = rec.actual || {}, cov = ac.covered_ha, sec = ac.duration_s;
+    if (cov == null || !sec || sec <= 0) return null;
+    return cov / (sec / 60);
+  }
+  function _bindStatsChips() {
+    const pane = $("tab-stats"); if (!pane || pane._statsBound) return;
+    pane._statsBound = true;                       // bind ONCE on the stable pane (host innerHTML is replaced)
+    pane.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-range]"); if (!b) return;
+      statsRange = b.getAttribute("data-range"); renderFlightStats();
+    });
+  }
+  async function renderFlightStats() {
+    const host = $("flight-stats"); if (!host) return;
+    const rows = (await flogAll())
+      .filter((r) => r.started_at >= _statsRangeFloor(statsRange))
+      .sort((a, b) => b.started_at - a.started_at);
+    const chip = (r, lbl) => `<button class="chip${statsRange === r ? " active" : ""}" data-range="${r}" aria-pressed="${statsRange === r}">${t(lbl)}</button>`;
+    let html = `<div class="stats-chips">${chip("hour", "з початку години")}${chip("day", "з початку дня")}${chip("all", "усе")}</div>`;
+    if (!rows.length) {
+      host.innerHTML = html + `<div class="msg">${t("Немає польотів за обраний період.")}</div>`;
+      _bindStatsChips(); return;
+    }
+    let secTot = 0, distTot = 0, covTot = 0, covDurMin = 0;
+    rows.forEach((r) => {
+      const ac = r.actual || {};
+      secTot += ac.duration_s || 0; distTot += ac.distance_m || 0;
+      if (ac.covered_ha != null) { covTot += ac.covered_ha; covDurMin += (ac.duration_s || 0) / 60; }
+    });
+    const avgHaMin = covDurMin > 0 ? covTot / covDurMin : null;
+    const num = (n, d) => (n == null ? "—" : (LANG === "en" ? n.toFixed(d) : String(Math.round(n * 10 ** d) / 10 ** d)));
+    const tile = (label, val, cls) => `<div class="stat-tile${cls ? " " + cls : ""}"><div class="sv">${val}</div><div class="sl">${t(label)}</div></div>`;
+    html += `<div class="stats-totals">
+      ${tile("Польотів", rows.length)}
+      ${tile("Годин", num(secTot / 3600, 1))}
+      ${tile("Кілометрів", num(distTot / 1000, 1))}
+      ${tile("Покрито", num(covTot, 1), "headline")}
+      ${tile("Сер. Га/хв", num(avgHaMin, 2))}
+    </div>`;
+    const cell = (r) => {
+      const ac = r.actual || {};
+      const spd = ac.avg_speed_ms != null ? num(ac.avg_speed_ms * 3.6, 1) : "—";  // km/h
+      return `<tr>
+        <td>${esc(r.date || "")}</td>
+        <td>${esc(r.field || "поле")}</td>
+        <td>${ac.covered_ha != null ? num(ac.covered_ha, 2) : "—"}</td>
+        <td>${ac.distance_m != null ? num(ac.distance_m / 1000, 2) : "—"}</td>
+        <td>${ac.duration_s != null ? Math.round(ac.duration_s / 60) : "—"}</td>
+        <td>${ac.battery_used_pct != null ? ac.battery_used_pct : "—"}</td>
+        <td>${spd}</td>
+        <td>${_haPerMin(r) != null ? num(_haPerMin(r), 2) : "—"}</td>
+      </tr>`;
+    };
+    const H = (s) => t(s);
+    html += `<div class="stats-table-wrap"><table class="stats-table"><thead><tr>
+      <th>${H("Дата")}</th><th>${H("Поле")}</th><th>${H("Покрито")}</th><th>${H("Відстань")}</th>
+      <th>${H("Час")}</th><th>${H("Батарея")}</th><th>${H("Сер. швидкість")}</th><th>${H("Га/хв")}</th>
+      </tr></thead><tbody>${rows.map(cell).join("")}</tbody></table></div>`;
+    host.innerHTML = html;
+    _bindStatsChips();
   }
 
   // Start recording when the drone arms in AUTO; sample ~1 Hz; finalize on disarm.
@@ -3238,7 +3358,7 @@
           planned: lastBuildStats ? Object.assign({}, lastBuildStats) : null,
           work: lastWorkContext ? Object.assign({}, lastWorkContext) : null,
           bp_start: (s.battery_pct != null ? s.battery_pct : null),
-          samples: [], sawComplete: false, wp_total: s.wp_total || 0, _last: 0 };
+          samples: [], sawComplete: false, wp_reached: 0, wp_total: s.wp_total || 0, _last: 0 };
         appLog("flightlog: recording started (AUTO armed)");
       }
       return;
@@ -3250,6 +3370,7 @@
         gs: s.groundspeed, bv: s.battery_v, bp: s.battery_pct, wp: s.wp_current });
     }
     if (s.wp_total && s.wp_current != null && s.wp_current >= s.wp_total - 1) flightRec.sawComplete = true;
+    if (s.wp_current != null) flightRec.wp_reached = Math.max(flightRec.wp_reached, s.wp_current);
     if (!armed) flightRecFinalize(s, false);           // disarmed -> flight over
   }
   function _sampleDist(samples) {
@@ -3268,11 +3389,27 @@
     if (actual_duration < 5) return;                   // too short to be a real flight
     const bp_end = (s && s.battery_pct != null) ? s.battery_pct : last.bp;
     const battery_used = (fr.bp_start != null && bp_end != null) ? (fr.bp_start - bp_end) : null;
+    // Covered area (spec §8): complete (>=90% / sawComplete) → the planned field area; partial →
+    // in-field track distance × swath, capped at the field area. Geometry lives in GEO_COVER.
+    const comp = window.GEO_COVER.coverageCompletion({
+      sawComplete: fr.sawComplete, wpReached: fr.wp_reached || 0, wpTotal: fr.wp_total || 0, hasRtl: flownHasRtl });
+    const ring = (fr.work && fr.work.boundary) || null;
+    const trackDist = _sampleDist(fr.samples);
+    let distM = window.GEO_COVER.distInField(fr.samples, ring);
+    if (distM == null) distM = trackDist;                 // no ring → whole track (still capped)
+    const swath_m = (fr.work && fr.work.swath_m) || 0;
+    const covered_ha = window.GEO_COVER.coveredHa({
+      covComplete: comp.covComplete, areaHa: (fr.work && fr.work.area_ha) || 0, swathM: swath_m, distM: distM });
+    const avg_speed_ms = actual_duration > 0 ? (trackDist / actual_duration) : null;
     const rec = {
       started_at: fr.started_at, ended_at: last.t, planned: fr.planned,
       actual: { duration_s: Math.round(actual_duration),
         battery_used_pct: (battery_used != null ? Math.round(battery_used) : null),
-        distance_m: Math.round(_sampleDist(fr.samples)) },
+        distance_m: Math.round(trackDist),
+        covered_ha: (covered_ha != null ? Math.round(covered_ha * 100) / 100 : null),
+        completion_pct: comp.completionPct,
+        avg_speed_ms: (avg_speed_ms != null ? Math.round(avg_speed_ms * 10) / 10 : null),
+        swath_m: swath_m || null },
       partial: !!partial || !fr.sawComplete,
       field: (fr.work && fr.work.field) || "поле",
       date: new Date(fr.started_at).toISOString().slice(0, 10),
@@ -3280,6 +3417,7 @@
       params: { wp_total: fr.wp_total }, samples: fr.samples,
     };
     await flogPut(rec);
+    await flogTrim(FLOG_MAX_FLIGHTS);
     flightSummaries.push(flogSummary(rec));
     const mins = Math.round(actual_duration / 60);
     setMsg(`Політ записано (${mins} хв${rec.partial ? ", частковий" : ""}). Оцінки часу відкалібруються.`, "ok");
@@ -3652,6 +3790,7 @@
                               diff: r.verify.mismatches } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
+        promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
         resumeClear();          // нова місія в дроні → стара точка продовження недійсна
         // Snapshot exactly what we uploaded — progress is computed off this, so
         // editing/rebuilding the route afterwards can't corrupt the live HUD.
@@ -3719,6 +3858,7 @@
       flownRoute = rem.rest.slice();
       flownHasRtl = $("rtl").checked;
       flownSave(rem.rest);
+      promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
       updateMissionStatus();

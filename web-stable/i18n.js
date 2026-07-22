@@ -291,3 +291,24 @@ Object.assign(window.FMP_TR, {
   "розбіжності": "discrepancies",
   "Не вдалося залити місію.": "Could not upload the mission.",
 });
+
+Object.assign(window.FMP_TR, {
+  "Статистика": "Statistics",
+  "Статистика польотів": "Flight statistics",
+  "Польотів": "Flights",
+  "Годин": "Hours",
+  "Кілометрів": "Kilometres",
+  "Покрито": "Covered",
+  "Сер. Га/хв": "Avg ha/min",
+  "Га/хв": "ha/min",
+  "Дата": "Date",
+  "Поле": "Field",
+  "Відстань": "Distance",
+  "Час": "Time",
+  "Батарея": "Battery",
+  "Сер. швидкість": "Avg speed",
+  "з початку години": "This hour",
+  "з початку дня": "Today",
+  "усе": "All",
+  "Немає польотів за обраний період.": "No flights in the selected period.",
+});

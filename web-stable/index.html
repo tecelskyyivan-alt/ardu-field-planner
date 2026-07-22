@@ -40,6 +40,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="plan">План</button>
         <button class="tab" data-tab="fly">Політ</button>
+        <button class="tab" data-tab="stats">Статистика</button>
         <button class="tab" data-tab="app" id="tab-btn-app">Додаток</button>
       </div>
 
@@ -241,6 +242,11 @@
       <p class="hint">Кожен виліт логується офлайн і калібрує оцінку часу / заряду.</p>
       </div><!-- /tab-fly -->
 
+      <div id="tab-stats" class="tab-pane">
+        <div class="step">Статистика польотів</div>
+        <div id="flight-stats"></div>
+      </div><!-- /tab-stats -->
+
       <div id="tab-app" class="tab-pane">
       <div class="step">
         Встановити додаток
@@ -312,6 +318,7 @@
   <script src="mav/link.js"></script>
   <script src="vendor/clipper.min.js"></script>
   <script src="i18n.js"></script>
+  <script src="geo-cover.js"></script>
   <script src="app.js"></script>
   <script src="sw-register.js"></script>
 </body>
