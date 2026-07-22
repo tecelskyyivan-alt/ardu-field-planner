@@ -332,3 +332,5 @@ Object.assign(window.FMP_TR, {
   "OSM може бути неповним — перевір очима, це НЕ гарантія.": "OSM may be incomplete — verify with your eyes, it is NOT a guarantee.",
   "Небезпек: {0} (стовпів {1} · ліній {2})": "Hazards: {0} (poles {1} · lines {2})",
 });
+
+Object.assign(window.FMP_TR, { "Пульт (EdgeTX/ELRS MAVLink)": "Handset (EdgeTX/ELRS MAVLink)" });
