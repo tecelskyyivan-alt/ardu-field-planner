@@ -113,6 +113,37 @@ finally:
     try: _os.remove(_lf)
     except OSError: pass
 
+print("\n== backup-sync round-trip (#10) ==")
+_syncdir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "sync")
+_sync_payload = {
+    "device": "test_sync_dev1", "ts": 1700000000000, "app_version": "9.9",
+    "data": {"fmp_projects": '{"Поле 1": {"ts": 1}}', "fmp_last_settings": '{"spacing":15}',
+             "fmp_fields_idb": '[{"name":"Поле 1","field":[]}]'},
+}
+s, sp = post("/api/sync", _sync_payload)
+check("sync push -> ok", sp.get("ok") is True and isinstance(sp.get("ts"), int))
+_sf = _os.path.join(_syncdir, "test_sync_dev1.json")
+check("snapshot written to sync/<device>.json", _os.path.isfile(_sf))
+s, sg = post("/api/sync_get", {"device": "test_sync_dev1"})
+check("sync_get -> ok", sg.get("ok") is True)
+check("sync_get returns the identical data back",
+      sg.get("snapshot", {}).get("data") == _sync_payload["data"])
+s, sg_unknown = post("/api/sync_get", {"device": "no_such_device1"})
+check("sync_get for an unknown (but valid) device -> ok:false",
+      sg_unknown.get("ok") is False and "копії" in (sg_unknown.get("error") or ""))
+try: _os.remove(_sf)
+except OSError: pass
+
+print("\n== backup-sync malformed device id rejected (#10) ==")
+for _bad_dev in ("bad id!!", "../evil", "ab", "x" * 41, ""):
+    s, bad = post("/api/sync", {"device": _bad_dev, "ts": 1, "data": {"fmp_lang": "uk"}})
+    check(f"push rejected for malformed device {_bad_dev!r}", bad.get("ok") is False)
+    s, bad_get = post("/api/sync_get", {"device": _bad_dev})
+    check(f"sync_get rejected for malformed device {_bad_dev!r}", bad_get.get("ok") is False)
+_stray = (_os.listdir(_syncdir) if _os.path.isdir(_syncdir) else [])
+check("no file written outside sync/ (and no stray file) for any malformed device",
+      not any("evil" in n or "bad" in n for n in _stray))
+
 print("\n== offline map tile proxy (/tiles/ — desktop offline maps) ==")
 import os as _os2
 _png = b"\x89PNG\r\n\x1a\n" + b"FAKE-TILE-BYTES"

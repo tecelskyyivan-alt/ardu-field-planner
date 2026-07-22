@@ -17,6 +17,7 @@ __pycache__/
 .venv/
 tiles_cache/
 logs/
+sync/
 
 # Large runtime assets (pulled/synced, not source)
 android/app/src/main/assets/web/pyodide/

@@ -122,6 +122,27 @@ window.FMP_TR = {
   "дрон по USB-кабелю": "drone over the USB cable",
   "просто відкрий цей додаток у": "just open this app in",
   "нові функції на перевірку. Ставиться": "new features to test. Installs",
+
+  // ---- backup-sync (own server, opt-in) (#10) ----
+  "Резервна копія (свій сервер)": "Backup (own server)",
+  "Опційно: зберігає поля, журнал польотів і параметри на твоєму сервері, щоб не втратити їх при заміні або втраті телефону. Дані йдуть лише на твій сервер.":
+    "Optional: backs up fields, flight log and settings to your own server, so you don't lose them if the phone is replaced or lost. Data goes only to your server.",
+  "Автосинхронізація": "Auto-sync",
+  "Синхронізувати зараз": "Sync now",
+  "Відновити з сервера": "Restore from server",
+  "вимкнено": "off",
+  "остання синхронізація: {0}": "last sync: {0}",
+  "синхронізацій ще не було": "no sync yet",
+  "Сервер не налаштовано.": "Server not configured.",
+  "Не вдалося синхронізувати із сервером.": "Could not sync with the server.",
+  "Синхронізовано із сервером.": "Synced with the server.",
+  "Отримую копію з сервера…": "Fetching the server copy…",
+  "Немає копії на сервері.": "No copy on the server.",
+  "Копія на сервері від {0}, полів: {1}.": "Server copy from {0}, fields: {1}.",
+  "Локально зараз полів: {0}.": "Locally right now, fields: {0}.",
+  "Перезаписати локальні дані копією з сервера? Застосунок перезавантажиться.":
+    "Overwrite local data with the server copy? The app will reload.",
+  "Відновлено з сервера. Перезавантаження…": "Restored from the server. Reloading…",
   "оновлюється з середини додатку": "updates from inside the app",
 
   // ---- fragmented help sentences (translated node-by-node) ----
