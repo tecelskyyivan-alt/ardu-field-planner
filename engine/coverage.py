@@ -12,7 +12,7 @@ Approach:
 import heapq
 import math
 
-from shapely.geometry import Polygon, LineString, MultiPolygon
+from shapely.geometry import Polygon, LineString, MultiPolygon, Point
 from shapely.affinity import rotate
 from shapely.ops import unary_union, split
 
@@ -1235,6 +1235,106 @@ def _dedupe_ll(pts, tol_m=0.3):
         if not out or haversine(out[-1][0], out[-1][1], p[0], p[1]) > tol_m:
             out.append(p)
     return out
+
+
+def safe_transit(boundary, waypoints, home, exclusions=None, margin=0.0):
+    """Plan the INGRESS (home→first coverage WP) and EGRESS (last WP→home) legs so they stay
+    INSIDE the field boundary and OUTSIDE exclusions/hazard corridors (#12). Returns per-leg
+    (lat,lon) waypoint lists + ok flags. FAIL-SAFE: any emitted leg not PROVABLY inside the strict
+    free space → ok=False + empty list (the caller flies a plain straight RTL with a persistent
+    warning, and NEVER bakes an obstacle-crossing waypoint into the mission)."""
+    res = {"ingress_ok": False, "egress_ok": False, "ingress": [], "egress": [],
+           "home_inside": False, "reason": ""}
+    wps = [(float(p[0]), float(p[1])) for p in (waypoints or [])]
+    if len(boundary) < 3 or not wps or home is None:
+        res["reason"] = "insufficient input"
+        return res
+    try:
+        cover = inset_boundary(boundary, margin) or boundary
+        exp = expand_exclusions(exclusions or [], margin)
+        free, lat0, lon0 = _free_polygon(cover, exp)
+        if free is None or free.is_empty:
+            res["reason"] = "empty free space"
+            return res
+        free_strict = free.buffer(0)
+
+        def P(ll):
+            return latlon_to_local(ll[0], ll[1], lat0, lon0)
+
+        def U(pt):
+            return local_to_latlon(pt[0], pt[1], lat0, lon0)
+
+        excl_union = None
+        _ep = []
+        for e in (exp or []):
+            if len(e) >= 3:
+                g = Polygon([P(p) for p in e]).buffer(0)
+                if not g.is_empty:
+                    _ep.append(g)
+        if _ep:
+            excl_union = unary_union(_ep)
+
+        H = P(home)
+        res["home_inside"] = bool(free_strict.contains(Point(H)))
+        ctx = {}   # shared visibility-graph context for both legs
+
+        def contained(path):
+            for a, b in zip(path, path[1:]):
+                if not free_strict.contains(LineString([a, b])):
+                    return False
+            return True
+
+        def exteriors():
+            polys = list(free.geoms) if free.geom_type == "MultiPolygon" else [free]
+            out = []
+            for pg in sorted(polys, key=lambda g: g.area, reverse=True):
+                r = list(pg.exterior.coords)
+                if len(r) >= 2 and r[0] == r[-1]:
+                    r = r[:-1]
+                if len(r) >= 3:
+                    out.append(r)
+            return out
+
+        def plan(target):
+            """H → target (both local). Returns (ok, poly_local incl. endpoints)."""
+            if math.hypot(H[0] - target[0], H[1] - target[1]) < 1.0:
+                return True, [H, target]
+            if res["home_inside"]:
+                poly = _route_freespace([H, target], free, ctx=ctx)
+                return (contained(poly), poly)
+            # home OUTSIDE free: project H to the nearest free exterior-ring foot E whose entry leg
+            # H→E does NOT touch an exclusion (that leg is unavoidably outside free); then route E→target.
+            best = None
+            for ring in exteriors():
+                f = _project_to_ring(H, ring)
+                if f is None:
+                    continue
+                E = f[1]
+                if excl_union is not None and LineString([H, E]).intersects(excl_union):
+                    continue
+                if best is None or f[0] < best[0]:
+                    best = (f[0], E)
+            if best is None:
+                return False, None
+            inner = _route_freespace([best[1], target], free, ctx=ctx)
+            return (contained(inner), [H] + inner)
+
+        ok_in, poly_in = plan(P(wps[0]))
+        if ok_in and poly_in:
+            res["ingress_ok"] = True
+            res["ingress"] = _dedupe_ll([U(pt) for pt in poly_in])
+        else:
+            res["reason"] = "ingress: leg not contained"
+
+        ok_eg, poly_eg = plan(P(wps[-1]))
+        if ok_eg and poly_eg:
+            res["egress_ok"] = True
+            res["egress"] = _dedupe_ll([U(pt) for pt in reversed(poly_eg)])   # WN → … → home
+        elif not res["reason"]:
+            res["reason"] = "egress: leg not contained"
+    except Exception as e:
+        res["reason"] = "safe_transit error: %r" % (e,)
+    return res
 
 
 def return_corridor_route(cover, spacing, home, field_boundary=None, exclusions=None,
