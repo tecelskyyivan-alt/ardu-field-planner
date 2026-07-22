@@ -2809,7 +2809,12 @@
       // mission (today's behaviour) — this must never throw out of the upload, and must
       // never prepend/append a leg whose *_ok is false.
       let flown = _wps;
-      if (!isInav) {
+      // Partial-route upload (resume after a battery swap passes p.route = the REMAINDER):
+      // safe_transit plans against the engine's _state = the FULL last-built route, so its
+      // ingress would target the ORIGINAL field start, not the mid-field resume point —
+      // leaving an unverified straight jump that can cut an exclusion. Skip the splice and
+      // fly the remainder plain (today's behaviour). (review Critical)
+      if (!isInav && !(p && p.route && p.route.length)) {
         try {
           const tParams = { home: { lat: home[0], lng: home[1] } };
           const eng = window.FMP_ENGINE;
@@ -2822,8 +2827,8 @@
             const pre  = t.ingress_ok ? t.ingress.slice(0, -1).map((p) => [p.lat, p.lng]) : [];
             const post = t.egress_ok  ? t.egress.slice(1).map((p) => [p.lat, p.lng])       : [];
             flown = [...pre, ..._wps, ...post];
-            if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", null);
-            if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", null);
+            if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", "warn");
+            if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", "warn");
           }
           // on !t.ok or engine unavailable → flown stays = _wps (NEVER block the upload; just no detour)
         } catch (e) {
