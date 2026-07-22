@@ -3226,6 +3226,21 @@
   }
   const flogSummary = (r) => ({ started_at: r.started_at, planned: r.planned || null,
     actual: r.actual || null, partial: !!r.partial });
+  const FLOG_MAX_FLIGHTS = 300;
+  async function flogTrim(cap) {
+    try {
+      const all = await flogAll();                 // getAll() → ascending by started_at key
+      if (all.length <= cap) return;
+      const excess = all.slice(0, all.length - cap);   // the oldest
+      const db = await flogOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(FLOG_STORE, "readwrite");
+        const st = tx.objectStore(FLOG_STORE);
+        excess.forEach((r) => st.delete(r.started_at));
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+    } catch (e) { /* private mode / quota — best-effort */ }
+  }
   async function loadFlightSummaries() {
     const all = await flogAll();
     flightSummaries = all.map(flogSummary);
@@ -3271,11 +3286,27 @@
     if (actual_duration < 5) return;                   // too short to be a real flight
     const bp_end = (s && s.battery_pct != null) ? s.battery_pct : last.bp;
     const battery_used = (fr.bp_start != null && bp_end != null) ? (fr.bp_start - bp_end) : null;
+    // Covered area (spec §8): complete (>=90% / sawComplete) → the planned field area; partial →
+    // in-field track distance × swath, capped at the field area. Geometry lives in GEO_COVER.
+    const comp = window.GEO_COVER.coverageCompletion({
+      sawComplete: fr.sawComplete, wpReached: fr.wp_reached || 0, wpTotal: fr.wp_total || 0, hasRtl: flownHasRtl });
+    const ring = (fr.work && fr.work.boundary) || null;
+    const trackDist = _sampleDist(fr.samples);
+    let distM = window.GEO_COVER.distInField(fr.samples, ring);
+    if (distM == null) distM = trackDist;                 // no ring → whole track (still capped)
+    const swath_m = (fr.work && fr.work.swath_m) || 0;
+    const covered_ha = window.GEO_COVER.coveredHa({
+      covComplete: comp.covComplete, areaHa: (fr.work && fr.work.area_ha) || 0, swathM: swath_m, distM: distM });
+    const avg_speed_ms = actual_duration > 0 ? (trackDist / actual_duration) : null;
     const rec = {
       started_at: fr.started_at, ended_at: last.t, planned: fr.planned,
       actual: { duration_s: Math.round(actual_duration),
         battery_used_pct: (battery_used != null ? Math.round(battery_used) : null),
-        distance_m: Math.round(_sampleDist(fr.samples)) },
+        distance_m: Math.round(trackDist),
+        covered_ha: (covered_ha != null ? Math.round(covered_ha * 100) / 100 : null),
+        completion_pct: comp.completionPct,
+        avg_speed_ms: (avg_speed_ms != null ? Math.round(avg_speed_ms * 10) / 10 : null),
+        swath_m: swath_m || null },
       partial: !!partial || !fr.sawComplete,
       field: (fr.work && fr.work.field) || "поле",
       date: new Date(fr.started_at).toISOString().slice(0, 10),
@@ -3283,6 +3314,7 @@
       params: { wp_total: fr.wp_total }, samples: fr.samples,
     };
     await flogPut(rec);
+    await flogTrim(FLOG_MAX_FLIGHTS);
     flightSummaries.push(flogSummary(rec));
     const mins = Math.round(actual_duration / 60);
     setMsg(`Політ записано (${mins} хв${rec.partial ? ", частковий" : ""}). Оцінки часу відкалібруються.`, "ok");
