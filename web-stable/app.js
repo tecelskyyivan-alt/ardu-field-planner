@@ -1898,10 +1898,14 @@
           { color: "#ff4d4d", weight: 1.5, fillOpacity: 0.18, dashArray: "4 4", interactive: false }).addTo(overviewLayer);
       });
       const ha = (L.GeometryUtil.geodesicArea(ll.map((c) => L.latLng(c[0], c[1]))) / 1e4) || 0;
+      const doneHa = +(r.done_ha) || 0, areaHa = r.area_ha || ha, cc = r.completed_count | 0;
+      const leftHa = Math.max(0, areaHa - doneHa);            // done_ha NOT capped (cumulative partials)
       L.marker(poly.getBounds().getCenter(), { interactive: false, keyboard: false, zIndexOffset: 500,
         icon: L.divIcon({ className: "area-label field",
-          html: "<span><b>" + esc(r.name || "Поле") + "</b><br>" + ha.toFixed(2) + " га</span>",
-          iconSize: [140, 38], iconAnchor: [70, 19] }) }).addTo(overviewLayer);
+          html: "<span><b>" + esc(r.name || "Поле") + "</b><br>" + ha.toFixed(2) + " га<br>"
+            + tf("зроблено {0} · лишилось {1} га", doneHa.toFixed(1), leftHa.toFixed(1)) + "<br>"
+            + tf("виконано {0} {1}", cc, plurCount(cc)) + "</span>",
+          iconSize: [178, 62], iconAnchor: [89, 31] }) }).addTo(overviewLayer);
       poly.bindTooltip("Натисни, щоб працювати з «" + esc(r.name || "Поле") + "»");
       poly.on("click", (e) => {
         L.DomEvent.stop(e); clearSavedOverview();
@@ -1972,7 +1976,9 @@
     const list = recs.map((r, i) => {
       const ha = r.area_ha ? ` · ${r.area_ha} га` : "";
       const d = r.updated ? " · " + new Date(r.updated).toISOString().slice(0, 10) : "";
-      return `${i + 1}. ${r.name}${ha}${d}`;
+      const dn = +(r.done_ha) || 0, cc = r.completed_count | 0;
+      const prog = (dn > 0 || cc > 0) ? ` · зроблено ${dn.toFixed(1)} га · ×${cc}` : "";
+      return `${i + 1}. ${r.name}${ha}${prog}${d}`;
     }).join("\n");
     const ans = (prompt(`Поля на цьому пристрої:\n${list}\n\nНОМЕР — відкрити · «del N» — видалити · «file» — з файлу:`) || "").trim();
     if (!ans) return;
