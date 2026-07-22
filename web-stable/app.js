@@ -547,6 +547,14 @@
   // contour (proven reliable), disambiguated by shape: a POLYLINE is always a
   // sector-split line; a POLYGON is an exclusion when in that mode, else the field.
   map.on(L.Draw.Event.CREATED, (e) => {
+    // A marker or polyline is ALWAYS a hazard (the toolbar is polygon-only; these types are used
+    // nowhere else) → never falls through to field/exclusion adoption.
+    if (e.layerType === "marker" || e.layerType === "polyline") {
+      const kind = e.layerType === "marker" ? "pole" : "line";
+      addHazardFromLayer(e.layer, kind); hazardMode = null;
+      setMsg(kind === "pole" ? "Стовп додано." : "ЛЕП додано.", "ok");
+      return;
+    }
     // Only treat a polygon as an exclusion when a field already exists — so an
     // auto-finished first polygon (with a stale drawingExclusion flag) is always
     // adopted as the CONTOUR, never silently turned into an exclusion. (bug-hunt #5)
@@ -564,7 +572,7 @@
   });
   // Reset the "next polygon is an exclusion" flag whenever a draw ends (finish or
   // cancel), so a cancelled "Додати виріз" can't turn the next field into a cutout.
-  map.on(L.Draw.Event.DRAWSTOP, () => { drawingExclusion = false; });
+  map.on(L.Draw.Event.DRAWSTOP, () => { drawingExclusion = false; hazardMode = null; });
 
   // ---- Контур / Виріз chooser INJECTED into the Leaflet.draw action bar, right
   // beside «Фініш / Видалити останню точку / Скасувати», in the SAME toolbar style
@@ -720,6 +728,133 @@
     return out;
   }
 
+  // ---- hazards (#13): manual pole / power-line markers the route (and #12 transit/fence) avoids ----
+  let hazardMode = null;      // 'pole' | 'line' while a hazard is being drawn
+  const HAZARD_LINE = "#ffb020", HAZARD_OSM = "#b06a2e";
+  function hazardLayers() { const o = []; drawnItems.eachLayer((l) => { if (l._k === "hazard") o.push(l); }); return o; }
+  const hazardItems = {
+    addLayer: (l) => { l._k = "hazard"; drawnItems.addLayer(l); },
+    clearLayers: () => removeByKind("hazard"),
+    eachLayer: (fn) => hazardLayers().forEach(fn),
+  };
+  function hazardClearanceM() { return parseFloat(($("hazard-clearance") || {}).value) || 25; }
+  function hazardStyle(m) {
+    return m && m.source === "osm"
+      ? { color: HAZARD_OSM, weight: 3, dashArray: "6 8", lineCap: "round" }
+      : { color: HAZARD_LINE, weight: 4, dashArray: "1 8", lineCap: "round" };
+  }
+  function hazardPoleIcon(m) {
+    const c = m.source === "osm" ? HAZARD_OSM : HAZARD_LINE;
+    return L.divIcon({ className: "area-label hazard", iconSize: [20, 20], iconAnchor: [10, 10],
+      html: '<span style="color:' + c + '"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>' });
+  }
+  function _hzGeom(l, kind) {
+    if (kind === "pole") { const ll = l.getLatLng(); return [{ lat: ll.lat, lng: ll.lng }]; }
+    let ll = l.getLatLngs(); while (Array.isArray(ll) && ll.length && Array.isArray(ll[0])) ll = ll[0];
+    return ll.map((p) => ({ lat: p.lat, lng: p.lng }));
+  }
+  function addHazardLayer(m) {
+    let layer;
+    if (m.kind === "pole") layer = L.marker([m.geom[0].lat, m.geom[0].lng], { icon: hazardPoleIcon(m), keyboard: false });
+    else layer = L.polyline(m.geom.map((p) => [p.lat, p.lng]), hazardStyle(m));
+    layer._hz = m;
+    layer.bindTooltip((m.kind === "pole" ? "Стовп" : "ЛЕП") + (m.source === "osm" ? " (OSM — перевір очима!)" : "") + " — клікни, щоб видалити");
+    layer.on("click", () => { if (nativeEditActive()) return; drawnItems.removeLayer(layer); clearRoute(); scheduleSaveField(); renderHazardList(); });
+    hazardItems.addLayer(layer);
+  }
+  function addHazardFromLayer(layer, kind) {
+    const geom = _hzGeom(layer, kind);
+    if (kind === "line" && geom.length < 2) return;
+    addHazardLayer({ kind, geom, source: "manual", avoid: true, osm: null });
+    clearRoute(); scheduleSaveField(); renderHazardList();
+  }
+  function collectHazards() {
+    return hazardLayers().map((l) => {
+      const m = l._hz || {};
+      return { kind: m.kind, geom: _hzGeom(l, m.kind), source: m.source || "manual", avoid: m.avoid !== false, osm: m.osm || null };
+    });
+  }
+  // ClipperLib open-offset: pole (1 vertex) → circle, line → capsule, of half-width metres. These
+  // polygons are fed to the route engine as extra exclusions (and to #12 transit/fence).
+  function hazardCorridors(halfWidthM) {
+    const C = window.ClipperLib;
+    const hz = collectHazards().filter((m) => m.avoid !== false && m.geom && m.geom.length);
+    if (!C || !hz.length || !(halfWidthM > 0)) { if (!C && hz.length) appLog("[hazard] ClipperLib відсутній — коридори уникання пропущено (небезпеки лишаються видимими)"); return []; }
+    let la = 0, lo = 0, n = 0;
+    hz.forEach((m) => m.geom.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
+    la /= n; lo /= n;
+    const mlat = 111320, mlng = (111320 * Math.cos(la * Math.PI / 180)) || 1, SC = 100;
+    const toClip = (g) => g.map((p) => ({ X: Math.round((p.lng - lo) * mlng * SC), Y: Math.round((p.lat - la) * mlat * SC) }));
+    const toLL = (path) => path.map((pt) => ({ lng: lo + pt.X / SC / mlng, lat: la + pt.Y / SC / mlat }));
+    const out = [];
+    try {
+      hz.forEach((m) => {
+        const co = new C.ClipperOffset(2, 0.25 * SC);
+        co.AddPath(toClip(m.geom), C.JoinType.jtRound, C.EndType.etOpenRound);   // round ends → point=circle, line=capsule
+        const sol = new C.Paths(); co.Execute(sol, halfWidthM * SC);
+        sol.forEach((path) => { if (path.length >= 3) out.push(toLL(path)); });
+      });
+    } catch (e) { appLog("[hazard] офсет коридору не вдався: " + e); return []; }
+    return out;
+  }
+  function startHazardDraw(kind) {
+    hazardMode = kind;
+    const h = kind === "pole" ? new L.Draw.Marker(map, {})
+      : new L.Draw.Polyline(map, { shapeOptions: hazardStyle({ source: "manual" }) });
+    h.enable();
+    setMsg(kind === "pole" ? "Постав стовп на карті." : "Малюй лінію ЛЕП (подвійний клік = кінець).", null);
+  }
+  function renderHazardList() {
+    const host = $("hazard-list"); if (!host) return;
+    const hz = collectHazards();
+    const warn = $("hazard-osm-warn");
+    if (warn) warn.style.display = hz.some((m) => m.source === "osm") ? "" : "none";
+    if (!hz.length) { host.innerHTML = ""; return; }
+    const poles = hz.filter((m) => m.kind === "pole").length, lines = hz.length - poles;
+    host.innerHTML = `<div class="hz-sum">${tf("Небезпек: {0} (стовпів {1} · ліній {2})", hz.length, poles, lines)}</div>`;
+  }
+  // EXPERIMENTAL OSM power-line import (Ivan asked «підтягнути ЛЕП для тесту»). NEVER authoritative:
+  // a line missing from OSM = false "clear" = danger → imported as source:'osm', avoid:false (display
+  // only, does NOT reroute the mission) with a permanent "verify with your eyes" warning.
+  async function importOsmPowerLines() {
+    if (!fieldPolygon) { setMsg("Спочатку задай поле — імпорт ЛЕП шукає в його межах.", "error"); return; }
+    if (!navigator.onLine) { setMsg("Немає інтернету — імпорт ЛЕП недоступний офлайн.", "error"); return; }
+    const b = fieldPolygon.getBounds().pad(0.15);
+    const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+    const q = `[out:json][timeout:25];(way["power"~"^(line|minor_line)$"](${bbox});node["power"~"^(tower|pole)$"](${bbox}););out geom;`;
+    setMsg("Шукаю ЛЕП в OSM…", null);
+    const mirrors = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+    let data = null;
+    for (const url of mirrors) {
+      const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 25000);
+      try {
+        const r = await fetch(url, { method: "POST", signal: ac.signal,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(q) });
+        clearTimeout(to);
+        if (!r.ok) continue;
+        data = await r.json(); break;
+      } catch (e) { clearTimeout(to); }
+    }
+    if (!data || !data.elements) { setMsg("Overpass недоступний — спробуй пізніше (планування не заблоковано).", "error"); return; }
+    const existing = new Set(collectHazards().filter((m) => m.osm).map((m) => m.osm.type + m.osm.id));
+    let added = 0;
+    for (const el of data.elements) {
+      if (added >= 800) break;
+      if (existing.has(el.type + el.id)) continue;
+      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+        addHazardLayer({ kind: "line", geom: el.geometry.map((p) => ({ lat: p.lat, lng: p.lon })), source: "osm", avoid: false, osm: { type: el.type, id: el.id } }); added++;
+      } else if (el.type === "node" && el.lat != null) {
+        addHazardLayer({ kind: "pole", geom: [{ lat: el.lat, lng: el.lon }], source: "osm", avoid: false, osm: { type: el.type, id: el.id } }); added++;
+      }
+    }
+    scheduleSaveField(); renderHazardList();
+    if (!added) setMsg("ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима!", "warn");
+    else setMsg(tf("Підтягнуто {0} об'єктів ЛЕП з OSM (лише показ — перевір очима; уникання вимкнено за замовч.).", added), "ok");
+  }
+  if ($("haz-add-pole")) $("haz-add-pole").addEventListener("click", () => startHazardDraw("pole"));
+  if ($("haz-add-line")) $("haz-add-line").addEventListener("click", () => startHazardDraw("line"));
+  if ($("haz-import-osm")) $("haz-import-osm").addEventListener("click", () => importOsmPowerLines());
+
   // Adopt a polygon layer (drawn or OSM-loaded) as the active field.
   function adoptField(layer) {
     if (editingContour) setContourEdit(false);   // off() the OLD polygon's edit listeners first (bug-hunt #2)
@@ -783,7 +918,7 @@
       const contour = boundaryFromPolygon();
       if (!contour || contour.length < 3) { localStorage.removeItem("fmp_last_field"); return; }
       const exclusions = exclusionItems.getLayers().map(ringOf).filter((r) => r.length >= 3);
-      localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions }));
+      localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: collectHazards() }));
     } catch (e) { /* quota / private mode — ignore */ }
   }
   function scheduleSaveField() {
@@ -800,6 +935,9 @@
         if (r && r.length >= 3)
           addExclusionLayer(L.polygon(r.map((p) => [p.lat, p.lng]), { color: "#ff4d4d", weight: 2 }));
       });
+      hazardItems.clearLayers();
+      (s.hazards || []).forEach((m) => { if (m && m.geom && m.geom.length) addHazardLayer(m); });
+      renderHazardList();
       setMsg("Відновлено останнє поле.", null);
     } catch (e) { /* malformed save — ignore */ }
   }
@@ -1072,7 +1210,9 @@
       // with contained arcs (R=spacing/2, passes shortened). THIS is the param the
       // engine reads — plane_turn in collectParams() was save/load only, not the build.
       plane_turn: !!($("round-turn") && $("round-turn").checked && isPlaneVehicle()),
-      exclusions: collectExclusions(),
+      // Hazard corridors (poles→circles, power lines→capsules) are added ONLY here, not in
+      // collectExclusions() — KML/geozone/project stores stay clean (#13). avoid=false hazards skipped.
+      exclusions: collectExclusions().concat(hazardCorridors(hazardClearanceM())),
       // Spray-footprint overlay (swath + double-spray): only on a real build, and only
       // if the toggle is on — keeps live angle drags fast (no buffer geometry then).
       viz: !live && (!$("viz-coverage") || $("viz-coverage").checked),
