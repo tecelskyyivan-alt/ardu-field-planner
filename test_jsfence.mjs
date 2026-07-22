@@ -232,5 +232,19 @@ console.log("\n== (d) true v1-frame (STX 0xFE) vehicle: clean abort, no garbage 
   link.disconnect(); t._stopHb();
 }
 
+console.log("\n== (e) fence upload (mission_type=1) must NOT clobber telemetry wp_total (audit finding) ==");
+{
+  const fenceItems = MAV_LINK.buildFenceItems(boundary, [exclusion]);
+  const t = makeFenceVehicle({ dialect: "int" });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  link._tlm.wp_total = 203;      // pretend a real 203-waypoint MISSION was already uploaded/ACK'd
+  const up = await link.uploadMission(fenceItems, undefined, undefined, 1);
+  check("[wp_total] fence upload still ok", up.ok === true);
+  check("[wp_total] telemetry wp_total untouched by the fence's own vertex count (" + fenceItems.length + ")",
+    link._tlm.wp_total === 203);
+  link.disconnect(); t._stopHb();
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

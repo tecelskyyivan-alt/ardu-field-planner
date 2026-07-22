@@ -782,7 +782,18 @@
   // polygons are fed to the route engine as extra exclusions (and to #12 transit/fence).
   function hazardCorridors(halfWidthM) {
     const C = window.ClipperLib;
-    const hz = collectHazards().filter((m) => m.avoid !== false && m.geom && m.geom.length);
+    // Perf (verified finding): filter avoid===false layers OUT before the per-vertex _hzGeom
+    // extraction, not after — collectHazards() extracts full geometry for EVERY hazard
+    // (needed by its other callers: save/restore, the hazard-count list), but here only
+    // avoid:true ones are ever used. After an OSM power-line import (up to 800 objects,
+    // each possibly 100+ vertices, all avoid:false) buildRoute() runs this on EVERY live
+    // angle-drag rebuild (~7 Hz) — skipping the extraction for the ones we'd throw away
+    // anyway removes that allocation without changing which hazards end up in `hz` (same
+    // avoid!==false && geom.length filter as before).
+    const hz = hazardLayers()
+      .filter((l) => (l._hz || {}).avoid !== false)             // same default as collectHazards()'s m.avoid !== false
+      .map((l) => ({ geom: _hzGeom(l, (l._hz || {}).kind) }))
+      .filter((m) => m.geom && m.geom.length);
     if (!C || !hz.length || !(halfWidthM > 0)) { if (!C && hz.length) appLog("[hazard] ClipperLib відсутній — коридори уникання пропущено (небезпеки лишаються видимими)"); return []; }
     let la = 0, lo = 0, n = 0;
     hz.forEach((m) => m.geom.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
@@ -924,8 +935,38 @@
       const contour = boundaryFromPolygon();
       if (!contour || contour.length < 3) { localStorage.removeItem("fmp_last_field"); return; }
       const exclusions = exclusionItems.getLayers().map(ringOf).filter((r) => r.length >= 3);
-      localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: collectHazards() }));
-    } catch (e) { /* quota / private mode — ignore */ }
+      const hazards = collectHazards();
+      try {
+        localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards }));
+      } catch (e) {
+        // QuotaExceededError: an OSM power-line import (importOsmPowerLines, capped at 800
+        // WAYS but not vertices) can carry thousands of vertices per way and blow the ~5 MB
+        // localStorage budget on its own. OSM hazards are display-only (avoid:false,
+        // non-authoritative) and re-importable with one tap — drop THEM from this save first
+        // rather than lose the field contour/exclusions too (verified finding: the whole save
+        // was failing silently, so the next reopen restored NOTHING).
+        const trimmed = hazards.filter((h) => h.source !== "osm");
+        let saved = false;
+        if (trimmed.length !== hazards.length) {
+          try {
+            localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: trimmed }));
+            appLog("saveLastField: quota exceeded with " + (hazards.length - trimmed.length) +
+              " OSM hazard(s) — saved without them (contour/exclusions kept; re-import ЛЕП з OSM after reopen)");
+            saved = true;
+          } catch (e2) { /* still too big — fall through to the last-resort save below */ }
+        }
+        if (!saved) {
+          // Either no OSM hazards to drop, or it still doesn't fit — last resort: contour +
+          // exclusions only (the field itself is the one thing that must never silently vanish).
+          try {
+            localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards: [] }));
+            appLog("saveLastField: quota exceeded — saved contour/exclusions only, ALL hazards dropped: " + e);
+          } catch (e3) {
+            appLog("saveLastField: FAILED even without hazards — field contour NOT persisted: " + e3);
+          }
+        }
+      }
+    } catch (e) { /* boundaryFromPolygon/collectHazards threw, or private-mode denies localStorage entirely — ignore */ }
   }
   function scheduleSaveField() {
     if (_fieldTimer) clearTimeout(_fieldTimer);
@@ -1177,6 +1218,7 @@
   }
   const httpApi = {
     build_route: (p) => postJSON("/api/build_route", p),
+    safe_transit: (p) => postJSON("/api/safe_transit", p),
     export: (fmt) => postJSON("/api/export", { fmt }),
     save_project: (p) => postJSON("/api/save_project", p),
     mav_ports: (p) => postJSON("/api/mav_ports", p || {}),
@@ -1948,12 +1990,23 @@
     try { return localStorage.getItem("fmp_is_plane") === "1"; } catch (e) { return false; }
   }
   // Autopilot params so a fixed-wing FLIES the planned R=spacing/2 arcs instead of
-  // cutting them (mirror of engine plane_turn_params): cap cruise so min turn radius
-  // V²/(g·tanφ) ≤ R; L1 look-ahead (NAVL1·V/π) ≈ 0.6·R to track the arc; small WP_RADIUS.
+  // cutting them (mirror of engine backend/plane_turns.py:plane_turn_params — keep the
+  // two in sync): cap cruise so min turn radius V²/(g·tanφ) ≤ R; L1 look-ahead
+  // (NAVL1·V/π) ≈ 0.6·R to track the arc; small WP_RADIUS.
+  //
+  // MIN_AIRSPEED is a floor below any real fixed-wing's minimum flying speed. At a
+  // tight enough spacing/turn radius, the R-feasible cruise (capped by vMax below) can
+  // fall BELOW that floor — audit finding: the old code then clamped it back UP to an
+  // arbitrary 1 m/s "safe-looking" positive number instead of admitting the arc is
+  // unflyable, which would have commanded a stall-adjacent AIRSPEED_CRUISE to the
+  // airframe. Return null instead — the caller must skip pushing plane params entirely
+  // (arcs stay untuned / effectively off) rather than fly an impossible cruise speed.
+  const PLANE_MIN_AIRSPEED = 12.0;
   function planeTurnParams(spacing, cruise) {
     const R = Math.max(spacing / 2, 1), g = 9.81, bank = 45;
     const vMax = Math.sqrt(0.4 * g * R * Math.tan(bank * Math.PI / 180));
-    const V = Math.max(1, Math.min(cruise || 12, vMax));
+    const V = Math.min(cruise || 12, vMax);
+    if (V < PLANE_MIN_AIRSPEED) return null;
     const navl1 = Math.max(6, Math.min(20, 0.6 * Math.PI * R / V));
     return {
       AIRSPEED_CRUISE: Math.round(V * 10) / 10,
@@ -2149,6 +2202,25 @@
   }
   if ($("show-saved")) $("show-saved").addEventListener("click", showSavedFields);
 
+  // Cheap contour-identity heuristic for the promoteFieldOnUpload guard below: same
+  // centroid (within GPS/redraw noise) AND comparable area. Good enough to tell "this is a
+  // WHOLE DIFFERENT field" apart from "the same field, re-surveyed/nudged a bit" without
+  // an expensive polygon-overlap computation.
+  function sameFieldGeometry(a, b) {
+    if (!a || !b || a.length < 3 || b.length < 3) return false;
+    const centroid = (r) => {
+      let la = 0, lo = 0; r.forEach((p) => { la += p.lat; lo += p.lng; });
+      return { lat: la / r.length, lng: lo / r.length };
+    };
+    const ca = centroid(a), cb = centroid(b);
+    if (haversineM(ca.lat, ca.lng, cb.lat, cb.lng) > 250) return false;   // centroids far apart -> different field
+    const areaA = _haOf(a), areaB = _haOf(b);
+    if (areaA > 0 && areaB > 0) {
+      const ratio = areaA > areaB ? areaA / areaB : areaB / areaA;
+      if (ratio > 1.75) return false;                                    // wildly different size -> different field
+    }
+    return true;
+  }
   // On upload: promote the current contour to a persistent named record (the promise
   // "Автозбереження — при заливці в дрон"). UPSERT by name so a re-upload of the same field
   // updates rather than duplicates; a freshly-drawn (unnamed) field mints "Поле N" ONCE and
@@ -2168,7 +2240,24 @@
     // Propagate the (possibly just-minted) name into the work context so a flight armed after
     // this upload — without a rebuild — credits THIS field (#8), not the stale generic "поле".
     if (lastWorkContext) lastWorkContext.field = name;
-    const prev = (recs || []).find((r) => r.name === name);
+    let prev = (recs || []).find((r) => r.name === name);
+    // Guard (verified finding): fmp_current_field is only persisted on beforeunload and
+    // right here — NOT on a field switch (showSavedFields tap / load-project), so an
+    // Android kill between switching fields and this upload can leave currentFieldName
+    // pointing at a DIFFERENT saved record than what's actually on screen now. UPSERTing
+    // blindly by that stale name would silently overwrite an unrelated field's saved
+    // contour/params/hazards with THIS field's geometry. If the existing record under
+    // `name` looks nothing like the contour we're about to save, treat it as a stale
+    // pairing — mint a fresh name instead of clobbering it.
+    if (prev && prev.field && prev.field.length >= 3 && !sameFieldGeometry(prev.field, field)) {
+      appLog("promoteFieldOnUpload: currentFieldName «" + name + "» geometry doesn't match its saved record " +
+             "(stale fmp_current_field after a kill/restore?) — minting a new name instead of UPSERT-clobbering it");
+      const names = new Set((recs || []).map((r) => r.name));
+      let n = 1; while (names.has("Поле " + n)) n++;
+      name = "Поле " + n; currentFieldName = name;
+      if (lastWorkContext) lastWorkContext.field = name;
+      prev = null;
+    }
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(), hazards: collectHazards(),
       created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now,
@@ -2536,6 +2625,7 @@
   let flownHome = null;           // {lat,lng}
   let flownHasRtl = true;
   let flownWpTotal = 0;           // total mission items uploaded (progress/completion)
+  let flownSplicePost = 0;        // safe-transit EGRESS waypoints appended after coverage (#12) — HUD lead math
   let flownRestored = false;      // flown snapshot came from disk (unverified) → not green until re-checked
   let targetMarker = null;        // ring on the active (next) waypoint
   let targetLine = null;          // dashed line drone -> next waypoint
@@ -2568,7 +2658,22 @@
     flownHome = f.home || null;
     flownHasRtl = (f.rtl != null ? f.rtl : true);
     flownWpTotal = f.wpTotal || 0;
+    flownSplicePost = f.post || 0;
     flownRestored = true;              // disk-restored → mission-status shows "verify", never green
+    // Intent-marker safety (verified finding): mavUpload() overwrites FLOWN_KEY with
+    // {route:NEW route, status:"uploading"} the INSTANT an upload starts, before the
+    // transfer is confirmed — so an app kill mid-upload leaves this bare marker on disk.
+    // RESUME_KEY, however, was recorded against whatever mission was flying BEFORE this
+    // upload attempt (a different route). Pairing that stale wp-progress with the marker's
+    // NEW route (as resumeRemaining() would, unchecked) can offer "continue from wp N" at
+    // an index that has nothing to do with this route — silently skipping a large, real
+    // stretch of never-flown coverage if accepted. We don't know what's actually on the
+    // drone after an unconfirmed upload, so drop the stale progress rather than risk
+    // pairing it with the wrong route; the operator re-verifies/re-uploads from scratch.
+    if (f.status === "uploading") {
+      try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
+      appLog("flownRestore: marker left mid-upload (killed before confirm) — cleared stale resume progress");
+    }
   }
   function resumeClear() {
     try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
@@ -2577,12 +2682,20 @@
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
   function missionLead() { return 2 + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0); }
-  function flownSave(route, home, hasRtl, status) {
+  // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
+  // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).
+  // The real "service points before coverage wp 0" that the FC's wp_current counts against
+  // is missionLead() + splicePre — store the SUM as `lead` so resumeRemaining()'s
+  // idx = wp - lead maps back to the right coverage waypoint (CRITICAL fix: previously only
+  // missionLead() was stored, silently skipping `splicePre` never-flown waypoints on every
+  // battery-swap resume of a spliced upload).
+  function flownSave(route, home, hasRtl, status, splicePre, splicePost) {
     try {
       localStorage.setItem(FLOWN_KEY, JSON.stringify({
         route: route, home: home || null,
         rtl: (hasRtl != null ? hasRtl : $("rtl").checked),
-        lead: missionLead(), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
+        lead: missionLead() + (splicePre || 0), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
+        post: splicePost || 0,          // egress splice length (#12) — HUD lead math on restore
         status: status || "confirmed", ts: Date.now(),
       }));
     } catch (e) {}
@@ -2592,6 +2705,10 @@
     if (!resumeOn()) return null;
     const p = resumeLoad(), f = flownLoad();
     if (!p || !f || !f.route || !f.route.length) return null;
+    // f.lead already carries missionLead()+splicePre for anything saved by flownSave above
+    // (this build); records from before splice_pre tracking existed were saved with the
+    // same call and have no splicePre concept, so they fall back to the historical default
+    // (3) exactly as before — safe, since an unspliced mission's real lead is 2 or 3 anyway.
     const lead = f.lead != null ? f.lead : 3;
     const idx = Math.max(0, Math.min((p.wp | 0) - lead, f.route.length - 1));
     if (idx < 1) return null;                       // майже нічого не пролетів
@@ -2826,6 +2943,14 @@
       // mission (today's behaviour) — this must never throw out of the upload, and must
       // never prepend/append a leg whose *_ok is false.
       let flown = _wps;
+      // splicePre = how many ingress waypoints got PREPENDED onto `flown` ahead of the
+      // coverage route (0 when no splice happens). CRITICAL: this must travel back to the
+      // caller (res.splice_pre below) so flownSave() can store lead = missionLead() +
+      // splicePre — resumeRemaining()'s `idx = wp - lead` otherwise stays off by `pre.length`
+      // on EVERY spliced upload, silently dropping the first `pre.length` coverage waypoints
+      // of a battery-swap resume (verified finding — the duplicated Critical).
+      let splicePre = 0;
+      let splicePost = 0;
       // Partial-route upload (resume after a battery swap passes p.route = the REMAINDER):
       // safe_transit plans against the engine's _state = the FULL last-built route, so its
       // ingress would target the ORIGINAL field start, not the mid-field resume point —
@@ -2844,6 +2969,8 @@
             const pre  = t.ingress_ok ? t.ingress.slice(0, -1).map((p) => [p.lat, p.lng]) : [];
             const post = t.egress_ok  ? t.egress.slice(1).map((p) => [p.lat, p.lng])       : [];
             flown = [...pre, ..._wps, ...post];
+            splicePre = pre.length;
+            splicePost = post.length;
             if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", "warn");
             if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", "warn");
           }
@@ -2857,6 +2984,11 @@
         ? MAV_LINK.buildMissionItemsInav(_wps, alt, rtl)
         : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), flown, alt, rtl, speed);
       const res = await _mavLink.uploadMission(items, undefined, p && p.onProgress);
+      // CRITICAL: report the splice length back to the caller — see splicePre comment
+      // above. 0 for INAV/resume uploads (no splice attempted) and for a plain _wps
+      // mission (no safe_transit ingress, or it failed/was unavailable).
+      res.splice_pre = splicePre;
+      res.splice_post = splicePost;   // egress splice length — HUD lead math only (display)
       if (!res.ok) return res;
       if (speed > 0 && !isInav) {   // INAV: MAVLink param-set is a stub; speed is a vehicle setting
         let ps = await _mavLink.setParam("WP_SPD", speed);
@@ -2939,7 +3071,13 @@
                 ? { ok: true, count: fenceItems.length, exclusions: exclusions.length,
                     // HOME outside the boundary: an ENABLED fence would then refuse to arm
                     // right here — the caller folds this into its message.
-                    homeOutside: !window.GEO_COVER.pointInRing(home[0], home[1], boundary) }
+                    homeOutside: !window.GEO_COVER.pointInRing(home[0], home[1], boundary),
+                    // Lost-ACK "ok" (link.js:610): every item was SENT but the final ACK never
+                    // arrived — on the vehicle the transfer can time out with the last vertex
+                    // missing and get discarded, leaving whatever fence was stored BEFORE this
+                    // upload. Carry the warning through so the caller paints uncertainty, not
+                    // success (verified finding — do not drop this like the old code did).
+                    warning: fres.warning || null }
                 : { ok: false, error: fres.error };
             }
           }
@@ -4157,10 +4295,12 @@
     const homeOffset = flownHome ? 1 : 0;
 
     const c = s.wp_current;
-    // Leading non-coverage items = home + takeoff (+ optional DO_CHANGE_SPEED).
-    // Derive from the vehicle's total so the map stays correct whatever we added.
+    // Leading non-coverage items = home + takeoff (+ optional DO_CHANGE_SPEED) + the
+    // safe-transit INGRESS splice (#12). Derive from the vehicle's total, but subtract the
+    // EGRESS splice too (flownSplicePost) — those items sit AFTER coverage, so counting them
+    // into `lead` made the HUD target/ETA lag by `post` waypoints (audit residual, display-only).
     const total = s.wp_total || (n + 2 + (flownHasRtl ? 1 : 0));
-    const lead = Math.max(2, total - n - (flownHasRtl ? 1 : 0));
+    const lead = Math.max(2, total - n - (flownHasRtl ? 1 : 0) - (flownSplicePost || 0));
     let phase = "", targetIdx;
     if (c < lead) {                              // pre-AUTO / takeoff
       targetIdx = homeOffset; phase = "зліт";
@@ -4293,6 +4433,14 @@
       // path unchanged. INAV planes get the arc geometry but no MAVLink param push.
       const _plane = isPlaneVehicle();
       const planeParams = (_rt && _plane) ? planeTurnParams(_sp, parseFloat($("speed").value) || 12) : null;
+      // planeTurnParams returns null when the spacing-derived turn radius is too tight to
+      // fly at ANY airspeed the airframe can sustain (below PLANE_MIN_AIRSPEED) — round-turn
+      // params are then simply not pushed (see mav_upload_mission's `pp &&` guard); log why,
+      // since the toggle being ON with nothing sent otherwise looks like a silent no-op.
+      if (_rt && _plane && !planeParams) {
+        appLog("plane-turn: вимкнено — при кроці " + _sp + " м потрібна крейсерська швидкість нижча за безпечний мінімум (" +
+          PLANE_MIN_AIRSPEED + " м/с); дуги НЕ тюняться (параметри не залито).");
+      }
       const turnRadiusM = (_rt && !_plane) ? Math.max(1, Math.min(10, _sp / 2)) : 0;
       // Intent-marker for the ACK→flownSave window: if the app is killed after the FC stored the
       // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2). Keep
@@ -4316,7 +4464,7 @@
                               diff: r.verify.mismatches },
         // #12p3: opt-in geofence outcome (undefined when the checkbox was off/not applicable)
         fence: r.fence && { ok: r.fence.ok, count: r.fence.count, exclusions: r.fence.exclusions,
-                            error: r.fence.error, homeOutside: r.fence.homeOutside } }));
+                            error: r.fence.error, homeOutside: r.fence.homeOutside, warning: r.fence.warning } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
         promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
@@ -4337,7 +4485,8 @@
         // #3: keep the notification's "WP x/y" denominator in sync with the real upload
         try { if (window.AndroidNotify && window.AndroidNotify.setMission) window.AndroidNotify.setMission(flownWpTotal); } catch (e) {}
         flownRestored = false;                   // fresh read-back-verified upload → trusted
-        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed");
+        flownSplicePost = r.splice_post || 0;
+        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
         resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
         let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
@@ -4361,7 +4510,15 @@
         // with zero paint frames in between, silently hiding a fence failure from the
         // pilot (review finding). Never downgrade an already-worse verdict (error > warn > ok).
         if (r.fence) {
-          if (r.fence.ok) {
+          if (r.fence.ok && r.fence.warning) {
+            // Lost-ACK "ok" (link.js:610): every fence item was SENT but the final ACK never
+            // arrived. On the vehicle this can time out and discard the incomplete transfer,
+            // silently keeping whatever fence (possibly a stale one from an earlier field) was
+            // stored before — must NOT read as "stored", even though res.fence.ok is true
+            // (verified finding).
+            m += " " + t("Геозона: підтвердження не прийшло — перевір перед увімкненням FENCE_ENABLE.");
+            if (kind === "ok") kind = "warn";
+          } else if (r.fence.ok) {
             const nExcl = r.fence.exclusions || 0;
             m += " " + (nExcl
               ? tf("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.", nExcl)
@@ -4416,7 +4573,11 @@
       flownHasRtl = $("rtl").checked;
       flownWpTotal = r.count || 0;
       flownRestored = false;
-      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed");
+      // Resume uploads never splice (mav_upload_mission gates the splice off when p.route is
+      // set — see its comment), so r.splice_pre is always 0 here; pass it through anyway for
+      // consistency with the full-upload call site above.
+      flownSplicePost = r.splice_post || 0;      // always 0 (no splice on resume) — reset a stale value
+      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
       promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
@@ -4426,12 +4587,16 @@
         ? "Натисни «Старт місії» — дрон підніметься вертикально на задану висоту і продовжить."
         : "Увімкни мотори і натисни «Старт місії» — дрон злетить на задану висоту і продовжить.";
       const rv = r.verify;
+      // tf()'s {0}/{1} template pattern (matching the full-upload verdicts above) instead of
+      // building the string by concatenation — setMsg's whole-string t() lookup can never
+      // match a concatenated string, so these mismatch/unverified warnings could never be
+      // translated even with i18n.js keys added (verified finding).
       if (rv && rv.ok && !rv.verified) {
-        setMsg("Залишок залито (" + r.count + " пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ("
-          + ((rv.mismatches || []).join("; ") || "розбіжності") + ") — перевір перед стартом.", "error");
+        setMsg(tf("Залишок залито ({0} пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ({1}) — перевір перед стартом.",
+          r.count, (rv.mismatches || []).join("; ") || t("розбіжності")), "error");
       } else if (rv && !rv.ok) {
-        setMsg("Залишок залито (" + r.count + " пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ("
-          + (rv.error || "таймаут") + ") — link заслабкий. " + tail, "warn");
+        setMsg(tf("Залишок залито ({0} пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({1}) — link заслабкий.",
+          r.count, rv.error || t("таймаут")) + " " + tail, "warn");
       } else {
         setMsg("Залишок залито (" + r.count + " пунктів). " + tail, "ok");
       }
@@ -4760,7 +4925,39 @@
     const data = {};
     SYNC_KEYS.forEach((k) => { try { const v = localStorage.getItem(k); if (v != null) data[k] = v; } catch (e) {} });
     try { const f = await fldAll(); if (f) data.fmp_fields_idb = JSON.stringify(f); } catch (e) {}
-    try { const l = await flogAll(); if (l && l.length) data.fmp_flightlog_idb = JSON.stringify(l); } catch (e) {}
+    // Sync flight SUMMARIES only. Every flogPut() record (app.js ~flightRecFinalize) also
+    // carries the full 1 Hz `samples` track — it's only ever read at finalize time to derive
+    // `actual` above; nothing re-reads it back from storage afterwards (no replay feature),
+    // and renderFlightStats/flogSummary only touch actual/planned/partial/field/date. Shipping
+    // the raw track here is pure bloat: FLOG_MAX_FLIGHTS=300 records can reach 20-30 MB,
+    // blowing past serve.py's 4 MB /api/sync cap and forcing an expensive main-thread
+    // double-stringify (boot/disarm/online — disarm runs while telemetry is still polling)
+    // for a payload that then gets rejected anyway (verified finding).
+    try {
+      const all = await flogAll();                // ascending by started_at (oldest first)
+      if (all && all.length) {
+        // Strip `samples`, and pre-size each stripped record ONCE (not the whole array
+        // repeatedly) so the payload-cap guard below is a cheap subtraction loop, not a
+        // repeated multi-MB re-stringify — that would recreate the very main-thread-freeze
+        // problem this fix is for.
+        let total = 0;
+        const sizes = new Array(all.length);
+        const stripped = all.map((r, i) => {
+          const c = Object.assign({}, r); delete c.samples;
+          const s = JSON.stringify(c); sizes[i] = s.length; total += s.length;
+          return c;
+        });
+        // Total-payload guard: even sample-free, a long flight history can still approach
+        // the server cap — drop the OLDEST records until it fits, rather than fail the sync
+        // outright. Recent flights are what matters most after losing/replacing a phone.
+        const MAX_BYTES = 3.5 * 1024 * 1024;
+        let start = 0;
+        while (start < stripped.length - 1 && total > MAX_BYTES) { total -= sizes[start]; start++; }
+        if (start > 0) appLog("sync: dropped " + start + " oldest flight summar" + (start === 1 ? "y" : "ies") +
+          " to stay under the " + (MAX_BYTES / 1e6).toFixed(1) + " MB sync payload cap");
+        data.fmp_flightlog_idb = JSON.stringify(stripped.slice(start));
+      }
+    } catch (e) {}
     return { device: deviceId(), ts: Date.now(), app_version: APP_VERSION, data };
   }
   // Applies a server snapshot as an HONEST OVERWRITE (matches the confirm() text the

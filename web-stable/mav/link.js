@@ -567,7 +567,11 @@
           if ((m.fields.mission_type || 0) !== missionType) continue;
           if (m.name === "MISSION_ACK") {
             this._log("mission: ACK type " + m.fields.type);
-            if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
+            // wp_total is the MISSION (type 0) waypoint count, used all flight for progress/
+            // completion. A fence (type 1, or any future non-0 mission_type) transfer ACKs
+            // through this SAME handler — must never overwrite it with the fence's own vertex
+            // count (verified finding: silently painted the field as fully sprayed after ~3%).
+            if (m.fields.type === 0) { if (missionType === 0) this._tlm.wp_total = n; return { ok: true, count: n }; }
             return { ok: false, error: this._rejectMission(m.fields.type) };
           }
           if (!gotReq) this._log("mission: first REQUEST (" + m.name + " seq " + m.fields.seq + ")");
@@ -591,7 +595,7 @@
           if (m && missionType !== 0 && !m.v2) return { ok: false, error: FENCE_V1_ERR };   // true v1 frame — see note above
           if (m && (m.fields.mission_type || 0) !== missionType) continue;   // cross-type — not ours
           if (m && m.name === "MISSION_ACK") {
-            if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
+            if (m.fields.type === 0) { if (missionType === 0) this._tlm.wp_total = n; return { ok: true, count: n }; }
             return { ok: false, error: this._rejectMission(m.fields.type) };
           }
           if (m && (m.name === "MISSION_REQUEST" || m.name === "MISSION_REQUEST_INT")) {
