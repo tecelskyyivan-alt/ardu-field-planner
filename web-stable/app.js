@@ -1936,6 +1936,8 @@
       // pass-end U-turns with contained arcs (R=spacing/2, passes shortened). Copter
       // keeps the WP_RADIUS round-turn. Needs the round-turn toggle on + a plane heartbeat.
       plane_turn: !!($("round-turn") && $("round-turn").checked && isPlaneVehicle()),
+      // #12p3: opt-in geofence upload — persisted like the neighbours, default OFF.
+      fence_upload: $("fence-upload") ? $("fence-upload").checked : false,
     };
   }
   // A plane is a plane even if you plan the route BEFORE connecting: remember the
@@ -1970,6 +1972,7 @@
     // unset so a fresh install / a project saved before this field doesn't force it on.
     if ($("viz-coverage")) $("viz-coverage").checked = !!p.viz;
     if ($("round-turn")) { $("round-turn").checked = !!p.round_turn; syncRoundTurnHint(); }
+    if ($("fence-upload")) $("fence-upload").checked = !!p.fence_upload;
     if (p.angle != null) {
       set("angle-range", p.angle);
       if ($("angle-val")) $("angle-val").textContent = Math.round(p.angle) + "°";
@@ -2894,6 +2897,41 @@
         } catch (e) {
           res.verify = { ok: false, verified: false, error: (e && e.message) || String(e) };
           res.verify_incomplete = true;
+        }
+      }
+      // #12p3: OPT-IN geofence upload — AFTER the mission itself is safely stored (above).
+      // Strictly gated on the checkbox (default OFF) and ArduPilot-only; NEVER touches
+      // FENCE_ENABLE/FENCE_ACTION (storage only — the pilot arms the fence themselves).
+      // A fence failure must NEVER fail/undo the mission upload: res.ok stays whatever
+      // it already is (true, since we're past the early `if (!res.ok) return res;` above).
+      if (!isInav && $("fence-upload") && $("fence-upload").checked) {
+        try {
+          const boundary = boundaryFromPolygon();
+          const exclusions = collectExclusions();
+          if (boundary && boundary.length >= 3) {
+            const fenceItems = MAV_LINK.buildFenceItems(boundary, exclusions);
+            const fres = await _mavLink.uploadMission(fenceItems, undefined, undefined, 1);
+            res.fence = fres.ok
+              ? { ok: true, count: fenceItems.length, exclusions: exclusions.length }
+              : { ok: false, error: fres.error };
+            if (fres.ok) {
+              const nExcl = exclusions.length;
+              let fm = nExcl
+                ? tf("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.", nExcl)
+                : t("Геозона залита: межа поля. Увімкни FENCE_ENABLE=1, коли будеш готовий.");
+              // HOME outside the boundary: an ENABLED fence would then refuse to arm right
+              // here — warn now, while the pilot can still move before switching it on.
+              if (!window.GEO_COVER.pointInRing(home[0], home[1], boundary)) {
+                fm += " " + t("Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.");
+              }
+              setMsg(fm, "ok");
+            } else {
+              setMsg(tf("Геозону не залито: {0}. Місія залита нормально.", fres.error || t("невідома помилка")), "warn");
+            }
+          }
+        } catch (e) {
+          setMsg(tf("Геозону не залито: {0}. Місія залита нормально.", (e && e.message) || String(e)), "warn");
+          res.fence = { ok: false, error: (e && e.message) || String(e) };
         }
       }
       return res;
