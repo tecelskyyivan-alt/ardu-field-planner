@@ -1372,6 +1372,8 @@
       restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
       restoreLastRoute(_routeSnap); // маршрут — зі знімка (будує lastWorkContext.field з currentFieldName)
     } finally { _bootRestoring = false; }
+    flownRestore();               // "що залито в дрон" — щоб статус місії й прогрес пережили reopen (#2)
+    updateMissionStatus();
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
     if (ss.map && ss.map.z != null) {
@@ -2315,6 +2317,18 @@
   function resumeOn() { const c = $("mission-resume"); return !!(c && c.checked); }
   function resumeLoad() { try { return JSON.parse(localStorage.getItem(RESUME_KEY) || "null"); } catch (e) { return null; } }
   function flownLoad() { try { return JSON.parse(localStorage.getItem(FLOWN_KEY) || "null"); } catch (e) { return null; } }
+  // Restore "what's uploaded to the drone" on boot so mission-status + the progress overlay
+  // survive a reopen. Marked flownRestored: after a kill/reboot the drone could be power-cycled/
+  // reflashed/a different airframe, so this is NOT trusted like a fresh read-back-verified upload.
+  function flownRestore() {
+    const f = flownLoad();
+    if (!f || !f.route || !f.route.length) return;
+    flownRoute = f.route;
+    flownHome = f.home || null;
+    flownHasRtl = (f.rtl != null ? f.rtl : true);
+    flownWpTotal = f.wpTotal || 0;
+    flownRestored = true;              // disk-restored → mission-status shows "verify", never green
+  }
   function resumeClear() {
     try { localStorage.removeItem(RESUME_KEY); } catch (e) {}
     resumeHint();
@@ -2395,6 +2409,11 @@
       el.textContent = t("Маршрут не побудовано."); el.className = "mission-status";
     } else if (!flown) {
       el.textContent = t("Маршрут НЕ залито в дрон. Натисни «Залити місію».");
+      el.className = "mission-status warn";
+    } else if (flownRestored) {
+      // Disk-restored flown snapshot — never route it into the same green pill as a fresh
+      // read-back-verified upload (the drone may have changed since). Connect + re-check first.
+      el.textContent = t("Остання відома місія (з пам'яті) — підключись і перевір, чи вона ще в дроні.");
       el.className = "mission-status warn";
     } else if (plan === flown) {
       el.textContent = tf("У дроні поточна місія: {0} точок.", lastRoute.length);
