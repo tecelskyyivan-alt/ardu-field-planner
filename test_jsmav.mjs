@@ -17,7 +17,7 @@ import vm from "vm";
 import { fileURLToPath } from "url";
 import path from "path";
 
-const MAVDIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "web", "mav");
+const MAVDIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "web-stable", "mav");
 vm.runInThisContext(fs.readFileSync(path.join(MAVDIR, "mavlink.js"), "utf8"));
 vm.runInThisContext(fs.readFileSync(path.join(MAVDIR, "link.js"), "utf8"));
 const { MAVLINK, MAV_LINK } = globalThis;
