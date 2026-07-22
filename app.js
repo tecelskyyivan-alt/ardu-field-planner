@@ -3254,6 +3254,14 @@
       appLog("connect result: " + JSON.stringify(r));
       if (r && r.ok) {
         mavConnected = true;
+        // #3: pinned live-telemetry notification — the native foreground service keeps the
+        // link + notification alive while the WebView is frozen in the background.
+        try {
+          if (window.AndroidNotify && window.AndroidNotify.start) {
+            window.AndroidNotify.start();
+            if (flownWpTotal > 0) window.AndroidNotify.setMission(flownWpTotal);
+          }
+        } catch (e) { appLog("AndroidNotify.start failed: " + e); }
         $("mav-connect").disabled = true;
         $("mav-disconnect").disabled = false;
         $("mav-upload").disabled = false;
@@ -3318,6 +3326,7 @@
     mavStopPolling();
     try { if (a && a.mav_disconnect) await a.mav_disconnect(); } catch (e) { /* ignore */ }
     mavConnected = false;
+    try { if (window.AndroidNotify && window.AndroidNotify.stop) window.AndroidNotify.stop(); } catch (e) {}
     $("mav-connect").disabled = false;
     $("mav-disconnect").disabled = true;
     $("mav-upload").disabled = true;
@@ -4256,6 +4265,8 @@
         }
         flownHasRtl = lastRtl;
         flownWpTotal = r.count || 0;
+        // #3: keep the notification's "WP x/y" denominator in sync with the real upload
+        try { if (window.AndroidNotify && window.AndroidNotify.setMission) window.AndroidNotify.setMission(flownWpTotal); } catch (e) {}
         flownRestored = false;                   // fresh read-back-verified upload → trusted
         if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed");
         resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
