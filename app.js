@@ -1888,6 +1888,31 @@
   }
   if ($("show-saved")) $("show-saved").addEventListener("click", showSavedFields);
 
+  // On upload: promote the current contour to a persistent named record (the promise
+  // "Автозбереження — при заливці в дрон"). UPSERT by name so a re-upload of the same field
+  // updates rather than duplicates; a freshly-drawn (unnamed) field mints "Поле N" ONCE and
+  // adopts that name so subsequent uploads hit the same record.
+  async function promoteFieldOnUpload() {
+    const field = boundaryFromPolygon();
+    if (!field || field.length < 3) return;                 // nothing to save
+    let recs = await fldAll();
+    const useLp = recs === null;                            // IDB unavailable → localStorage fallback
+    if (useLp) { const o = lpAll(); recs = Object.keys(o).map((n) => Object.assign({ name: n }, o[n])); }
+    let name = currentFieldName;
+    if (!name) {
+      const names = new Set((recs || []).map((r) => r.name));
+      let n = 1; while (names.has("Поле " + n)) n++;
+      name = "Поле " + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
+    }
+    const prev = (recs || []).find((r) => r.name === name);
+    const now = Date.now();
+    const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
+      created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now };
+    const ok = useLp ? false : await fldPut(rec);
+    if (!ok) { try { lpSave(name, rec); } catch (e) {} }
+    try { localStorage.setItem("fmp_current_field", name); } catch (e) {}   // for boot restore (Task 7)
+    appLog("field promoted on upload: «" + name + "» (upsert)");
+  }
   $("save-project").addEventListener("click", async () => {
     const field = boundaryFromPolygon();
     if (!field || field.length < 3) { setMsg("Спочатку задай поле.", "error"); return; }
@@ -3687,6 +3712,7 @@
                               diff: r.verify.mismatches } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
+        promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
         resumeClear();          // нова місія в дроні → стара точка продовження недійсна
         // Snapshot exactly what we uploaded — progress is computed off this, so
         // editing/rebuilding the route afterwards can't corrupt the live HUD.
@@ -3754,6 +3780,7 @@
       flownRoute = rem.rest.slice();
       flownHasRtl = $("rtl").checked;
       flownSave(rem.rest);
+      promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
       updateMissionStatus();
