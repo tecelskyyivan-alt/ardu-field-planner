@@ -1230,6 +1230,15 @@
     args.forEach((a, i) => { s = s.split("{" + i + "}").join(String(a)); });
     return s;
   }
+  // Pluralise a count word: UA раз/рази/разів, EN time/times.
+  function plurCount(n) {
+    if (LANG === "en") return n === 1 ? "time" : "times";
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return "разів";
+    if (b === 1) return "раз";
+    if (b >= 2 && b <= 4) return "рази";
+    return "разів";
+  }
 
   // Escape HTML before putting any untrusted string into innerHTML. The drone's
   // STATUSTEXT / mode strings flow into the HUD, so a spoofed or malformed
@@ -1814,6 +1823,16 @@
         rq.onerror = () => rej(rq.error);
       });
     } catch (e) { return null; }     // null = IDB unavailable -> caller uses localStorage
+  }
+  async function fldGet(name) {       // one record by keyPath (null if missing / IDB unavailable)
+    try {
+      const db = await fldOpen();
+      return await new Promise((res, rej) => {
+        const rq = db.transaction(FLD_STORE, "readonly").objectStore(FLD_STORE).get(name);
+        rq.onsuccess = () => res(rq.result || null);
+        rq.onerror = () => rej(rq.error);
+      });
+    } catch (e) { return null; }
   }
   async function fldDelete(name) {
     try {
