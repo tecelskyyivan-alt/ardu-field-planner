@@ -18,7 +18,7 @@ from .coverage import (
     generate_coverage, polygon_area_ha, inset_boundary, expand_exclusions, optimal_angle,
     split_route_by_time, split_route_by_area, covered_area_ha, estimate_mission_time,
     coverage_metrics, split_field_by_line, overlap_optimal_angle, mission_overlap,
-    return_corridor_route, coverage_overlap_geo,
+    return_corridor_route, coverage_overlap_geo, safe_transit,
 )
 from .geo import centroid, path_length, haversine
 from .mission import (
@@ -251,7 +251,7 @@ class Api:
                 "home": home, "takeoff_alt": takeoff_alt,
                 "waypoints": wps, "wp_alt": alt, "rtl": rtl,
                 "speed": speed, "contour": boundary, "flights": flights,
-                "exclusions": exclusions,
+                "exclusions": exclusions, "margin": margin,
             }
 
             return {
@@ -340,6 +340,40 @@ class Api:
             return {"ok": True, **LINK.status()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def safe_transit(self, params=None):
+        """Plan obstacle-free INGRESS/EGRESS legs for the last-built route (#12), so the drone
+        flies to the mission start and back home WITHOUT leaving the field or crossing an
+        exclusion. Reads field/route/exclusions from the last build_route; `home` defaults to that
+        route's home but the caller (JS) may override it with the live vehicle's home/GPS. Returns
+        {ok, ingress_ok, egress_ok, ingress:[{lat,lng}], egress:[{lat,lng}], home_inside, reason}.
+        FAIL-SAFE: any leg not PROVABLY inside the field free-space comes back ok'd but with its
+        *_ok False and an EMPTY list, so the caller flies a plain straight RTL (with a warning) and
+        never splices an obstacle-crossing waypoint into the mission."""
+        p = params or {}
+        s = self._state
+        if not s or not s.get("waypoints"):
+            return {"ok": False, "error": "Спочатку побудуй маршрут."}
+        try:
+            boundary = s.get("contour") or []
+            wps = s["waypoints"]
+            hp = p.get("home")
+            if hp and hp.get("lat") is not None and hp.get("lng") is not None:
+                home = (float(hp["lat"]), float(hp["lng"]))   # live vehicle home overrides
+            else:
+                h = s["home"]; home = (h[0], h[1])
+            margin = float(p.get("margin", s.get("margin", 0)) or 0)
+            exclusions = s.get("exclusions") or []
+            r = safe_transit(boundary, wps, home, exclusions=exclusions, margin=margin)
+            return {
+                "ok": True,
+                "ingress_ok": r["ingress_ok"], "egress_ok": r["egress_ok"],
+                "ingress": [{"lat": a, "lng": b} for a, b in r["ingress"]],
+                "egress": [{"lat": a, "lng": b} for a, b in r["egress"]],
+                "home_inside": r["home_inside"], "reason": r["reason"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     def _mission_items(self):
         """Build MAVLink mission items from the last-built route (or None).
