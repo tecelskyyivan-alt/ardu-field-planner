@@ -227,23 +227,41 @@ class BleBridge(private val act: MainActivity, private val web: WebView) {
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
-            writing = false
-            pump(g, writeChar ?: return)                   // send the next queued chunk
+            // completed=true: mark the in-flight write done AND check-out the next chunk atomically
+            // (see pump() below — this used to be a plain `writing = false` here, racing write()'s
+            // pump() call on another thread).
+            pump(g, writeChar ?: return, completed = true)
         }
     }
 
     // ---- helpers ----
 
+    /**
+     * Fix (IMPORTANT finding, check-then-act race): `writing` test-and-set and the queue poll must
+     * happen under the SAME lock as the "previous write completed" transition, or the GATT callback
+     * thread (onCharacteristicWrite, completed=true) and the JS binder thread (write() -> pump(),
+     * completed=false) can interleave: both read writing==false, both poll a distinct chunk, and
+     * whichever writeCharacteristic() call loses (device-busy) used to just drop its chunk — a torn
+     * MAVLink frame on the uplink. Now the whole "complete previous + maybe start next" decision is
+     * one synchronized block, and a writeCharacteristic() failure re-queues at the head instead of
+     * discarding, so the next pump() (triggered by the next write() or completion) retries it.
+     */
     @Suppress("DEPRECATION")
-    private fun pump(g: BluetoothGatt, wc: BluetoothGattCharacteristic) {
-        if (writing) return
-        val chunk = synchronized(writeQueue) { if (writeQueue.isEmpty()) null else writeQueue.poll() } ?: return
-        writing = true
+    private fun pump(g: BluetoothGatt, wc: BluetoothGattCharacteristic, completed: Boolean = false) {
+        val chunk: ByteArray? = synchronized(writeQueue) {
+            if (completed) writing = false
+            if (writing || writeQueue.isEmpty()) null
+            else { writing = true; writeQueue.poll() }
+        } ?: return
         try {
             wc.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             wc.value = chunk
-            if (!g.writeCharacteristic(wc)) { writing = false }
-        } catch (e: Exception) { writing = false }
+            if (!g.writeCharacteristic(wc)) {
+                synchronized(writeQueue) { writing = false; writeQueue.addFirst(chunk) }
+            }
+        } catch (e: Exception) {
+            synchronized(writeQueue) { writing = false; writeQueue.addFirst(chunk) }
+        }
     }
 
     // Fire window.<fn>('<base64/json>') on the UI thread, JSON-quoting the (remote-controlled) arg

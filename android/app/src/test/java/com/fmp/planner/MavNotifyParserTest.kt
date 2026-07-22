@@ -81,4 +81,36 @@ class MavNotifyParserTest {
         val s = p.snapshot()
         assertTrue(s.armed == true && s.wpSeq == 5)
     }
+
+    /**
+     * IMPORTANT staleness finding: fakes the clock, feeds one HEARTBEAT (armed, no position fix
+     * yet), then advances the clock with NO further frames arriving — simulating a dead MAVLink
+     * link. Asserts the snapshot exposes the growing age (so TelemetryService can flag the
+     * notification stale after STALE_MS) and that distance does not grow purely from time passing:
+     * distM only advances inside the GLOBAL_POSITION_INT handler on a freshly arrived frame, so a
+     * silent stream must leave it frozen. flightSec, by contrast, is documented (see
+     * MavNotifyParser.snapshot()) to keep ticking on wall-clock time even while stale — asserted
+     * here too, to lock in that this is a deliberate choice and not an oversight.
+     */
+    @Test fun staleness_age_exposed_and_distance_frozen_during_silence() {
+        var t = 1000L
+        val p = MavNotifyParser { t }
+        p.push(HEARTBEAT)                 // armed at t=1000; lastRxMs=1000
+        p.push(GPI)                       // first position fix at t=1000; no prior fix -> distM stays 0
+
+        val before = p.snapshot()
+        assertEquals(0L, before.ageMs)
+        assertEquals(0.0, before.distM, 1e-9)
+
+        t = 15000L                        // 14s of silence: no new frames pushed
+        val after = p.snapshot()
+        assertEquals(14000L, after.ageMs)
+        assertEquals(0.0, after.distM, 1e-9)         // must NOT grow from stale positions
+        assertTrue(after.flightSec > before.flightSec) // documented: flight time keeps running
+    }
+
+    @Test fun ageMs_is_null_before_any_frame_arrives() {
+        val p = MavNotifyParser { 500L }
+        assertNull(p.snapshot().ageMs)
+    }
 }

@@ -32,9 +32,15 @@ class TelemetryService : Service() {
     private lateinit var nm: NotificationManager
     private var ticking = false
 
+    // Minor fix (1 Hz identical re-post): cache the previous tick's rendered title+text so the
+    // ticker can skip nm.notify() entirely when nothing visible changed — notify() forces SystemUI
+    // to re-process the ongoing row even for a byte-identical Notification.
+    private var lastTitle: String? = null
+    private var lastText: String? = null
+
     private val ticker = object : Runnable {
         override fun run() {
-            nm.notify(NOTIF_ID, buildNotification())
+            renderIfChanged()
             if (ticking) ui.postDelayed(this, 1000L)
         }
     }
@@ -58,12 +64,18 @@ class TelemetryService : Service() {
             return START_NOT_STICKY
         }
         TelemetryHub.active = true
-        startForeground(NOTIF_ID, buildNotification())
+        startForeground(NOTIF_ID, render())
         if (!ticking) {
             ticking = true
             ui.post(ticker)
         }
-        return START_STICKY
+        // Minor fix (START_STICKY zombie): this service is useless on its own — it only renders
+        // TelemetryHub's shared parser state, which lives in-process alongside the WebView and the
+        // MAVLink bridges. If the OS kills the whole process and STICKY resurrects just this service,
+        // there is no WebView/bridges to repopulate it (blank "FMP — — · 00:00" zombie notification,
+        // or a startForeground() crash-loop on API 31+ background-FGS policy). NOT_STICKY lets it die
+        // with the process; JS starts it again via NotifyBridge on the next real MAVLink connect.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -76,10 +88,48 @@ class TelemetryService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun buildNotification(): Notification {
+    /** Renders the current snapshot, updates the last-posted cache (so a subsequent tick can tell
+     *  it's unchanged), and returns the Notification — used for the mandatory startForeground()
+     *  call, which must always post regardless of the cache. */
+    private fun render(): Notification {
         val s = TelemetryHub.snapshot()
-        val title = "FMP — ${s.modeName}" + (if (s.armed == true) " · ARMED" else "")
+        val title = computeTitle(s)
+        val text = buildText(s)
+        lastTitle = title
+        lastText = text
+        return buildNotification(title, text)
+    }
 
+    /** 1 Hz ticker path (minor fix): skip nm.notify() entirely when this tick's title+text are
+     *  byte-identical to the previous tick's — avoids ~3600 redundant SystemUI re-posts/hour plus
+     *  their PendingIntent construction while connected-but-idle. */
+    private fun renderIfChanged() {
+        val s = TelemetryHub.snapshot()
+        val title = computeTitle(s)
+        val text = buildText(s)
+        if (title == lastTitle && text == lastText) return
+        lastTitle = title
+        lastText = text
+        nm.notify(NOTIF_ID, buildNotification(title, text))
+    }
+
+    /** Staleness fix (IMPORTANT finding): once the parser hasn't seen a CRC-verified frame for
+     *  STALE_MS, the title stops claiming a live mode/armed state (which would just be the last
+     *  values seen before the link died) and instead surfaces the outage explicitly, with the
+     *  outage duration so the operator can judge how long they've been flying blind. */
+    private fun computeTitle(s: MavNotifyParser.Snapshot): String {
+        val age = s.ageMs
+        val stale = age == null || age >= STALE_MS
+        if (!stale) return "FMP — ${s.modeName}" + (if (s.armed == true) " · ARMED" else "")
+        val secs = age?.let { it / 1000 }
+        return if (secs != null) "⚠ немає звʼязку (${secs}с)" else "⚠ немає звʼязку"
+    }
+
+    /** Telemetry line intentionally renders the last-known values AS-IS even while stale (see
+     *  computeTitle above) — NotificationCompat's plain setContentText has no practical way to
+     *  "dim" part of the text without a Spannable, and the title already carries the staleness
+     *  warning, so duplicating it in the body would add complexity for no extra operator signal. */
+    private fun buildNotification(title: String, text: String): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
         }
@@ -97,7 +147,7 @@ class TelemetryService : Service() {
         // the platform stat_notify_sync glyph is the documented fallback until one is added.
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
-            .setContentText(buildText(s))
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(contentIntent)
             .addAction(0, "Стоп", stopIntent)
@@ -136,5 +186,7 @@ class TelemetryService : Service() {
         const val CHANNEL_ID = "fmp_telemetry"
         const val ACTION_STOP = "com.fmp.planner.action.STOP_TELEMETRY"
         private const val NOTIF_ID = 1001
+        // IMPORTANT staleness finding: no CRC-verified frame for this long -> notification goes stale.
+        private const val STALE_MS = 10_000L
     }
 }
