@@ -2577,12 +2577,19 @@
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
   function missionLead() { return 2 + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0); }
-  function flownSave(route, home, hasRtl, status) {
+  // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
+  // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).
+  // The real "service points before coverage wp 0" that the FC's wp_current counts against
+  // is missionLead() + splicePre — store the SUM as `lead` so resumeRemaining()'s
+  // idx = wp - lead maps back to the right coverage waypoint (CRITICAL fix: previously only
+  // missionLead() was stored, silently skipping `splicePre` never-flown waypoints on every
+  // battery-swap resume of a spliced upload).
+  function flownSave(route, home, hasRtl, status, splicePre) {
     try {
       localStorage.setItem(FLOWN_KEY, JSON.stringify({
         route: route, home: home || null,
         rtl: (hasRtl != null ? hasRtl : $("rtl").checked),
-        lead: missionLead(), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
+        lead: missionLead() + (splicePre || 0), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
         status: status || "confirmed", ts: Date.now(),
       }));
     } catch (e) {}
@@ -2592,6 +2599,10 @@
     if (!resumeOn()) return null;
     const p = resumeLoad(), f = flownLoad();
     if (!p || !f || !f.route || !f.route.length) return null;
+    // f.lead already carries missionLead()+splicePre for anything saved by flownSave above
+    // (this build); records from before splice_pre tracking existed were saved with the
+    // same call and have no splicePre concept, so they fall back to the historical default
+    // (3) exactly as before — safe, since an unspliced mission's real lead is 2 or 3 anyway.
     const lead = f.lead != null ? f.lead : 3;
     const idx = Math.max(0, Math.min((p.wp | 0) - lead, f.route.length - 1));
     if (idx < 1) return null;                       // майже нічого не пролетів
@@ -2826,6 +2837,13 @@
       // mission (today's behaviour) — this must never throw out of the upload, and must
       // never prepend/append a leg whose *_ok is false.
       let flown = _wps;
+      // splicePre = how many ingress waypoints got PREPENDED onto `flown` ahead of the
+      // coverage route (0 when no splice happens). CRITICAL: this must travel back to the
+      // caller (res.splice_pre below) so flownSave() can store lead = missionLead() +
+      // splicePre — resumeRemaining()'s `idx = wp - lead` otherwise stays off by `pre.length`
+      // on EVERY spliced upload, silently dropping the first `pre.length` coverage waypoints
+      // of a battery-swap resume (verified finding — the duplicated Critical).
+      let splicePre = 0;
       // Partial-route upload (resume after a battery swap passes p.route = the REMAINDER):
       // safe_transit plans against the engine's _state = the FULL last-built route, so its
       // ingress would target the ORIGINAL field start, not the mid-field resume point —
@@ -2844,6 +2862,7 @@
             const pre  = t.ingress_ok ? t.ingress.slice(0, -1).map((p) => [p.lat, p.lng]) : [];
             const post = t.egress_ok  ? t.egress.slice(1).map((p) => [p.lat, p.lng])       : [];
             flown = [...pre, ..._wps, ...post];
+            splicePre = pre.length;
             if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", "warn");
             if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", "warn");
           }
@@ -2857,6 +2876,10 @@
         ? MAV_LINK.buildMissionItemsInav(_wps, alt, rtl)
         : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), flown, alt, rtl, speed);
       const res = await _mavLink.uploadMission(items, undefined, p && p.onProgress);
+      // CRITICAL: report the splice length back to the caller — see splicePre comment
+      // above. 0 for INAV/resume uploads (no splice attempted) and for a plain _wps
+      // mission (no safe_transit ingress, or it failed/was unavailable).
+      res.splice_pre = splicePre;
       if (!res.ok) return res;
       if (speed > 0 && !isInav) {   // INAV: MAVLink param-set is a stub; speed is a vehicle setting
         let ps = await _mavLink.setParam("WP_SPD", speed);
@@ -4337,7 +4360,7 @@
         // #3: keep the notification's "WP x/y" denominator in sync with the real upload
         try { if (window.AndroidNotify && window.AndroidNotify.setMission) window.AndroidNotify.setMission(flownWpTotal); } catch (e) {}
         flownRestored = false;                   // fresh read-back-verified upload → trusted
-        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed");
+        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0);
         resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
         let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
@@ -4416,7 +4439,10 @@
       flownHasRtl = $("rtl").checked;
       flownWpTotal = r.count || 0;
       flownRestored = false;
-      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed");
+      // Resume uploads never splice (mav_upload_mission gates the splice off when p.route is
+      // set — see its comment), so r.splice_pre is always 0 here; pass it through anyway for
+      // consistency with the full-upload call site above.
+      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0);
       promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
