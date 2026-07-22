@@ -9,7 +9,7 @@
 # backend/ (drift = the "route algorithm broke again" class of bug).
 set -e
 cd "$(dirname "$0")"
-MODS="__init__ geo coverage mission api flight_calib"
+MODS="__init__ geo coverage plane_turns mission api flight_calib"
 DESTS="web-stable/engine android/app/src/main/assets/engine"
 for d in $DESTS; do
   mkdir -p "$d"
