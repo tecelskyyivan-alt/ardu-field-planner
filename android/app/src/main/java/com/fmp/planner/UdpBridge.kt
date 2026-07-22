@@ -51,6 +51,9 @@ import java.util.concurrent.Executors
  *   AndroidUdp.write(base64)
  *   AndroidUdp.close()
  *   incoming bytes -> window.__androidUdpData('<base64>')
+ *
+ * Every inbound packet is also mirrored into TelemetryHub (the pinned live-telemetry notification,
+ * #3) — a no-op when that service isn't running.
  */
 class UdpBridge(private val ctx: Context, private val web: WebView) {
 
@@ -237,6 +240,8 @@ class UdpBridge(private val ctx: Context, private val web: WebView) {
                 dlog("rx: $rxPackets пакетів / $rxBytes байт, останній від ${pkt.address?.hostAddress}:${pkt.port}")
             }
             if (pkt.length > 0) {
+                // notification tap (#3): gate the per-packet copy on `active` and never throw into the recv loop
+                if (TelemetryHub.active) try { TelemetryHub.feed(pkt.data.copyOf(pkt.length)) } catch (_: Exception) {}
                 // JSON-quote the (remote) bytes — injection-proof vs splicing into '...'.
                 val arg = JSONObject.quote(Base64.encodeToString(pkt.data, 0, pkt.length, Base64.NO_WRAP))
                 ui.post { web.evaluateJavascript("window.__androidUdpData&&window.__androidUdpData($arg)", null) }

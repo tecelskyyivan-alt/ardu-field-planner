@@ -36,6 +36,9 @@ import java.util.concurrent.Executors
  *   AndroidSerial.write(base64)
  *   AndroidSerial.close()
  *   incoming bytes -> window.__androidSerialData('<base64>')
+ *
+ * Every inbound chunk is also mirrored into TelemetryHub (the pinned live-telemetry notification,
+ * #3) — a no-op when that service isn't running.
  */
 class SerialBridge(
     private val ctx: Context,
@@ -148,6 +151,7 @@ class SerialBridge(
     // ---- SerialInputOutputManager.Listener ----
     override fun onNewData(data: ByteArray) {
         if (data.isEmpty()) return
+        try { TelemetryHub.feed(data) } catch (_: Exception) {}     // notification tap (#3): must never kill the serial read thread
         // JSON-quote the (remote, attacker-controlled) bytes instead of splicing them
         // into a '...' literal — injection-proof regardless of the encoder.
         val arg = JSONObject.quote(Base64.encodeToString(data, Base64.NO_WRAP))

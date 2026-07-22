@@ -16,6 +16,23 @@
     <!-- Phone GPS: the map's «📍 my GPS» button + GPS anchor for route start/finish. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- MAVLink over Bluetooth LE (SpeedyBee-style FC / NUS or HM-10 BLE-UART). API 31+ uses the
+         runtime BLUETOOTH_SCAN/CONNECT (SCAN with neverForLocation → no location needed for BLE);
+         pre-31 falls back to BLUETOOTH/BLUETOOTH_ADMIN + the fine location declared above. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" tools:targetApi="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:targetApi="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <!-- Pinned live-telemetry notification (#3): keeps mode/battery/altitude/speed/waypoint/
+         flight-time visible (and the MAVLink bridges alive) while the screen is off / the app
+         is backgrounded mid-flight, like a music-player notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:label="@string/app_name"
@@ -73,5 +90,12 @@
                 <data android:mimeType="text/xml" />
             </intent-filter>
         </activity>
+
+        <!-- Pinned live-telemetry notification (#3). Started/stopped only from our own JS via
+             NotifyBridge (AndroidNotify) — never exported to other apps. -->
+        <service
+            android:name=".TelemetryService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.AssetManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.GeolocationPermissions
@@ -35,6 +36,8 @@ class MainActivity : Activity() {
     private var ble: BleBridge? = null
     // A BLE scan awaiting the runtime Bluetooth-permission result (API 31+ SCAN/CONNECT).
     private var pendingBlePerm: ((Boolean) -> Unit)? = null
+    // TelemetryService's start() awaiting the runtime POST_NOTIFICATIONS result (API 33+).
+    private var pendingNotifyPerm: ((Boolean) -> Unit)? = null
     // A WebView geolocation request awaiting the OS location-permission result.
     private var pendingGeo: Pair<String?, GeolocationPermissions.Callback?>? = null
     // A WebView <input type=file> click awaiting the SAF document-picker result.
@@ -147,6 +150,7 @@ class MainActivity : Activity() {
         webView.addJavascriptInterface(ble!!, "AndroidBle")
         webView.addJavascriptInterface(LogBridge(this, webView), "AndroidLog")  // diagnostic-log upload (store-and-forward)
         webView.addJavascriptInterface(PhotoBridge(webView), "AndroidPhoto")  // photo-import upload
+        webView.addJavascriptInterface(NotifyBridge(this, webView), "AndroidNotify")  // pinned live-telemetry notification (#3)
         // In-app self-update (download + install an APK): only for the self-distributed
         // builds. The Google Play build (SELF_UPDATE=false) omits it — Play forbids apps
         // installing APKs, and the REQUEST_INSTALL_PACKAGES permission is stripped too.
@@ -250,6 +254,25 @@ class MainActivity : Activity() {
         }
     }
 
+    // Runtime notification permission for the pinned telemetry service (#3). Only API 33+
+    // gates POST_NOTIFICATIONS at runtime — older Android has no such prompt, so the callback
+    // fires true immediately there. NotifyBridge starts the foreground service either way; a
+    // denial here only means the notification itself won't be visible.
+    fun requestNotifyPermission(cb: (Boolean) -> Unit) {
+        runOnUiThread {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                cb(true); return@runOnUiThread
+            }
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                cb(true)
+            } else {
+                pendingNotifyPerm = cb
+                try { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 11) }
+                catch (e: Exception) { pendingNotifyPerm = null; cb(false) }
+            }
+        }
+    }
+
     // Deliver the OS location-permission result to a WebView geolocation request that
     // was waiting on it (the «📍 Мій GPS» on-demand prompt).
     override fun onRequestPermissionsResult(
@@ -265,6 +288,11 @@ class MainActivity : Activity() {
             val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
             pendingBlePerm?.invoke(ok)
             pendingBlePerm = null
+        }
+        if (requestCode == 11) {
+            val ok = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingNotifyPerm?.invoke(ok)
+            pendingNotifyPerm = null
         }
     }
 
