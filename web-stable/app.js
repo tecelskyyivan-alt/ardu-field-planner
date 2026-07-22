@@ -3276,6 +3276,77 @@
     flightSummaries = all.map(flogSummary);
   }
 
+  // ---- flight statistics tab ----
+  let statsRange = "all";
+  function _statsRangeFloor(r) {                 // epoch-ms floor of the selected period (LOCAL time)
+    const d = new Date();
+    if (r === "hour") { d.setMinutes(0, 0, 0); return d.getTime(); }
+    if (r === "day") { d.setHours(0, 0, 0, 0); return d.getTime(); }
+    return 0;                                     // "all"
+  }
+  function _haPerMin(rec) {                       // Га/хв = covered_ha / duration_min
+    const ac = rec.actual || {}, cov = ac.covered_ha, sec = ac.duration_s;
+    if (cov == null || !sec || sec <= 0) return null;
+    return cov / (sec / 60);
+  }
+  function _bindStatsChips() {
+    const pane = $("tab-stats"); if (!pane || pane._statsBound) return;
+    pane._statsBound = true;                       // bind ONCE on the stable pane (host innerHTML is replaced)
+    pane.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-range]"); if (!b) return;
+      statsRange = b.getAttribute("data-range"); renderFlightStats();
+    });
+  }
+  async function renderFlightStats() {
+    const host = $("flight-stats"); if (!host) return;
+    const rows = (await flogAll())
+      .filter((r) => r.started_at >= _statsRangeFloor(statsRange))
+      .sort((a, b) => b.started_at - a.started_at);
+    const chip = (r, lbl) => `<button class="chip${statsRange === r ? " active" : ""}" data-range="${r}" aria-pressed="${statsRange === r}">${t(lbl)}</button>`;
+    let html = `<div class="stats-chips">${chip("hour", "з початку години")}${chip("day", "з початку дня")}${chip("all", "усе")}</div>`;
+    if (!rows.length) {
+      host.innerHTML = html + `<div class="msg">${t("Немає польотів за обраний період.")}</div>`;
+      _bindStatsChips(); return;
+    }
+    let secTot = 0, distTot = 0, covTot = 0, covDurMin = 0;
+    rows.forEach((r) => {
+      const ac = r.actual || {};
+      secTot += ac.duration_s || 0; distTot += ac.distance_m || 0;
+      if (ac.covered_ha != null) { covTot += ac.covered_ha; covDurMin += (ac.duration_s || 0) / 60; }
+    });
+    const avgHaMin = covDurMin > 0 ? covTot / covDurMin : null;
+    const num = (n, d) => (n == null ? "—" : (LANG === "en" ? n.toFixed(d) : String(Math.round(n * 10 ** d) / 10 ** d)));
+    const tile = (label, val, cls) => `<div class="stat-tile${cls ? " " + cls : ""}"><div class="sv">${val}</div><div class="sl">${t(label)}</div></div>`;
+    html += `<div class="stats-totals">
+      ${tile("Польотів", rows.length)}
+      ${tile("Годин", num(secTot / 3600, 1))}
+      ${tile("Кілометрів", num(distTot / 1000, 1))}
+      ${tile("Покрито", num(covTot, 1), "headline")}
+      ${tile("Сер. Га/хв", num(avgHaMin, 2))}
+    </div>`;
+    const cell = (r) => {
+      const ac = r.actual || {};
+      const spd = ac.avg_speed_ms != null ? num(ac.avg_speed_ms * 3.6, 1) : "—";  // km/h
+      return `<tr>
+        <td>${esc(r.date || "")}</td>
+        <td>${esc(r.field || "поле")}</td>
+        <td>${ac.covered_ha != null ? num(ac.covered_ha, 2) : "—"}</td>
+        <td>${ac.distance_m != null ? num(ac.distance_m / 1000, 2) : "—"}</td>
+        <td>${ac.duration_s != null ? Math.round(ac.duration_s / 60) : "—"}</td>
+        <td>${ac.battery_used_pct != null ? ac.battery_used_pct : "—"}</td>
+        <td>${spd}</td>
+        <td>${_haPerMin(r) != null ? num(_haPerMin(r), 2) : "—"}</td>
+      </tr>`;
+    };
+    const H = (s) => t(s);
+    html += `<div class="stats-table-wrap"><table class="stats-table"><thead><tr>
+      <th>${H("Дата")}</th><th>${H("Поле")}</th><th>${H("Покрито")}</th><th>${H("Відстань")}</th>
+      <th>${H("Час")}</th><th>${H("Батарея")}</th><th>${H("Сер. швидкість")}</th><th>${H("Га/хв")}</th>
+      </tr></thead><tbody>${rows.map(cell).join("")}</tbody></table></div>`;
+    host.innerHTML = html;
+    _bindStatsChips();
+  }
+
   // Start recording when the drone arms in AUTO; sample ~1 Hz; finalize on disarm.
   function flightRecTick(s) {
     const armed = !!s.armed, auto = (s.mode || "").toUpperCase() === "AUTO";
