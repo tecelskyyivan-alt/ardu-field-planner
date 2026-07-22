@@ -1391,12 +1391,8 @@
     if (ss.tab && ss.tab !== "plan") {
       try { const b = document.querySelector('.tab[data-tab="' + ss.tab + '"]'); if (b) b.click(); } catch (e) {}
     }
-    // Сесія закінчилась підключеною по BLE → тихо перепідключаємось самі.
-    if (ss.wasConnected && ss.connType === "ble" && window.AndroidBle && window.__fmpBleAutoReconnect) {
-      let mac = "";
-      try { mac = localStorage.getItem("fmp_ble_last") || ""; } catch (e) {}
-      if (mac) { appLog("[restore] авто-реконект BLE до " + mac); window.__fmpBleAutoReconnect(mac, 2500); }
-    }
+    // Сесія закінчилась підключеною → тихо перепідключаємось самі (BLE/UDP/TCP/cable, #2).
+    bootAutoReconnect(ss);
     // Хуки збереження решти сесії.
     let _mvTimer = null;
     map.on("moveend zoomend", () => {
@@ -2282,6 +2278,8 @@
 
   // ---- MAVLink: live link to the drone (connect, telemetry, upload) --------
   let mavConnected = false;
+  let mavConnecting = false;       // synchronous guard: true from the top of mavConnect until it settles
+  let _autoReconnectTimer = null;  // pending boot auto-reconnect timer (cleared on manual connect/disconnect)
   let mavPollTimer = null;
   let droneMarker = null;
   let droneTrack = null;          // flown-path polyline
@@ -2978,10 +2976,13 @@
   }
 
   async function mavConnect() {
+    if (mavConnected || mavConnecting) return;   // re-entrancy: block the boot-timer↔manual double-connect race
     const a = mavApi();
     if (!a || !a.mav_connect) { setMsg("API недоступний.", "error"); return; }
     const conn = mavConnString();
     if (!conn) { setMsg("Обери COM-порт або введи адресу.", "error"); return; }
+    mavConnecting = true;
+    if (_autoReconnectTimer) { clearTimeout(_autoReconnectTimer); _autoReconnectTimer = null; }
     setMsg("Підключаюсь до дрона…", null);
     appLog("connect → " + conn + " baud=" + $("mav-baud").value);
     $("mav-connect").disabled = true;
@@ -3018,10 +3019,39 @@
     } catch (e) {
       $("mav-connect").disabled = false;
       setMsg("Помилка підключення: " + e, "error");
+    } finally {
+      mavConnecting = false;
     }
+  }
+  // Boot auto-reconnect dispatcher (#2): re-open the last session's link with no user action.
+  // BLE branch is byte-for-byte the previous behaviour; UDP/TCP/cable added. Desktop WebSerial is
+  // skipped (port indices don't survive a reload). Guarded by mavConnecting so it can't race a manual tap.
+  function bootAutoReconnect(ss) {
+    if (!ss || !ss.wasConnected) return;
+    const conn = ss.connType;
+    if (conn === "ble") {
+      if (!(window.AndroidBle && window.__fmpBleAutoReconnect)) return;
+      let mac = "";
+      try { mac = localStorage.getItem("fmp_ble_last") || ""; } catch (e) {}
+      if (mac) { appLog("[restore] авто-реконект BLE до " + mac); window.__fmpBleAutoReconnect(mac, 2500); }
+      return;
+    }
+    if (conn === "cable" && !IS_ANDROID) return;                 // desktop WebSerial: no auto-open (needs a gesture)
+    if (conn !== "cable" && conn !== "udp" && conn !== "tcp") return;
+    try {
+      const tsel = $("mav-conn-type");
+      if (tsel && tsel.querySelector('option[value="' + conn + '"]')) { tsel.value = conn; mavSyncRows(); }
+    } catch (e) {}
+    if (ss.addr && $("mav-address")) { try { $("mav-address").value = ss.addr; } catch (e) {} }
+    appLog("[restore] авто-реконект " + conn + (ss.addr ? " → " + ss.addr : ""));
+    _autoReconnectTimer = setTimeout(() => {
+      _autoReconnectTimer = null;
+      if (!mavConnected && !mavConnecting) mavConnect();
+    }, 1200);
   }
 
   async function mavDisconnect() {
+    if (_autoReconnectTimer) { clearTimeout(_autoReconnectTimer); _autoReconnectTimer = null; }
     const a = mavApi();
     mavStopPolling();
     try { if (a && a.mav_disconnect) await a.mav_disconnect(); } catch (e) { /* ignore */ }
