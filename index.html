@@ -40,6 +40,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="plan">План</button>
         <button class="tab" data-tab="fly">Політ</button>
+        <button class="tab" data-tab="stats">Статистика</button>
         <button class="tab" data-tab="app" id="tab-btn-app">Додаток</button>
       </div>
 
@@ -240,6 +241,11 @@
       <button id="export-flights-csv" class="ghost">Записи робіт (CSV)</button>
       <p class="hint">Кожен виліт логується офлайн і калібрує оцінку часу / заряду.</p>
       </div><!-- /tab-fly -->
+
+      <div id="tab-stats" class="tab-pane">
+        <div class="step">Статистика польотів</div>
+        <div id="flight-stats"></div>
+      </div><!-- /tab-stats -->
 
       <div id="tab-app" class="tab-pane">
       <div class="step">

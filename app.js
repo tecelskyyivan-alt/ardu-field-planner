@@ -1255,6 +1255,7 @@
         b.classList.toggle("active", b === btn));
       document.querySelectorAll(".tab-pane").forEach((p) =>
         p.classList.toggle("active", p.id === "tab-" + name));
+      if (name === "stats" && typeof renderFlightStats === "function") renderFlightStats();
       // Leaflet needs a nudge after the panel content changes width/visibility.
       setTimeout(() => map.invalidateSize(), 50);
     });
