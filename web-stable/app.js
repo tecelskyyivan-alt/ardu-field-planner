@@ -3240,7 +3240,7 @@
           planned: lastBuildStats ? Object.assign({}, lastBuildStats) : null,
           work: lastWorkContext ? Object.assign({}, lastWorkContext) : null,
           bp_start: (s.battery_pct != null ? s.battery_pct : null),
-          samples: [], sawComplete: false, wp_total: s.wp_total || 0, _last: 0 };
+          samples: [], sawComplete: false, wp_reached: 0, wp_total: s.wp_total || 0, _last: 0 };
         appLog("flightlog: recording started (AUTO armed)");
       }
       return;
@@ -3252,6 +3252,7 @@
         gs: s.groundspeed, bv: s.battery_v, bp: s.battery_pct, wp: s.wp_current });
     }
     if (s.wp_total && s.wp_current != null && s.wp_current >= s.wp_total - 1) flightRec.sawComplete = true;
+    if (s.wp_current != null) flightRec.wp_reached = Math.max(flightRec.wp_reached, s.wp_current);
     if (!armed) flightRecFinalize(s, false);           // disarmed -> flight over
   }
   function _sampleDist(samples) {
