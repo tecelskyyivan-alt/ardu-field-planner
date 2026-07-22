@@ -1344,7 +1344,10 @@
     if (h && $("round-turn")) h.style.display = $("round-turn").checked ? "" : "none";
   }
   if ($("round-turn")) $("round-turn").addEventListener("change", syncRoundTurnHint);
-  window.addEventListener("beforeunload", () => { saveLastSettings(); saveLastField(); });
+  window.addEventListener("beforeunload", () => {
+    saveLastSettings(); saveLastField();
+    try { localStorage.setItem("fmp_current_field", currentFieldName || ""); } catch (e) {}
+  });
   restoreLastSettings();          // pre-fill last session's settings before first render
   // Deferred so ALL module-level `let`s (lastRoute, …) are initialized first —
   // adoptField()→clearRoute() touches them, which would hit a TDZ error if run inline.
@@ -1355,6 +1358,7 @@
     try {
       restoreLastField();          // контур + вирізи (adoptField кличе clearRoute)
       restoreLastRoute(_routeSnap); // маршрут — зі знімка, без перерахунку
+      try { const _cf = localStorage.getItem("fmp_current_field"); if (_cf) currentFieldName = _cf; } catch (e) {}
     } finally { _bootRestoring = false; }
     const ss = sessionLoad();
     // Позиція карти користувача перемагає fitBounds відновленого поля.
