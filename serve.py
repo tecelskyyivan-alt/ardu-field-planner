@@ -329,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, path, payload):
         if path == "/api/build_route":
             return api.build_route(payload)
+        if path == "/api/safe_transit":
+            return api.safe_transit(payload)
         if path == "/api/export":
             return api.export(payload.get("fmt"))
         if path == "/api/save_project":
