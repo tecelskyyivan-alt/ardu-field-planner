@@ -49,5 +49,13 @@
     const raw = d * o.swathM / 1e4;
     return o.areaHa > 0 ? Math.min(raw, o.areaHa) : raw;  // cap at field area when known
   }
-  global.GEO_COVER = { haversineM, pointInRing, distInField, coveredHa, coverageCompletion };
+  // Apply a finished flight's coverage to a field record's cycle counters (pure, returns a copy).
+  // complete → increment completed_count and reset the cycle (done_ha=0); partial → accumulate done_ha.
+  function applyFieldCredit(rec, coveredHa, covComplete) {
+    const out = Object.assign({}, rec);
+    if (covComplete) { out.completed_count = (out.completed_count | 0) + 1; out.done_ha = 0; }
+    else { out.done_ha = (+out.done_ha || 0) + (coveredHa || 0); }
+    return out;
+  }
+  global.GEO_COVER = { haversineM, pointInRing, distInField, coveredHa, coverageCompletion, applyFieldCredit };
 })(typeof window !== "undefined" ? window : globalThis);
