@@ -373,3 +373,17 @@ button.active { background: var(--accent); color: #fff; border-color: var(--acce
 .follow-ctl a { display: flex; align-items: center; justify-content: center; }
 .follow-ctl a .ic { width: 18px; height: 18px; }
 .follow-ctl a.active { background: var(--accent); color: #fff; }
+
+/* ---- Flight statistics tab (#tab-stats) ---- */
+.stats-chips { display: flex; gap: 6px; margin: 6px 0 10px; }
+.chip { padding: 4px 10px; border: 1px solid #2a3340; border-radius: 14px; background: #121820; color: var(--text-dim); font-size: 12px; cursor: pointer; }
+.chip.active { color: var(--ok); border-color: #285644; background: #10201a; }
+.stats-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.stat-tile { background: #121820; border: 1px solid #202a36; border-radius: 8px; padding: 8px; text-align: center; }
+.stat-tile .sv { font-size: 18px; font-weight: 600; color: var(--text); }
+.stat-tile.headline .sv { font-size: 22px; color: var(--ok); }
+.stat-tile .sl { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+.stats-table-wrap { overflow-x: auto; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.stats-table th, .stats-table td { padding: 5px 7px; border-bottom: 1px solid #1b2430; text-align: right; white-space: nowrap; }
+.stats-table th:first-child, .stats-table td:first-child, .stats-table th:nth-child(2), .stats-table td:nth-child(2) { text-align: left; }
