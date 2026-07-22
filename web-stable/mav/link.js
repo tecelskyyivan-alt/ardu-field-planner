@@ -480,8 +480,15 @@
       // A v2 frame with mission_type=0 truncates that trailing byte off the wire (and a v1
       // frame never had it), so BOTH decode to 0 — indistinguishable, and harmless: it's
       // exactly the default mission's own type. A NONZERO mission_type (fence) is never
-      // truncated, so seeing it requires real MAVLink2+INT support from the vehicle.
-      const FENCE_V1_ERR = "Прошивка не підтримує заливку геозони (потрібен сучасний MAVLink2 mission-протокол — дрон відповідає застарілим MISSION_REQUEST).";
+      // truncated, so seeing it requires real MAVLink2 support from the vehicle — but NOT
+      // necessarily the INT message form: real ArduPilot (SITL-verified, 4.6.3) answers a
+      // FENCE request with plain MISSION_REQUEST inside a v2 frame, mission_type=1 set
+      // correctly — same dual-dialect behaviour as the type-0 mission path below (reply
+      // with a float MISSION_ITEM; at ~49.5° float32 resolution is ~0.5 m, plenty for a
+      // fence with metre-scale margins). The only real "unsupported firmware" signal is
+      // the FRAME itself being MAVLink1 (STX 0xFE) — that wire format has no mission_type
+      // field at all, so it can never correctly serve a nonzero-type transaction.
+      const FENCE_V1_ERR = "Прошивка не підтримує заливку геозони (потрібен MAVLink2 — дрон відповідає протоколом MAVLink1).";
       const stallMs = timeout || 30000;   // no-PROGRESS window (a fresh request/item resets it)
       const HARD_CAP = 600000;            // absolute ceiling (10 min) — safety net only
       const REQ_WAIT = 300;               // idle poll only; a real request wakes _recv instantly, so shorter = faster loss recovery, zero extra uplink
@@ -550,10 +557,11 @@
             }
             continue;
           }
-          // Fence (missionType!=0) requires MAVLink2+INT; a plain MISSION_REQUEST reply means
-          // the vehicle only speaks the legacy v1-style dialect for this list — it can never
-          // correctly serve our INT-only fence items. Abort cleanly rather than upload garbage.
-          if (missionType !== 0 && m.name === "MISSION_REQUEST") return { ok: false, error: FENCE_V1_ERR };
+          // Fence (missionType!=0) requires MAVLink2 — keyed on the FRAME (m.v2), NOT the
+          // message name: a v1 frame (STX 0xFE) physically cannot carry mission_type, so it
+          // can never correctly serve this transaction. A v2 plain MISSION_REQUEST is fine
+          // (ArduPilot's real fence dialect) — handled below like any other request.
+          if (missionType !== 0 && !m.v2) return { ok: false, error: FENCE_V1_ERR };
           // Cross-type traffic (e.g. a stray type-0 request/ack while we're mid-fence-upload,
           // or vice versa) is NOT for this transaction — ignore it, never answer it.
           if ((m.fields.mission_type || 0) !== missionType) continue;
@@ -580,7 +588,7 @@
         const ackDeadline = Date.now() + Math.max(stallMs, 10000);
         while (Date.now() < ackDeadline) {
           const m = await this._recv(["MISSION_ACK", "MISSION_REQUEST", "MISSION_REQUEST_INT"], REQ_WAIT);
-          if (m && missionType !== 0 && m.name === "MISSION_REQUEST") return { ok: false, error: FENCE_V1_ERR };
+          if (m && missionType !== 0 && !m.v2) return { ok: false, error: FENCE_V1_ERR };   // true v1 frame — see note above
           if (m && (m.fields.mission_type || 0) !== missionType) continue;   // cross-type — not ours
           if (m && m.name === "MISSION_ACK") {
             if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
