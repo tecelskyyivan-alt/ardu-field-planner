@@ -267,7 +267,7 @@ Object.assign(window.FMP_TR, {
     "Geofence uploaded: field boundary. Enable it yourself (FENCE_ENABLE=1) when ready.",
   "Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.":
     "Geofence uploaded: field boundary + {0} cut-outs. Enable it yourself (FENCE_ENABLE=1) when ready.",
-  "Геозону не залито: {0}. Місія залита нормально.": "Geofence NOT uploaded: {0}. Mission uploaded fine.",
+  "Геозону НЕ залито: {0}. Місія залита нормально.": "Geofence NOT uploaded: {0}. Mission uploaded fine.",
   "Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.":
     "Home is outside the field boundary — with the fence enabled, the drone will refuse to arm here.",
   "невідома помилка": "unknown error",

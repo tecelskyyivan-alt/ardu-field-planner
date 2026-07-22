@@ -2900,37 +2900,36 @@
         }
       }
       // #12p3: OPT-IN geofence upload — AFTER the mission itself is safely stored (above).
-      // Strictly gated on the checkbox (default OFF) and ArduPilot-only; NEVER touches
-      // FENCE_ENABLE/FENCE_ACTION (storage only — the pilot arms the fence themselves).
-      // A fence failure must NEVER fail/undo the mission upload: res.ok stays whatever
-      // it already is (true, since we're past the early `if (!res.ok) return res;` above).
-      if (!isInav && $("fence-upload") && $("fence-upload").checked) {
+      // Strictly gated on the checkbox (default OFF), ArduPilot-only, and a FULL-mission
+      // upload (not a battery-swap resume of a partial route — resuming the remainder isn't
+      // the moment to re-splice the fence, mirrors the safe_transit gate above). NEVER
+      // touches FENCE_ENABLE/FENCE_ACTION (storage only — the pilot arms the fence
+      // themselves). A fence failure must NEVER fail/undo the mission upload: res.ok stays
+      // whatever it already is (true, since we're past the early `if (!res.ok) return res;`
+      // above). The outcome is attached as res.fence — the CALLER composes the one message
+      // actually painted to the pilot (a setMsg here would just be silently overwritten).
+      if (!isInav && !(p && p.route && p.route.length) && $("fence-upload") && $("fence-upload").checked) {
         try {
           const boundary = boundaryFromPolygon();
           const exclusions = collectExclusions();
           if (boundary && boundary.length >= 3) {
             const fenceItems = MAV_LINK.buildFenceItems(boundary, exclusions);
-            const fres = await _mavLink.uploadMission(fenceItems, undefined, undefined, 1);
-            res.fence = fres.ok
-              ? { ok: true, count: fenceItems.length, exclusions: exclusions.length }
-              : { ok: false, error: fres.error };
-            if (fres.ok) {
-              const nExcl = exclusions.length;
-              let fm = nExcl
-                ? tf("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.", nExcl)
-                : t("Геозона залита: межа поля. Увімкни FENCE_ENABLE=1, коли будеш готовий.");
-              // HOME outside the boundary: an ENABLED fence would then refuse to arm right
-              // here — warn now, while the pilot can still move before switching it on.
-              if (!window.GEO_COVER.pointInRing(home[0], home[1], boundary)) {
-                fm += " " + t("Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.");
-              }
-              setMsg(fm, "ok");
+            if (!fenceItems.length) {
+              // Degenerate boundary after closing-vertex dedupe (<3 real vertices left) —
+              // an EMPTY upload would send COUNT=0/type=1, which CLEARS any fence already
+              // stored on the vehicle. Skip the upload entirely rather than risk that.
+              res.fence = { ok: false, error: "контур поля вироджений — замало вершин для геозони" };
             } else {
-              setMsg(tf("Геозону не залито: {0}. Місія залита нормально.", fres.error || t("невідома помилка")), "warn");
+              const fres = await _mavLink.uploadMission(fenceItems, undefined, undefined, 1);
+              res.fence = fres.ok
+                ? { ok: true, count: fenceItems.length, exclusions: exclusions.length,
+                    // HOME outside the boundary: an ENABLED fence would then refuse to arm
+                    // right here — the caller folds this into its message.
+                    homeOutside: !window.GEO_COVER.pointInRing(home[0], home[1], boundary) }
+                : { ok: false, error: fres.error };
             }
           }
         } catch (e) {
-          setMsg(tf("Геозону не залито: {0}. Місія залита нормально.", (e && e.message) || String(e)), "warn");
           res.fence = { ok: false, error: (e && e.message) || String(e) };
         }
       }
@@ -4285,7 +4284,10 @@
         verify_threw: r.verify_incomplete,   // verify raised (vs a clean ok:false return) — field-diagnostic
         verify: r.verify && { ok: r.verify.ok, verified: r.verify.verified, err: r.verify.error,
                               n_exp: r.verify.count_expected, n_act: r.verify.count_actual,
-                              diff: r.verify.mismatches } }));
+                              diff: r.verify.mismatches },
+        // #12p3: opt-in geofence outcome (undefined when the checkbox was off/not applicable)
+        fence: r.fence && { ok: r.fence.ok, count: r.fence.count, exclusions: r.fence.exclusions,
+                            error: r.fence.error, homeOutside: r.fence.homeOutside } }));
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
         promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
@@ -4310,21 +4312,38 @@
         resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
         let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
+        let kind = "ok";
         const v = r.verify;
         if (v && v.ok && v.verified) {
           m += " " + t("Перевірено зчитуванням — збігається.");
-          setMsg(m, "ok");
         } else if (v && v.ok && !v.verified) {
           m += " " + tf("Зчитана місія НЕ збігається ({0}).", (v.mismatches || []).join("; ") || t("розбіжності"));
-          setMsg(m, "error");
+          kind = "error";
         } else if (v && !v.ok) {
           // AMBER: mission stored (ACK'd) but read-back could not complete on this link.
-          setMsg(m + " " + tf("Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB.",
-            (v.error || t("таймаут"))), "warn");
+          m += " " + tf("Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB.",
+            (v.error || t("таймаут")));
+          kind = "warn";
         } else {
           if (r.warning) m += " " + r.warning;
-          setMsg(m, "ok");
         }
+        // #12p3: fold the OPT-IN geofence outcome into THIS SAME painted message — a
+        // setMsg called from inside mav_upload_mission would be overwritten by this one
+        // with zero paint frames in between, silently hiding a fence failure from the
+        // pilot (review finding). Never downgrade an already-worse verdict (error > warn > ok).
+        if (r.fence) {
+          if (r.fence.ok) {
+            const nExcl = r.fence.exclusions || 0;
+            m += " " + (nExcl
+              ? tf("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.", nExcl)
+              : t("Геозона залита: межа поля. Увімкни FENCE_ENABLE=1, коли будеш готовий."));
+            if (r.fence.homeOutside) m += " " + t("Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.");
+          } else {
+            m += " " + tf("Геозону НЕ залито: {0}. Місія залита нормально.", r.fence.error || t("невідома помилка"));
+            if (kind === "ok") kind = "warn";   // fence failure alone must not read as a clean success
+          }
+        }
+        setMsg(m, kind);
       } else {
         setMsg((r && r.error) || t("Не вдалося залити місію."), "error");
         // upload rejected → drone still holds its previous mission; undo the intent-marker
