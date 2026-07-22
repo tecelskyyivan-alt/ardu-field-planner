@@ -824,7 +824,8 @@
       lastBuildStats = { duration_s: res.duration_s, length_m: res.length_m, sprayed_ha: res.sprayed_ha };
       lastFieldAreaHa = res.area_ha || 0;
       lastWorkContext = { field: currentFieldName || "поле", area_ha: res.area_ha || 0,
-        sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1 };
+        sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1,
+        swath_m: parseFloat($("spacing").value) || 0, boundary: null };   // restore path: no live field ring
       if (res.calibration) lastCalibration = res.calibration;
       routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
       routeMarkers = L.featureGroup([
@@ -1097,7 +1098,8 @@
     lastBuildStats = { duration_s: res.duration_s, length_m: res.length_m, sprayed_ha: res.sprayed_ha };
     lastFieldAreaHa = res.area_ha || 0;
     lastWorkContext = { field: currentFieldName || "поле", area_ha: res.area_ha || 0,
-      sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1 };
+      sprayed_ha: res.sprayed_ha || 0, liquid_l: res.liquid_l || 0, sections: res.flights || 1,
+      swath_m: parseFloat($("spacing").value) || 0, boundary: boundary };   // field ring for covered-area (§8)
     if (res.calibration) lastCalibration = res.calibration;
 
     clearRoute(live);   // on a live rebuild keep the last spray overlay (viz isn't recomputed)
