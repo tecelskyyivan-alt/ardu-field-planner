@@ -105,6 +105,13 @@ class Api:
             # (radius = spacing/2, passes shortened) so a plane — which can't pivot
             # like a copter — turns INSIDE the field inset instead of overshooting.
             plane_turn = bool(params.get("plane_turn", False))
+            # plane_turn_params returns None when the R-feasible cruise at this
+            # spacing is unflyable (below min_airspeed) — in that case arcs must
+            # NOT be inserted at all (never write an unflyable AIRSPEED_CRUISE to
+            # the airframe), so plane_turn behaves as if it were off.
+            plane_params = plane_turn_params(spacing, speed) if plane_turn else None
+            plane_turn_effective = plane_turn and plane_params is not None
+            plane_skipped = 0   # reversals that fell back to a sharp turn (arc not provably clear)
             margin = max(float(params.get("margin", 0)), 0.0)
             auto_angle = bool(params.get("auto_angle", False))
             exclusions = [
@@ -173,15 +180,16 @@ class Api:
                 seed = angle                       # keep the USER's seed for every sector (bug-hunt #6)
                 sec_angles = []
                 for sec in sectors:
-                    w, sec_ang, _ = self._route_for(sec, spacing, seed, margin,
+                    w, sec_ang, sec_cover = self._route_for(sec, spacing, seed, margin,
                                                     auto_angle, exclusions, anchor_ll, sfa, optimize, speed)
                     if not w:
                         # A sub-field too small to cover must NOT be silently dropped
                         # (the operator would think the whole field is sprayed). (bug-hunt #7)
                         return {"ok": False,
                                 "error": "Сектор замалий для покриття — змісти лінію поділу або зменши крок/відступ."}
-                    if plane_turn and len(w) >= 4:
-                        w = add_plane_turns(w, spacing)
+                    if plane_turn_effective and len(w) >= 4:
+                        w, sk = add_plane_turns(w, spacing, within=sec_cover, avoid=exclusions)
+                        plane_skipped += sk
                     flights.append(w)
                     wps.extend(w)
                     sec_angles.append(round(sec_ang, 1))
@@ -195,8 +203,8 @@ class Api:
                     return {"ok": False, "error": "Поле замале для цього кроку — зменши крок або відступ."}
                 if not wps:
                     return {"ok": False, "error": "Не вдалося побудувати проходи — спробуй менший крок або інший кут."}
-                if plane_turn and len(wps) >= 4:
-                    wps = add_plane_turns(wps, spacing)
+                if plane_turn_effective and len(wps) >= 4:
+                    wps, plane_skipped = add_plane_turns(wps, spacing, within=cover, avoid=exclusions)
                 flights = None
 
             home = (*centroid(boundary), 0.0)
@@ -288,8 +296,10 @@ class Api:
                 "duration_breakdown": {k: round(v, 1) for k, v in time_est.items()},
                 "calibration": cal or None,
                 # Fixed-wing: autopilot params FMP should push at upload so the plane
-                # flies the planned arcs (None for copter / when plane_turn is off).
-                "plane_params": plane_turn_params(spacing, speed) if plane_turn else None,
+                # flies the planned arcs (None for copter / when plane_turn is off or
+                # the derived cruise speed is unflyable at this spacing).
+                "plane_params": plane_params,
+                **({"plane_turns_skipped": plane_skipped} if plane_turn else {}),
                 "angle_used": round(angle, 1),
                 "margin": margin,
                 "flights": len(flights),
