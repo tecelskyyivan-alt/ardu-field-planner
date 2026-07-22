@@ -2292,6 +2292,8 @@
   let flownRoute = null;          // [[lat,lng],…] coverage waypoints uploaded
   let flownHome = null;           // {lat,lng}
   let flownHasRtl = true;
+  let flownWpTotal = 0;           // total mission items uploaded (progress/completion)
+  let flownRestored = false;      // flown snapshot came from disk (unverified) → not green until re-checked
   let targetMarker = null;        // ring on the active (next) waypoint
   let targetLine = null;          // dashed line drone -> next waypoint
   let liveHomeMarker = null;      // ArduPilot's actual HOME (arm point)
@@ -2320,10 +2322,13 @@
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
   function missionLead() { return 2 + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0); }
-  function flownSave(route) {
+  function flownSave(route, home, hasRtl, status) {
     try {
       localStorage.setItem(FLOWN_KEY, JSON.stringify({
-        route: route, rtl: $("rtl").checked, lead: missionLead(), ts: Date.now(),
+        route: route, home: home || null,
+        rtl: (hasRtl != null ? hasRtl : $("rtl").checked),
+        lead: missionLead(), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
+        status: status || "confirmed", ts: Date.now(),
       }));
     } catch (e) {}
   }
@@ -3812,6 +3817,9 @@
       const _plane = isPlaneVehicle();
       const planeParams = (_rt && _plane) ? planeTurnParams(_sp, parseFloat($("speed").value) || 12) : null;
       const turnRadiusM = (_rt && !_plane) ? Math.max(1, Math.min(10, _sp / 2)) : 0;
+      // Intent-marker for the ACK→flownSave window: if the app is killed after the FC stored the
+      // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2).
+      try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: lastRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
         onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
         turn_radius_m: turnRadiusM,
@@ -3830,13 +3838,11 @@
       if (r && r.ok) {
         scheduleSaveField();    // uploading a mission → make sure the contour is saved
         promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
-        resumeClear();          // нова місія в дроні → стара точка продовження недійсна
         // Snapshot exactly what we uploaded — progress is computed off this, so
         // editing/rebuilding the route afterwards can't corrupt the live HUD.
         flownRoute = lastRoute ? lastRoute.slice() : null;
-        if (flownRoute) flownSave(flownRoute);   // для продовження після заміни батареї
         // HOME = the drone's actual home (arm point), matching ArduPilot — so the
-        // RTL leg in progress/ETA returns to where the drone really is.
+        // RTL leg in progress/ETA returns to where the drone really is. Set BEFORE flownSave.
         if (lastStatus && lastStatus.home_lat != null) {
           flownHome = { lat: lastStatus.home_lat, lng: lastStatus.home_lon };
         } else if (lastStatus && lastStatus.lat != null) {
@@ -3845,6 +3851,10 @@
           flownHome = lastHome;
         }
         flownHasRtl = lastRtl;
+        flownWpTotal = r.count || 0;
+        flownRestored = false;                   // fresh read-back-verified upload → trusted
+        if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed");
+        resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
         let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
         const v = r.verify;
@@ -3895,8 +3905,14 @@
       // Тепер у дроні саме залишок: план на карті і «залито» — це він.
       lastRoute = rem.rest.slice();
       flownRoute = rem.rest.slice();
+      // Derive home from the drone's live position — resume can be the first upload after a reopen,
+      // where without this flownHome=null and _progGeom builds no RTL-leg/countdown (§4.2).
+      if (lastStatus && lastStatus.home_lat != null) flownHome = { lat: lastStatus.home_lat, lng: lastStatus.home_lon };
+      else if (lastStatus && lastStatus.lat != null) flownHome = { lat: lastStatus.lat, lng: lastStatus.lon };
       flownHasRtl = $("rtl").checked;
-      flownSave(rem.rest);
+      flownWpTotal = r.count || 0;
+      flownRestored = false;
+      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed");
       promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
