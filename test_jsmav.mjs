@@ -192,5 +192,23 @@ console.log("\n== mismatch message carries a metre delta (cos-lat scaled) ==");
   link.disconnect(); t._stopHb();
 }
 
+console.log("\n== verify has its own short cap → VERIFY-INCOMPLETE, not a 10-min hang ==");
+{
+  const wpsC = Array.from({ length: 24 }, (_, i) => [49.49 + i * 1e-4, 24.0 + i * 1e-4]);
+  const exp = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wpsC, 30, true, 7);
+  // Items trickle IN-progress (150 ms < the 700 ms stall window, so the stall never fires),
+  // but the full read-back would take ~4 s — the cap must cut it WHILE progress is happening,
+  // proving it's the hard cap, not the stall window. Without the cap: runs to completion → ok:true.
+  const t = makeMissionVehicle(toStored(exp), { itemDelay: 150 });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const t0 = Date.now();
+  const v = await link.verifyMission(exp, 700);                       // 700 ms cap for the test
+  const dtMs = Date.now() - t0;
+  check("[cap] verify returned incomplete (ok:false)", v.ok === false && v.verified === false);
+  check("[cap] verify honoured the cap (< 2 s, not the full trickle)", dtMs < 2000);
+  link.disconnect(); t._stopHb();
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

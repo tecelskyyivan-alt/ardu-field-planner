@@ -549,7 +549,7 @@
     }
 
     // ---- mission download (REQUEST_LIST → COUNT → ITEM_INT → ACK) ----
-    async downloadMission(timeout) {
+    async downloadMission(timeout, hardCapMs) {
       if (!this._t) return { ok: false, error: "Немає звʼязку." };
       const stallMs = timeout || 15000;        // no-progress window (slow-RF tolerant)
       return this._withBusy(async () => {
@@ -570,7 +570,10 @@
         const n = cm.fields.count;
         const items = {};
         let seq = 0, lastReq = 0, lastProgress = Date.now();
-        const deadline = Date.now() + 600000;
+        // Standalone "Що залито в дрон" keeps the generous 10-min ceiling; verify passes a
+        // short hardCapMs so a weak/slow-but-alive link yields VERIFY-INCOMPLETE instead of
+        // freezing the HUD (streams are paused) for the full read-back.
+        const deadline = Date.now() + (hardCapMs || 600000);
         while (seq < n && Date.now() < deadline) {
           if (Date.now() - lastProgress > stallMs) break;
           if (Date.now() - lastReq > 1000) {
@@ -600,7 +603,7 @@
 
     // ---- read-back verify (download + compare to what we meant to upload) ----
     async verifyMission(expected, timeout) {
-      const dl = await this.downloadMission(timeout);
+      const dl = await this.downloadMission(timeout, timeout || 60000);
       if (!dl.ok) return { ok: false, verified: false, error: dl.error, count_expected: expected.length };
       const actual = dl.items;
       // INAV has no home slot: seq 0 IS the first waypoint, so verify its coords too
