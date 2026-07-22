@@ -15,6 +15,9 @@
 
   const FRAME_GLOBAL = 0, FRAME_GLOBAL_REL = 3, FRAME_MISSION = 2;
   const CMD_WAYPOINT = 16, CMD_RTL = 20, CMD_TAKEOFF = 22, CMD_DO_CHANGE_SPEED = 178;
+  // #12p3: ArduPilot geofence storage (MAV_MISSION_TYPE_FENCE = 1) — polygon vertices only.
+  const CMD_FENCE_INCLUSION = 5001, CMD_FENCE_EXCLUSION = 5002;   // MAV_CMD_NAV_FENCE_POLYGON_VERTEX_*
+  const MISSION_TYPE_FENCE = 1;
   const CMD_DO_SET_MODE = 176, CMD_MISSION_START = 300, CMD_ARM_DISARM = 400;
   const CMD_PAUSE_CONTINUE = 193;   // MAV_CMD_DO_PAUSE_CONTINUE (Copter: hold on track, stay in AUTO)
   const CMD_GET_HOME = 410, CMD_DO_SET_MISSION_CURRENT = 224;
@@ -113,6 +116,36 @@
         p1: 0, p2: 0, p3: 0, p4: 0, lat, lon, alt });
     for (const [lat, lon] of waypoints) add(FRAME_GLOBAL_REL, CMD_WAYPOINT, lat, lon, wpAlt);
     if (rtl) add(FRAME_MISSION, CMD_RTL, 0, 0, 0);
+    return items;
+  }
+
+  // #12p3: opt-in geofence upload. Build the field boundary as an INCLUSION polygon
+  // fence and each exclusion polygon as an EXCLUSION fence — MISSION_ITEM_INT, frame
+  // GLOBAL, param1 = that polygon's OWN vertex count, seq running across all items.
+  // ArduPilot ≥4.0 stores these as the fence (via uploadMission(..., MISSION_TYPE_FENCE)).
+  // Storage only — never sets FENCE_ENABLE/FENCE_ACTION; the caller decides.
+  // boundary: [{lat,lng},…]; exclusions: [ [{lat,lng},…], … ]. Drops a ring's closing
+  // duplicate vertex (first === last) so N/M count the REAL polygon vertices.
+  function dedupeRing(ring) {
+    if (!ring || ring.length < 3) return [];
+    const r = ring.slice();
+    const a = r[0], b = r[r.length - 1];
+    if (r.length > 3 && a.lat === b.lat && a.lng === b.lng) r.pop();
+    return r;
+  }
+  function buildFenceItems(boundary, exclusions) {
+    const items = [];
+    const addRing = (ring, cmd) => {
+      const r = dedupeRing(ring);
+      if (r.length < 3) return;
+      const n = r.length;
+      for (const p of r) {
+        items.push({ seq: items.length, frame: FRAME_GLOBAL, command: cmd, current: 0, autocontinue: 0,
+          p1: n, p2: 0, p3: 0, p4: 0, lat: p.lat, lon: p.lng, alt: 0 });
+      }
+    };
+    addRing(boundary, CMD_FENCE_INCLUSION);
+    for (const ex of (exclusions || [])) addRing(ex, CMD_FENCE_EXCLUSION);
     return items;
   }
 
@@ -436,8 +469,19 @@
     // items — only a genuinely stalled link (no request for `stallMs`) fails. The
     // old fixed 20 s cap made large uploads over low-bandwidth links time out
     // mid-transfer even though they were progressing fine.
-    async uploadMission(items, timeout, onProgress) {
+    // `missionType` (default 0 = the normal mission) is the trailing MAVLink2 mission_type
+    // extension field (FENCE=1 — #12p3). Threaded through COUNT/ITEM_INT sends AND used to
+    // FILTER incoming REQUEST(_INT)/ACK: any reply carrying a DIFFERENT mission_type (e.g. a
+    // stray type-0 request mid-fence-upload) is cross-transaction noise, ignored, never
+    // answered. Default 0 keeps every existing call byte-identical.
+    async uploadMission(items, timeout, onProgress, missionType) {
       if (!this._t) return { ok: false, error: "Немає звʼязку. Спочатку підключись до дрона." };
+      missionType = missionType || 0;
+      // A v2 frame with mission_type=0 truncates that trailing byte off the wire (and a v1
+      // frame never had it), so BOTH decode to 0 — indistinguishable, and harmless: it's
+      // exactly the default mission's own type. A NONZERO mission_type (fence) is never
+      // truncated, so seeing it requires real MAVLink2+INT support from the vehicle.
+      const FENCE_V1_ERR = "Прошивка не підтримує заливку геозони (потрібен сучасний MAVLink2 mission-протокол — дрон відповідає застарілим MISSION_REQUEST).";
       const stallMs = timeout || 30000;   // no-PROGRESS window (a fresh request/item resets it)
       const HARD_CAP = 600000;            // absolute ceiling (10 min) — safety net only
       const REQ_WAIT = 300;               // idle poll only; a real request wakes _recv instantly, so shorter = faster loss recovery, zero extra uplink
@@ -451,13 +495,13 @@
         // request, so its stall-recovery must differ from ArduPilot (see loop).
         const isInav = this._tlm.autopilot != null && this._tlm.autopilot !== 3;
         let _countN = 0;
-        const sendCount = () => { _countN++; this._log("mission: COUNT " + n + " sent (#" + _countN + ")"); this._send("MISSION_COUNT", { target_system: ts, target_component: tc, count: n, mission_type: 0 }); };
+        const sendCount = () => { _countN++; this._log("mission: COUNT " + n + " sent (#" + _countN + ")"); this._send("MISSION_COUNT", { target_system: ts, target_component: tc, count: n, mission_type: missionType }); };
         const sendItem = (seq, v1) => {
           const it = items[seq];
           const f = {
             target_system: ts, target_component: tc, seq: it.seq, frame: it.frame, command: it.command,
             current: it.current, autocontinue: it.autocontinue, param1: it.p1, param2: it.p2, param3: it.p3, param4: it.p4,
-            z: it.alt, mission_type: 0,
+            z: it.alt, mission_type: missionType,
           };
           // Match the item type to what the vehicle ASKED for: a v1 MISSION_REQUEST wants
           // MISSION_ITEM (float lat/lon in degrees) — INAV / older stacks reject the INT
@@ -506,6 +550,13 @@
             }
             continue;
           }
+          // Fence (missionType!=0) requires MAVLink2+INT; a plain MISSION_REQUEST reply means
+          // the vehicle only speaks the legacy v1-style dialect for this list — it can never
+          // correctly serve our INT-only fence items. Abort cleanly rather than upload garbage.
+          if (missionType !== 0 && m.name === "MISSION_REQUEST") return { ok: false, error: FENCE_V1_ERR };
+          // Cross-type traffic (e.g. a stray type-0 request/ack while we're mid-fence-upload,
+          // or vice versa) is NOT for this transaction — ignore it, never answer it.
+          if ((m.fields.mission_type || 0) !== missionType) continue;
           if (m.name === "MISSION_ACK") {
             this._log("mission: ACK type " + m.fields.type);
             if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
@@ -529,6 +580,8 @@
         const ackDeadline = Date.now() + Math.max(stallMs, 10000);
         while (Date.now() < ackDeadline) {
           const m = await this._recv(["MISSION_ACK", "MISSION_REQUEST", "MISSION_REQUEST_INT"], REQ_WAIT);
+          if (m && missionType !== 0 && m.name === "MISSION_REQUEST") return { ok: false, error: FENCE_V1_ERR };
+          if (m && (m.fields.mission_type || 0) !== missionType) continue;   // cross-type — not ours
           if (m && m.name === "MISSION_ACK") {
             if (m.fields.type === 0) { this._tlm.wp_total = n; return { ok: true, count: n }; }
             return { ok: false, error: this._rejectMission(m.fields.type) };
@@ -760,5 +813,5 @@
     }
   }
 
-  root.MAV_LINK = { MavLink, buildMissionItems, buildMissionItemsInav, humanize };
+  root.MAV_LINK = { MavLink, buildMissionItems, buildMissionItemsInav, buildFenceItems, humanize };
 })(typeof globalThis !== "undefined" ? globalThis : this);
