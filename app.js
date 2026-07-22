@@ -551,7 +551,7 @@
     // nowhere else) → never falls through to field/exclusion adoption.
     if (e.layerType === "marker" || e.layerType === "polyline") {
       const kind = e.layerType === "marker" ? "pole" : "line";
-      addHazardFromLayer(e.layer, kind); hazardMode = null;
+      addHazardFromLayer(e.layer, kind); hazardMode = null; _hazHandler = null;
       setMsg(kind === "pole" ? "Стовп додано." : "ЛЕП додано.", "ok");
       return;
     }
@@ -572,7 +572,7 @@
   });
   // Reset the "next polygon is an exclusion" flag whenever a draw ends (finish or
   // cancel), so a cancelled "Додати виріз" can't turn the next field into a cutout.
-  map.on(L.Draw.Event.DRAWSTOP, () => { drawingExclusion = false; hazardMode = null; });
+  map.on(L.Draw.Event.DRAWSTOP, () => { drawingExclusion = false; hazardMode = null; _hazHandler = null; });
 
   // ---- Контур / Виріз chooser INJECTED into the Leaflet.draw action bar, right
   // beside «Фініш / Видалити останню точку / Скасувати», in the SAME toolbar style
@@ -730,6 +730,7 @@
 
   // ---- hazards (#13): manual pole / power-line markers the route (and #12 transit/fence) avoids ----
   let hazardMode = null;      // 'pole' | 'line' while a hazard is being drawn
+  let _hazHandler = null;     // the active L.Draw.Marker/Polyline (so a new/abandoned one can be disabled)
   const HAZARD_LINE = "#ffb020", HAZARD_OSM = "#b06a2e";
   function hazardLayers() { const o = []; drawnItems.eachLayer((l) => { if (l._k === "hazard") o.push(l); }); return o; }
   const hazardItems = {
@@ -798,10 +799,12 @@
     return out;
   }
   function startHazardDraw(kind) {
+    cancelToolbarDraw();                                    // stop any active field/exclusion polygon draw
+    if (_hazHandler) { try { _hazHandler.disable(); } catch (e) {} _hazHandler = null; }   // and any abandoned hazard draw
     hazardMode = kind;
-    const h = kind === "pole" ? new L.Draw.Marker(map, {})
+    _hazHandler = kind === "pole" ? new L.Draw.Marker(map, {})
       : new L.Draw.Polyline(map, { shapeOptions: hazardStyle({ source: "manual" }) });
-    h.enable();
+    _hazHandler.enable();
     setMsg(kind === "pole" ? "Постав стовп на карті." : "Малюй лінію ЛЕП (подвійний клік = кінець).", null);
   }
   function renderHazardList() {
@@ -1742,6 +1745,7 @@
     const _eb = $("edit-contour"); if (_eb) _eb.disabled = true;
     drawnItems.clearLayers();
     exclusionItems.clearLayers();
+    renderHazardList();            // #13: hazards live in drawnItems (already cleared) → refresh the sidebar
     if (sectorsLayer) { map.removeLayer(sectorsLayer); sectorsLayer = null; }
     fieldPolygon = null;
     setFieldArea();                // remove the live area label
@@ -2020,6 +2024,9 @@
     applyParams(proj.params);
     exclusionItems.clearLayers();
     removeByKind("split");          // drop the previous field's split lines (bug-hunt #1)
+    hazardItems.clearLayers();      // #13: drop the previous field's hazards (else they leak into the new build/save)
+    (Array.isArray(proj.hazards) ? proj.hazards : []).forEach((m) => { if (m && m.geom && m.geom.length) addHazardLayer(m); });
+    renderHazardList();
     if (sectorsLayer) { map.removeLayer(sectorsLayer); sectorsLayer = null; }
     if (Array.isArray(proj.exclusions)) {
       proj.exclusions.forEach((ex) => {
@@ -2094,7 +2101,7 @@
     if (lastWorkContext) lastWorkContext.field = name;
     const prev = (recs || []).find((r) => r.name === name);
     const now = Date.now();
-    const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
+    const rec = { name, field, params: collectParams(), exclusions: collectExclusions(), hazards: collectHazards(),
       created: (prev && prev.created) || now, updated: now, area_ha: lastFieldAreaHa || 0, uploaded_at: now,
       // MERGE-preserve #8 cycle progress across re-uploads (else every upload zeroes it)
       done_ha: (prev && +prev.done_ha) || 0, completed_count: (prev && prev.completed_count) || 0,
@@ -2115,7 +2122,7 @@
     let n = 1; while (names.has("Поле " + n)) n++;
     const name = "Поле " + n;
     const now = Date.now();
-    const rec = { name, field, params: collectParams(), exclusions: collectExclusions(),
+    const rec = { name, field, params: collectParams(), exclusions: collectExclusions(), hazards: collectHazards(),
       created: now, updated: now, area_ha: lastFieldAreaHa || 0,
       done_ha: 0, completed_count: 0, last_flight_at: null };
     const ok = await fldPut(rec);
