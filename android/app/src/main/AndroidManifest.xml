@@ -26,6 +26,14 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
+    <!-- Pinned live-telemetry notification (#3): keeps mode/battery/altitude/speed/waypoint/
+         flight-time visible (and the MAVLink bridges alive) while the screen is off / the app
+         is backgrounded mid-flight, like a music-player notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -82,5 +90,12 @@
                 <data android:mimeType="text/xml" />
             </intent-filter>
         </activity>
+
+        <!-- Pinned live-telemetry notification (#3). Started/stopped only from our own JS via
+             NotifyBridge (AndroidNotify) — never exported to other apps. -->
+        <service
+            android:name=".TelemetryService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

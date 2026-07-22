@@ -41,6 +41,9 @@ import java.util.UUID
  *
  * Reconstructed from the JS contract + UdpBridge/SerialBridge patterns — the original lived only in
  * the build tree and was never committed. NOTE: BLE GATT is device-specific; validate on hardware.
+ *
+ * Every inbound notification is also mirrored into TelemetryHub (the pinned live-telemetry
+ * notification, #3) — a no-op when that service isn't running.
  */
 class BleBridge(private val act: MainActivity, private val web: WebView) {
 
@@ -216,7 +219,10 @@ class BleBridge(private val act: MainActivity, private val web: WebView) {
         override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
             if (ch.uuid == notifyChar?.uuid) {
                 val v = ch.value ?: return
-                if (v.isNotEmpty()) emit("window.__androidBleData", Base64.encodeToString(v, Base64.NO_WRAP))
+                if (v.isNotEmpty()) {
+                    TelemetryHub.feed(v)   // pinned notification tap (#3) — no-op unless the service is running
+                    emit("window.__androidBleData", Base64.encodeToString(v, Base64.NO_WRAP))
+                }
             }
         }
 
