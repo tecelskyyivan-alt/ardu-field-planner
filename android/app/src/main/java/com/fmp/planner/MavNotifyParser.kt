@@ -16,7 +16,10 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
     data class Snapshot(
         val mode: Int, val modeName: String, val vehicleType: Int, val armed: Boolean?,
         val battV: Double?, val battPct: Int?, val altM: Double?, val gsMs: Double?,
-        val wpSeq: Int?, val wpTotal: Int?, val flightSec: Long, val distM: Double, val progressPct: Int?
+        val wpSeq: Int?, val wpTotal: Int?, val flightSec: Long, val distM: Double, val progressPct: Int?,
+        /** ms since the last successfully CRC-verified frame; null if none has ever arrived. Lets
+         *  TelemetryService detect a dead link and mark the notification stale (see STALE_MS there). */
+        val ageMs: Long?
     )
 
     companion object {
@@ -50,6 +53,7 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
     private var distM = 0.0
     private var lastLat: Double? = null
     private var lastLon: Double? = null
+    private var lastRxMs = 0L
 
     /** wp_total is trusted ONLY from JS (it uploaded the mission); MISSION_CURRENT.total is optional. */
     fun setMission(total: Int) { wpTotalPushed = if (total > 0) total else 0 }
@@ -59,13 +63,23 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
     }
 
     fun snapshot(): Snapshot {
+        // Deliberate choice (staleness fix, IMPORTANT finding): flightSec keeps ticking on wall-clock
+        // time even while the link is dead and lastArmed is stale — we have no reliable disarm signal
+        // without a live HEARTBEAT, so freezing the timer would just replace one wrong signal (a dead
+        // link disguised as live) with another (a flight that "ended" while possibly still airborne).
+        // TelemetryService surfaces the actual staleness via the title/ageMs instead of stopping this.
         val live = if (lastArmed && flightStartMs > 0) nowMs() - flightStartMs else 0
         val fSec = (flightAccumMs + live) / 1000
         val wt = if (wpTotalPushed > 0) wpTotalPushed else null
         val pct = if (wt != null && wt > 1 && wpSeq != null)
             (wpSeq!!.coerceIn(0, wt) * 100) / wt else null
+        // distM (unlike flightSec) is NOT wall-clock-derived: it only grows inside the msgId==33
+        // handler below, on a freshly arrived GLOBAL_POSITION_INT frame. While the stream is dead no
+        // frames arrive, so distM is naturally frozen during a gap — nothing here needs to special-case
+        // staleness for distance.
+        val age = if (lastRxMs > 0) nowMs() - lastRxMs else null
         return Snapshot(mode, modeName, vehicleType, armed, battV, battPct, altM, gsMs,
-            wpSeq, wt, fSec, distM, pct)
+            wpSeq, wt, fSec, distM, pct, age)
     }
 
     fun push(bytes: ByteArray) {
@@ -113,6 +127,7 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
         acc(extra and 0xff)
         val wire = u16(a, payStart + len)
         if (crc != wire) return BAD
+        lastRxMs = nowMs()   // staleness fix: only CRC-verified, modeled frames count as "link alive"
         ingest(msgId, a, payStart, len)
         return total
     }
