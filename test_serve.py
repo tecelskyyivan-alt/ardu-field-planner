@@ -144,6 +144,28 @@ _stray = (_os.listdir(_syncdir) if _os.path.isdir(_syncdir) else [])
 check("no file written outside sync/ (and no stray file) for any malformed device",
       not any("evil" in n or "bad" in n for n in _stray))
 
+print("\n== non-dict JSON body -> clean rejection, not a dropped connection (review I1) ==")
+# A body can be syntactically valid JSON yet not an object (null/number/array/string/
+# bool). Before the fix this crashed _sync_device's payload.get(...) with an
+# AttributeError OUTSIDE the try/except that guards the Api dispatch, so do_POST threw
+# and the connection was dropped instead of a clean {"ok": false, ...} response — a
+# broken urlopen() call here (ConnectionResetError/RemoteDisconnected) IS a failure.
+for _bad_body in (None, 42, [1, 2], "just a string", True):
+    try:
+        s, r = post("/api/sync", _bad_body)
+        clean = s == 200 and isinstance(r, dict) and r.get("ok") is False
+    except Exception as exc:
+        clean = False
+        print(f"      (connection error for body {_bad_body!r}: {exc})")
+    check(f"/api/sync with non-dict body {_bad_body!r} -> clean ok:false, no dropped connection", clean)
+    try:
+        s, r = post("/api/sync_get", _bad_body)
+        clean = s == 200 and isinstance(r, dict) and r.get("ok") is False
+    except Exception as exc:
+        clean = False
+        print(f"      (connection error for body {_bad_body!r}: {exc})")
+    check(f"/api/sync_get with non-dict body {_bad_body!r} -> clean ok:false, no dropped connection", clean)
+
 print("\n== offline map tile proxy (/tiles/ — desktop offline maps) ==")
 import os as _os2
 _png = b"\x89PNG\r\n\x1a\n" + b"FAKE-TILE-BYTES"

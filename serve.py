@@ -397,6 +397,13 @@ class Handler(BaseHTTPRequestHandler):
 
     _SYNC_DEVICE_RE = None   # compiled lazily in _sync_device (avoid a module-level `import re`)
 
+    # Access control note (#10, v1 tradeoff): the client-generated device id is the
+    # ONLY per-device selector here — there's no auth token binding a device to its
+    # snapshot. This relies entirely on the deployment's site-wide basic-auth (the
+    # same boundary /api/log already trusts) to keep randoms off the endpoint; a
+    # request that clears basic-auth can read/overwrite ANY device's backup by
+    # guessing/observing its id. Accepted for v1 on Ivan's own single-operator
+    # server — do not deploy this behind a public, unauthenticated origin.
     def _sync_device(self, payload):
         """Validate+return the client device id, or None (caller rejects). Unlike
         /api/log (sanitize-and-continue), a malformed id here is REJECTED outright —
@@ -412,7 +419,11 @@ class Handler(BaseHTTPRequestHandler):
     def _store_sync(self, payload):
         """Persist a device's opt-in backup-sync snapshot under sync/<device>.json
         (#10) — fields / flight stats / settings, so a lost or replaced phone
-        doesn't lose them. One file per device; each push overwrites the last."""
+        doesn't lose them. One file per device; each push overwrites the last.
+        Write is atomic (temp file + os.replace) and the caller (do_POST) holds
+        the shared server lock across this call, so two racing pushes for the
+        same device can't interleave and a concurrent GET never sees a torn
+        file (review M3)."""
         dev = self._sync_device(payload)
         if dev is None:
             return {"ok": False, "error": "невірний ідентифікатор пристрою"}
@@ -427,11 +438,13 @@ class Handler(BaseHTTPRequestHandler):
             "data": data,
         }
         syncdir = os.path.join(HERE, "sync")
+        fp = os.path.join(syncdir, f"{dev}.json")
+        tmp_fp = fp + ".tmp"
         try:
             os.makedirs(syncdir, exist_ok=True)
-            fp = os.path.join(syncdir, f"{dev}.json")
-            with open(fp, "w", encoding="utf-8") as f:
+            with open(tmp_fp, "w", encoding="utf-8") as f:
                 json.dump(snapshot, f, ensure_ascii=False)
+            os.replace(tmp_fp, fp)      # atomic on POSIX/Windows — no torn reads
             # Disk-fill guard (same reasoning as _store_log): a real user has 1-2
             # devices; cap distinct snapshots and prune the oldest beyond that.
             try:
@@ -444,10 +457,16 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return {"ok": True, "ts": snapshot["ts"]}
         except Exception as exc:
+            try:
+                os.remove(tmp_fp)
+            except OSError:
+                pass
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     def _get_sync(self, payload):
-        """Return the last snapshot pushed by this device, if any (#10)."""
+        """Return the last snapshot pushed by this device, if any (#10). See the
+        access-control note above _sync_device — the device id is the only
+        selector, trusting the deployment's site-wide basic-auth."""
         dev = self._sync_device(payload)
         if dev is None:
             return {"ok": False, "error": "невірний ідентифікатор пристрою"}
@@ -481,13 +500,24 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(raw.decode("utf-8") or "{}")
         except Exception:
             payload = {}
+        # A body can be syntactically valid JSON yet NOT an object (`null`, `42`,
+        # `[1]`, `"str"`, `true`) — every handler below calls payload.get(...), which
+        # would raise AttributeError on a non-dict and (since these handlers sit
+        # OUTSIDE the try/except that guards _dispatch) crash out of do_POST with no
+        # HTTP response at all, dropping the client's connection. Normalize once,
+        # here, for every POST path (review I1).
+        if not isinstance(payload, dict):
+            payload = {}
         # Client diagnostic-log upload — stored to logs/, never goes through the Api.
         if self.path == "/api/log":
             self._send(200, json.dumps(self._store_log(payload)))
             return
         # Opt-in backup-sync (#10) — stored to sync/, never goes through the Api.
+        # The write path shares the same lock the Api dispatch below uses (M3).
         if self.path == "/api/sync":
-            self._send(200, json.dumps(self._store_sync(payload)))
+            with _lock:
+                res = self._store_sync(payload)
+            self._send(200, json.dumps(res))
             return
         if self.path == "/api/sync_get":
             self._send(200, json.dumps(self._get_sync(payload)))
