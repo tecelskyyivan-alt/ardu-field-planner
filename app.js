@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.80";
+  const APP_VERSION = "2.5.81";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -552,6 +552,10 @@
   map.on(L.Draw.Event.CREATED, (e) => {
     // A marker or polyline is ALWAYS a hazard (the toolbar is polygon-only; these types are used
     // nowhere else) → never falls through to field/exclusion adoption.
+    if (e.layerType === "polyline" && cutDrawing) {   // ЛЕП-виріз вручну (ТЗ Івана)
+      makeManualCut(e.layer);
+      return;
+    }
     if (e.layerType === "marker" || e.layerType === "polyline") {
       const kind = e.layerType === "marker" ? "pole" : "line";
       addHazardFromLayer(e.layer, kind); hazardMode = null; _hazHandler = null;
@@ -575,7 +579,7 @@
   });
   // Reset the "next polygon is an exclusion" flag whenever a draw ends (finish or
   // cancel), so a cancelled "Додати виріз" can't turn the next field into a cutout.
-  map.on(L.Draw.Event.DRAWSTOP, () => { drawingExclusion = false; hazardMode = null; _hazHandler = null; });
+  map.on(L.Draw.Event.DRAWSTOP, () => { drawingExclusion = false; hazardMode = null; _hazHandler = null; cutDrawing = false; });
 
   // ---- Контур / Виріз chooser INJECTED into the Leaflet.draw action bar, right
   // beside «Фініш / Видалити останню точку / Скасувати», in the SAME toolbar style
@@ -846,41 +850,6 @@
   // EXPERIMENTAL OSM power-line import (Ivan asked «підтягнути ЛЕП для тесту»). NEVER authoritative:
   // a line missing from OSM = false "clear" = danger → imported as source:'osm', avoid:false (display
   // only, does NOT reroute the mission) with a permanent "verify with your eyes" warning.
-  async function importOsmPowerLines() {
-    if (!fieldPolygon) { setMsg("Спочатку задай поле — імпорт ЛЕП шукає в його межах.", "error"); return; }
-    if (!navigator.onLine) { setMsg("Немає інтернету — імпорт ЛЕП недоступний офлайн.", "error"); return; }
-    const b = fieldPolygon.getBounds().pad(0.15);
-    const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
-    const q = `[out:json][timeout:25];(way["power"~"^(line|minor_line)$"](${bbox});node["power"~"^(tower|pole)$"](${bbox}););out geom;`;
-    setMsg("Шукаю ЛЕП в OSM…", null);
-    const mirrors = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
-    let data = null;
-    for (const url of mirrors) {
-      const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 25000);
-      try {
-        const r = await fetch(url, { method: "POST", signal: ac.signal,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(q) });
-        clearTimeout(to);
-        if (!r.ok) continue;
-        data = await r.json(); break;
-      } catch (e) { clearTimeout(to); }
-    }
-    if (!data || !data.elements) { setMsg("Overpass недоступний — спробуй пізніше (планування не заблоковано).", "error"); return; }
-    const existing = new Set(collectHazards().filter((m) => m.osm).map((m) => m.osm.type + m.osm.id));
-    let added = 0;
-    for (const el of data.elements) {
-      if (added >= 800) break;
-      if (existing.has(el.type + el.id)) continue;
-      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) {
-        addHazardLayer({ kind: "line", geom: el.geometry.map((p) => ({ lat: p.lat, lng: p.lon })), source: "osm", avoid: false, osm: { type: el.type, id: el.id } }); added++;
-      } else if (el.type === "node" && el.lat != null) {
-        addHazardLayer({ kind: "pole", geom: [{ lat: el.lat, lng: el.lon }], source: "osm", avoid: false, osm: { type: el.type, id: el.id } }); added++;
-      }
-    }
-    scheduleSaveField(); renderHazardList();
-    if (!added) setMsg("ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима!", "warn");
-    else setMsg(tf("Підтягнуто {0} об'єктів ЛЕП з OSM (лише показ — перевір очима; уникання вимкнено за замовч.).", added), "ok");
-  }
   // (hazard-button wiring lives AFTER the `const $` declaration below — a top-level
   // `$(...)` call up here is a TemporalDeadZone ReferenceError that kills the whole
   // IIFE at boot: map renders, every later feature is dead. Field incident 2.5.72.)
@@ -947,7 +916,11 @@
     try {
       const contour = boundaryFromPolygon();
       if (!contour || contour.length < 3) { localStorage.removeItem("fmp_last_field"); return; }
-      const exclusions = exclusionItems.getLayers().map(ringOf).filter((r) => r.length >= 3);
+      // Store each exclusion as {r:ring, c:cut-tag} so auto-cuts stay replaceable across a reopen
+      // (legacy bare-array saves still load — see restoreLastField). Hand-drawn cuts have c=null.
+      const exclusions = exclusionItems.getLayers()
+        .map((l) => ({ r: ringOf(l), c: l._cut || null }))
+        .filter((o) => o.r.length >= 3);
       const hazards = collectHazards();
       try {
         localStorage.setItem("fmp_last_field", JSON.stringify({ contour, exclusions, hazards }));
@@ -991,9 +964,13 @@
     if (!s || !s.contour || s.contour.length < 3) return;
     try {
       adoptField(L.polygon(s.contour.map((p) => [p.lat, p.lng]), { color: "#2d7ff9", weight: 2 }));
-      (s.exclusions || []).forEach((r) => {
-        if (r && r.length >= 3)
-          addExclusionLayer(L.polygon(r.map((p) => [p.lat, p.lng]), { color: "#ff4d4d", weight: 2 }));
+      (s.exclusions || []).forEach((item) => {
+        const ring = Array.isArray(item) ? item : (item && item.r);   // legacy array | {r,c}
+        if (ring && ring.length >= 3) {
+          const poly = L.polygon(ring.map((p) => [p.lat, p.lng]), { color: "#ff4d4d", weight: 2 });
+          addExclusionLayer(poly);
+          if (item && item.c) poly._cut = item.c;                     // keep auto/manual tag on restore
+        }
       });
       hazardItems.clearLayers();
       (s.hazards || []).forEach((m) => { if (m && m.geom && m.geom.length) addHazardLayer(m); });
@@ -1173,54 +1150,111 @@
     }
   }
 
-  // #13-ТЗ (Іван): «по ЛЕП потрібна кнопка виріз з шириною» — перетворює лінії ЛЕП
-  // (ручні та OSM) на СПРАВЖНІ вирізи-капсули заданої повної ширини. Далі це звичайні
-  // вирізи: маршрут їх обходить, вони зберігаються з полем, йдуть у геозону (#12p3) і
-  // safe-transit. Лінії-джерела лишаються на карті як показ (avoid=false — обхід тепер
-  // забезпечує сам виріз, без подвійного коридору).
-  function hazardLinesToCuts() {
+  // ---- ІНСТРУМЕНТ ВИРІЗУ ЛЕП (#13, ТЗ Івана: одна кнопка авто, одна ручна) --------------
+  // Лінія/точка ЛЕП → полігон-виріз заданої ШИРИНИ (капсула / коло). Це справжні вирізи:
+  // маршрут їх обходить, вони зберігаються з полем і йдуть у геозону/safe-transit. Кожен
+  // виріз тегується (_cut='auto'|'manual'): АВТО-вирізи повністю замінюються при повторному
+  // запуску (зміна ширини → новий виріз замість старого, без накладання); ручні — лишаються.
+  function cutWidthM() { return parseFloat(($("cut-width") || {}).value) || 0; }
+  function _offsetToRings(geoms, kind, widthM) {
     const C = window.ClipperLib;
-    if (!C) { setMsg("ClipperLib відсутній — виріз недоступний.", "error"); return; }
-    const w = parseFloat(($("haz-cut-width") || {}).value) || 0;
-    if (!(w > 0)) { setMsg("Задай ширину вирізу, м.", "error"); return; }
-    const lines = hazardLayers().filter((l) => (l._hz || {}).kind === "line");
-    if (!lines.length) { setMsg("Нема ліній ЛЕП — додай «+ ЛЕП» або підтягни з OSM.", "error"); return; }
-    const geoms = lines.map((l) => _hzGeom(l, "line")).filter((g) => g.length >= 2);
+    if (!C || !(widthM > 0)) return [];
     let la = 0, lo = 0, n = 0;
     geoms.forEach((g) => g.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
+    if (!n) return [];
     la /= n; lo /= n;
     const mlat = 111320, mlng = (111320 * Math.cos(la * Math.PI / 180)) || 1, SC = 100;
     const toClip = (g) => g.map((p) => ({ X: Math.round((p.lng - lo) * mlng * SC), Y: Math.round((p.lat - la) * mlat * SC) }));
     const toLL = (path) => path.map((pt) => [la + pt.Y / SC / mlat, lo + pt.X / SC / mlng]);
-    let made = 0;
-    try {
-      geoms.forEach((g) => {
-        const co = new C.ClipperOffset(2, 0.25 * SC);
-        co.AddPath(toClip(g), C.JoinType.jtRound, C.EndType.etOpenRound);   // line → capsule
-        const sol = new C.Paths(); co.Execute(sol, (w / 2) * SC);
-        sol.forEach((path) => {
-          if (path.length < 3) return;
-          const poly = L.polygon(toLL(path));
-          addExclusionLayer(poly);
-          made++;
-        });
-      });
-    } catch (e) { setMsg("Не вдалося побудувати виріз: " + e, "error"); return; }
-    // The cut now owns the avoidance — demote the source lines to display-only so the
-    // clearance corridor isn't applied on top of the exclusion (no double margin).
-    lines.forEach((l) => { if (l._hz) l._hz.avoid = false; });
+    const rings = [];
+    geoms.forEach((g) => {
+      if (!g.length) return;
+      const co = new C.ClipperOffset(2, 0.25 * SC);
+      const et = (kind === "point" || g.length < 2) ? C.EndType.etOpenRound : C.EndType.etOpenRound;
+      co.AddPath(toClip(g.length < 2 ? [g[0], g[0]] : g), C.JoinType.jtRound, et);
+      const sol = new C.Paths(); co.Execute(sol, (widthM / 2) * SC);
+      sol.forEach((path) => { if (path.length >= 3) rings.push(toLL(path)); });
+    });
+    return rings;
+  }
+  function addCutLayer(ringLL, tag) {
+    const poly = L.polygon(ringLL);
+    addExclusionLayer(poly);
+    poly._cut = tag || "manual";
+    return poly;
+  }
+  function clearAutoCuts() {
+    exclusionItems.getLayers().forEach((l) => { if (l._cut === "auto") exclusionItems.removeLayer(l); });
+  }
+  // АВТО: знайти ЛЕП в OSM у межах поля і одразу вирізати (замінюючи попередні авто-вирізи).
+  async function cutAutoFromOsm() {
+    if (!fieldPolygon) { setMsg("Спочатку задай поле — пошук ЛЕП іде в його межах.", "error"); return; }
+    if (!navigator.onLine) { setMsg("Немає інтернету — авто-пошук ЛЕП недоступний офлайн.", "error"); return; }
+    const w = cutWidthM();
+    if (!(w > 0)) { setMsg("Задай ширину вирізу, м.", "error"); return; }
+    const b = fieldPolygon.getBounds().pad(0.15);
+    const bbox = b.getSouth() + "," + b.getWest() + "," + b.getNorth() + "," + b.getEast();
+    const q = "[out:json][timeout:25];(way[\"power\"~\"^(line|minor_line)$\"](" + bbox + ");node[\"power\"~\"^(tower|pole)$\"](" + bbox + "););out geom;";
+    setMsg("Шукаю ЛЕП в OSM…", null);
+    const mirrors = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+    let data = null;
+    for (const url of mirrors) {
+      const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 25000);
+      try {
+        const r = await fetch(url, { method: "POST", signal: ac.signal,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(q) });
+        clearTimeout(to);
+        if (!r.ok) continue;
+        data = await r.json(); break;
+      } catch (e) { clearTimeout(to); }
+    }
+    if (!data || !data.elements) { setMsg("Overpass недоступний — спробуй пізніше або накресли виріз вручну (планування не заблоковано).", "error"); return; }
+    const lines = [], points = [];
+    let taken = 0;
+    for (const el of data.elements) {
+      if (taken >= 800) break;
+      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+        lines.push(el.geometry.map((p) => ({ lat: p.lat, lng: p.lon }))); taken++;
+      } else if (el.type === "node" && el.lat != null) {
+        points.push([{ lat: el.lat, lng: el.lon }]); taken++;
+      }
+    }
+    if (!taken) { setMsg("ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима або накресли вручну!", "warn"); return; }
+    clearAutoCuts();                                   // replace previous auto cuts (no stacking)
+    const rings = _offsetToRings(lines, "line", w).concat(_offsetToRings(points, "point", w));
+    rings.forEach((r) => addCutLayer(r, "auto"));
     clearRoute(); scheduleSaveField(); renderHazardList();
-    setMsg(tf("Створено {0} виріз(ів) шириною {1} м з ліній ЛЕП. Перебудуй маршрут — він їх обійде; вирізи підуть і в геозону.", made, w), "ok");
+    const warn = $("hazard-osm-warn"); if (warn) warn.style.display = "";
+    setMsg(tf("Вирізано {0} ділянок ЛЕП з OSM (ширина {1} м). OSM неповний — ПЕРЕВІР ОЧИМА! Зміни ширину й тисни ще раз — старі авто-вирізи заміняться. Перебудуй маршрут.", rings.length, w), "warn");
+  }
+  // ВРУЧНУ: увімкнути креслення лінії; на завершенні — виріз-капсула поточної ширини.
+  let cutDrawing = false;
+  function startCutDraw() {
+    if (!fieldPolygon) { setMsg("Спочатку задай поле.", "error"); return; }
+    if (!(cutWidthM() > 0)) { setMsg("Задай ширину вирізу, м.", "error"); return; }
+    cancelToolbarDraw();
+    if (_hazHandler) { try { _hazHandler.disable(); } catch (e) {} _hazHandler = null; }
+    cutDrawing = true; hazardMode = "cut";
+    _hazHandler = new L.Draw.Polyline(map, { shapeOptions: { color: "#ff4d4d", weight: 3, dashArray: "4 4" } });
+    _hazHandler.enable();
+    setMsg("Веди лінію вздовж ЛЕП (подвійний клік = кінець) — стане вирізом заданої ширини.", null);
+  }
+  function makeManualCut(layer) {
+    const geom = _hzGeom(layer, "line");
+    cutDrawing = false; hazardMode = null; _hazHandler = null;
+    if (geom.length < 2) { setMsg("Замало точок для лінії.", "error"); return; }
+    const rings = _offsetToRings([geom], "line", cutWidthM());
+    rings.forEach((r) => addCutLayer(r, "manual"));
+    clearRoute(); scheduleSaveField(); renderHazardList();
+    setMsg(tf("Виріз завширшки {0} м створено. Перебудуй маршрут — він його обійде.", cutWidthM()), "ok");
   }
 
   // Hazard-subsystem buttons (#13): wired HERE, not next to their functions above —
   // `$` is a const and does not exist before this line (TDZ). See the note at the
   // hazards section.
-  if ($("haz-add-pole")) $("haz-add-pole").addEventListener("click", () => startHazardDraw("pole"));
-  if ($("haz-add-line")) $("haz-add-line").addEventListener("click", () => startHazardDraw("line"));
-  if ($("haz-import-osm")) $("haz-import-osm").addEventListener("click", () => importOsmPowerLines());
+  if ($("cut-auto")) $("cut-auto").addEventListener("click", () => cutAutoFromOsm());
+  if ($("cut-manual")) $("cut-manual").addEventListener("click", () => startCutDraw());
   if ($("haz-relief")) $("haz-relief").addEventListener("click", () => importReliefLimits());
-  if ($("haz-make-cut")) $("haz-make-cut").addEventListener("click", () => hazardLinesToCuts());
 
   function setMsg(text, kind) {
     text = t(text);                            // i18n: translate whole-string messages (EN)

@@ -135,14 +135,13 @@
       </details>
 
       <details id="hazards-group" class="io-group">
-        <summary>Небезпеки (ЛЕП / стовпи)</summary>
-        <div class="haz-row"><button id="haz-add-pole" class="ghost">+ Стовп</button><button id="haz-add-line" class="ghost">+ ЛЕП</button></div>
-        <label class="row" style="font-weight:400;margin:4px 0 0">Запас обходу, м <input id="hazard-clearance" type="number" value="25" min="1" step="1" /></label>
-        <button id="haz-import-osm" class="ghost">Підтягнути ЛЕП з OSM (тест)</button>
+        <summary>Вирізи ЛЕП / рельєф</summary>
+        <label class="row" style="font-weight:400;margin:0 0 4px">Ширина вирізу, м <input id="cut-width" type="number" value="30" min="2" step="1" /></label>
+        <button id="cut-auto" class="ghost">🔍 Знайти ЛЕП і вирізати (OSM)</button>
+        <button id="cut-manual" class="ghost">✏️ Накреслити виріз вручну</button>
+        <div id="hazard-osm-warn" class="hint warn" style="display:none">OSM неповний — перевір очима, це НЕ гарантія. Немає ЛЕП в OSM? Накресли виріз вручну.</div>
+        <label class="row" style="font-weight:400;margin:8px 0 0">Запас висоти над рельєфом, м <input id="hazard-clearance" type="number" value="25" min="1" step="1" /></label>
         <button id="haz-relief" class="ghost">Рельєф: висотні ліміти (карта висот)</button>
-        <label class="row" style="font-weight:400;margin:4px 0 0">Ширина вирізу ЛЕП, м <input id="haz-cut-width" type="number" value="30" min="2" step="1" /></label>
-        <button id="haz-make-cut" class="ghost">ЛЕП → вирізи (з шириною)</button>
-        <div id="hazard-osm-warn" class="hint warn" style="display:none">OSM може бути неповним — перевір очима, це НЕ гарантія.</div>
         <div id="hazard-list"></div>
       </details>
       <button id="clear" class="ghost">Очистити</button>
