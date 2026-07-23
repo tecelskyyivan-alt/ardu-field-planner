@@ -41,9 +41,20 @@
     const covComplete = !!o.sawComplete || (lastCoverageSeq > 0 && wr >= lastCoverageSeq) || compFrac >= 0.90;
     return { covComplete: covComplete, compFrac: compFrac, completionPct: Math.round(compFrac * 100) };
   }
-  // covered_ha: complete → the planned field area; partial → distance × swath, capped at area.
+  // "Reached the last waypoint" only proves the UPLOADED list finished — a short test hop or a
+  // battery-swap REMAINDER also ends on its own last WP. Crediting the whole field for that gave
+  // 51 га за 3 хвилини (field report). Full credit needs the flown distance to plausibly cover
+  // the field: distance×swath ≥ 60% of the area (no swath info → trust the complete flag, legacy).
+  function fullCreditOk(o) {
+    if (!o.covComplete) return false;
+    if (!(o.areaHa > 0)) return true;
+    if (!o.swathM || o.swathM <= 0) return true;
+    const dz = (o.distM == null ? 0 : o.distM) * o.swathM / 1e4;
+    return dz >= 0.6 * o.areaHa;
+  }
+  // covered_ha: plausibly-complete → the planned field area; otherwise distance × swath, capped.
   function coveredHa(o) {
-    if (o.covComplete) return o.areaHa || 0;
+    if (fullCreditOk(o)) return o.areaHa || 0;
     if (!o.swathM || o.swathM <= 0) return null;         // unknown swath → «—», never divide/zero
     const d = o.distM == null ? 0 : o.distM;
     const raw = d * o.swathM / 1e4;
@@ -57,5 +68,5 @@
     else { out.done_ha = (+out.done_ha || 0) + (coveredHa || 0); }
     return out;
   }
-  global.GEO_COVER = { haversineM, pointInRing, distInField, coveredHa, coverageCompletion, applyFieldCredit };
+  global.GEO_COVER = { haversineM, pointInRing, distInField, coveredHa, coverageCompletion, applyFieldCredit, fullCreditOk };
 })(typeof window !== "undefined" ? window : globalThis);
