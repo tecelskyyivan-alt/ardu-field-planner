@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.76";
+  const APP_VERSION = "2.5.77";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -4953,9 +4953,38 @@
   const SYNC_KEYS = ["fmp_projects", "fmp_current_field", "fmp_last_field",
     "fmp_last_settings", "fmp_last_route", "fmp_is_plane", "fmp_lang"];
   function syncEnabled() { try { return localStorage.getItem("fmp_sync_on") === "1"; } catch (e) { return false; } }
-  // No native bridge in v1: Android/iOS can only sync when a self-hoster has baked
-  // their own absolute VPS_BASE into the build (no same-origin server to fetch there).
-  function syncConfigured() { return !((IS_ANDROID || IS_IOS) && !VPS_BASE); }
+  // APK/iOS have no same-origin server and a plain cross-origin fetch dies on the basic-auth CORS
+  // preflight — so on Android the transport of choice is the NATIVE bridge (window.AndroidSync,
+  // LogBridge-style: no CORS, auth baked into the build). Browser/PWA keeps same-origin fetch.
+  function syncNative() {
+    try { return (window.AndroidSync && window.AndroidSync.available()) ? window.AndroidSync : null; }
+    catch (e) { return null; }
+  }
+  function syncConfigured() { return !!syncNative() || !((IS_ANDROID || IS_IOS) && !VPS_BASE); }
+  // One transport for both endpoints: native bridge when available, else same-origin fetch.
+  // Returns the parsed response JSON or null (never throws).
+  async function syncCall(path, payload) {
+    const nb = syncNative();
+    if (nb) {
+      return await new Promise((resolve) => {
+        let done = false;
+        const to = setTimeout(() => { if (!done) { done = true; resolve(null); } }, 20000);
+        window.__syncResult = (body) => {
+          if (done) return; done = true; clearTimeout(to);
+          try { resolve(body == null ? null : JSON.parse(body)); } catch (e) { resolve(null); }
+        };
+        try { nb.call(path, JSON.stringify(payload)); }
+        catch (e) { done = true; clearTimeout(to); resolve(null); }
+      });
+    }
+    try {
+      const r = await fetch(SYNC_BASE + path, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload), credentials: "include",
+      });
+      return await r.json().catch(() => null);
+    } catch (e) { return null; }
+  }
   async function buildSyncPayload() {
     const data = {};
     SYNC_KEYS.forEach((k) => { try { const v = localStorage.getItem(k); if (v != null) data[k] = v; } catch (e) {} });
@@ -5038,13 +5067,9 @@
     _syncPushing = true;
     try {
       const payload = await buildSyncPayload();
-      const r = await fetch(SYNC_BASE + "/api/sync", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload), credentials: "include",
-      });
-      const j = await r.json().catch(() => null);
-      if (!r.ok || !j || !j.ok) {
-        appLog("sync: push failed HTTP " + r.status);
+      const j = await syncCall("/api/sync", payload);
+      if (!j || !j.ok) {
+        appLog("sync: push failed " + (j ? JSON.stringify(j).slice(0, 120) : "(no response)"));
         if (manual) setMsg("Не вдалося синхронізувати із сервером.", "error");
         return false;
       }
@@ -5075,11 +5100,7 @@
     if (!syncConfigured()) { setMsg("Сервер не налаштовано.", "error"); return; }
     setMsg("Отримую копію з сервера…", null);
     try {
-      const r = await fetch(SYNC_BASE + "/api/sync_get", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device: deviceId() }), credentials: "include",
-      });
-      const j = await r.json().catch(() => null);
+      const j = await syncCall("/api/sync_get", { device: deviceId() });
       if (!j || !j.ok) { setMsg((j && j.error) || "Немає копії на сервері.", "error"); return; }
       const snap = j.snapshot || {};
       let localFields = 0;
