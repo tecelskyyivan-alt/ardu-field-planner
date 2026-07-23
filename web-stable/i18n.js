@@ -56,7 +56,7 @@ window.FMP_TR = {
   "Підключення до дрона": "Connect to drone",
   "Тип зʼєднання": "Connection type",
   "Кабель (USB) / радіо / мережа. Маршрут — у вкладці «План».": "Cable (USB) / radio / network. Route is on the «Plan» tab.",
-  "Кабель / радіо (COM-порт)": "Cable / radio (COM port)",
+  "Кабель / пульт EdgeTX / радіо (COM-порт)": "Cable / EdgeTX handset / radio (COM port)",
   "COM-порт": "COM port",
   "Оновити список портів": "Refresh port list",
   "Вибрати пристрій (USB)": "Select device (USB)",
@@ -376,7 +376,6 @@ Object.assign(window.FMP_TR, {
   "Небезпек: {0} (стовпів {1} · ліній {2})": "Hazards: {0} (poles {1} · lines {2})",
 });
 
-Object.assign(window.FMP_TR, { "Пульт (EdgeTX/ELRS MAVLink)": "Handset (EdgeTX/ELRS MAVLink)" });
 
 Object.assign(window.FMP_TR, {
   "Прогалини": "Gaps",
