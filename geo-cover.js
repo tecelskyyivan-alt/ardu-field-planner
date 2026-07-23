@@ -68,5 +68,61 @@
     else { out.done_ha = (+out.done_ha || 0) + (coveredHa || 0); }
     return out;
   }
-  global.GEO_COVER = { haversineM, pointInRing, distInField, coveredHa, coverageCompletion, applyFieldCredit, fullCreditOk };
+  // ---- relief limit zones (#13-доопрацювання: небезпеки не лише з OSM) --------------------
+  // Convex hull (Andrew monotone chain) over {lat,lng} points; lng plays x, lat plays y.
+  function _hull(pts) {
+    const p = pts.slice().sort((a, b) => (a.lng - b.lng) || (a.lat - b.lat));
+    if (p.length <= 2) return p;
+    const cross = (o, a, b) => (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+    const lo = [], up = [];
+    for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+    lo.pop(); up.pop();
+    return lo.concat(up);
+  }
+  // Zones where the SURFACE (Copernicus ~90 м DSM via the elevation API) rises to within
+  // `limit` metres of the flight plane: elev - ref >= limit. Grid is row-major (idx = iy*nx+ix),
+  // cells with elev == null are ignored. 4-connected hot cells cluster into zones; each ring is
+  // the hull of member cell centers inflated by half a grid step. Coarse data by design — this
+  // catches hills/ridges/forest bulks, NOT individual poles (the UI must say so).
+  function reliefZones(o) {
+    const nx = o.nx, ny = o.ny, pts = o.pts, thr = o.limit;
+    const hLat = o.halfLatDeg || 0, hLng = o.halfLngDeg || 0;
+    const hot = new Array(nx * ny).fill(false);
+    let maxDz = null, worst = null;
+    for (let i = 0; i < nx * ny; i++) {
+      const p = pts[i]; if (!p || p.elev == null) continue;
+      const dz = p.elev - o.ref;
+      if (maxDz == null || dz > maxDz) { maxDz = dz; worst = { lat: p.lat, lng: p.lng, dz: dz }; }
+      if (dz >= thr) hot[i] = true;
+    }
+    const seen = new Array(nx * ny).fill(false);
+    const zones = [];
+    for (let s = 0; s < nx * ny; s++) {
+      if (!hot[s] || seen[s]) continue;
+      const cells = [], q = [s]; seen[s] = true;
+      while (q.length) {
+        const c = q.pop(); cells.push(c);
+        const cx = c % nx, cy = (c / nx) | 0;
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach((d) => {
+          const x = cx + d[0], y = cy + d[1];
+          if (x < 0 || y < 0 || x >= nx || y >= ny) return;
+          const j = y * nx + x;
+          if (hot[j] && !seen[j]) { seen[j] = true; q.push(j); }
+        });
+      }
+      let zMax = null;
+      const corners = [];
+      cells.forEach((c) => {
+        const p = pts[c], dz = p.elev - o.ref;
+        if (zMax == null || dz > zMax) zMax = dz;
+        [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach((sgn) =>
+          corners.push({ lat: p.lat + sgn[1] * hLat, lng: p.lng + sgn[0] * hLng }));
+      });
+      const ring = _hull(corners);
+      if (ring.length >= 3) zones.push({ ring: ring, maxDz: zMax, cells: cells.length });
+    }
+    return { zones: zones, maxDz: maxDz, worst: worst };
+  }
+  global.GEO_COVER = { haversineM, pointInRing, distInField, coveredHa, coverageCompletion, applyFieldCredit, fullCreditOk, reliefZones };
 })(typeof window !== "undefined" ? window : globalThis);
