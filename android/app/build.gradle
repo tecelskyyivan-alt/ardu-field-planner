@@ -11,8 +11,8 @@ android {
         applicationId "com.fmp.planner"
         minSdk 24
         targetSdk 35
-        versionCode 91
-        versionName "2.5.74"
+        versionCode 92
+        versionName "2.5.75"
         // In-app APK self-update: ON for the self-distributed builds, OFF for Play
         // (Google Play forbids apps installing APKs themselves). Gates the AndroidUpdate
         // bridge in MainActivity; the `play` build also strips REQUEST_INSTALL_PACKAGES.

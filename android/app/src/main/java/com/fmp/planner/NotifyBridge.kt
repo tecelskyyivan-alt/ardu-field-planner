@@ -71,6 +71,20 @@ class NotifyBridge(private val act: MainActivity, @Suppress("unused") private va
     @JavascriptInterface
     fun isRunning(): Boolean = TelemetryHub.active
 
+    /** Background flown-track buffer: JSON [[tMs,lat,lng,relAltM],...] recorded by the native
+     *  parser while the WebView was frozen (screen off). Drain-and-clear — JS backfills the map
+     *  track + flight record from it on resume. */
+    @JavascriptInterface
+    fun drainTrack(): String {
+        val arr = org.json.JSONArray()
+        for (s4 in TelemetryHub.drainTrack()) {
+            val row = org.json.JSONArray()
+            row.put(s4[0].toLong()); row.put(s4[1]); row.put(s4[2]); row.put(s4[3])
+            arr.put(row)
+        }
+        return arr.toString()
+    }
+
     /** First-ever start only: ask to be exempted from Doze/App-Standby battery restrictions so
      *  Android doesn't freeze the MAVLink link mid-flight. Some OEMs block this intent entirely
      *  (MIUI etc.) — never fatal, the operator can still grant it manually in Settings. */

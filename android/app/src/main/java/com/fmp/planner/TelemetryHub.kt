@@ -15,6 +15,32 @@ package com.fmp.planner
 object TelemetryHub {
     val parser = MavNotifyParser()
 
+    // Background flown-track buffer (#3 field report): while the WebView is frozen (screen off)
+    // JS collects nothing, so the map track had a hole. The parser taps every armed position
+    // here (1 Hz throttle, ring of 7200 = ~2 h); JS drains it on resume and backfills the map.
+    private val track = ArrayDeque<DoubleArray>()          // [tMs, lat, lon, relAltM]
+    @Volatile private var lastTrackMs = 0L
+
+    init {
+        parser.onPosition = { lat, lon, alt, armed ->
+            if (active && armed) {
+                val now = System.currentTimeMillis()
+                if (now - lastTrackMs >= 1000) {
+                    lastTrackMs = now
+                    synchronized(track) {
+                        track.addLast(doubleArrayOf(now.toDouble(), lat, lon, alt))
+                        if (track.size > 7200) track.removeFirst()
+                    }
+                }
+            }
+        }
+    }
+
+    /** Drain-and-clear the buffered background track (oldest first). */
+    fun drainTrack(): List<DoubleArray> = synchronized(track) {
+        val out = track.toList(); track.clear(); out
+    }
+
     /** true only while TelemetryService is running (i.e. someone is actually reading snapshots). */
     @Volatile var active = false
 

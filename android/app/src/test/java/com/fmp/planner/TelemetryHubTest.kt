@@ -31,4 +31,19 @@ class TelemetryHubTest {
 
         TelemetryHub.active = false   // leave the shared singleton inactive for any later test
     }
+
+    // Golden GPI frame from MavNotifyParserTest (lat/lon 1e7-scaled, relative_alt 25 m).
+    private val GPI = byteArrayOf(-3, 28, 0, 0, 0, 1, 1, 33, 0, 0, 0, 0, 0, 0, 32, -109, 127, 29, -96, -94, 79, 14, -96, -122, 1, 0, -88, 97, 0, 0, 0, 0, 0, 0, 0, 0, 120, 105, 35, 108)
+
+    @Test fun background_track_buffers_armed_positions_and_drains_once() {
+        TelemetryHub.drainTrack()                    // clear any residue from other tests
+        TelemetryHub.active = true
+        TelemetryHub.feed(HEARTBEAT)                 // armed=true
+        TelemetryHub.feed(GPI)                       // one armed position
+        val t = TelemetryHub.drainTrack()
+        assertEquals(1, t.size)
+        assertEquals(25.0, t[0][3], 1e-3)            // relative alt, not AMSL
+        assertEquals(0, TelemetryHub.drainTrack().size)   // drain clears
+        TelemetryHub.active = false
+    }
 }

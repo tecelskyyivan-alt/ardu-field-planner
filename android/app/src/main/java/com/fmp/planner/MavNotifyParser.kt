@@ -36,6 +36,10 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
             (if (vtype == 1) PLANE[cm] else ACM[cm]) ?: "MODE $cm"
     }
 
+    /** Invoked on every decoded GLOBAL_POSITION_INT (lat, lon, relAltM, armed) — the Hub
+     *  buffers positions here so the map track survives the WebView being frozen. */
+    var onPosition: ((Double, Double, Double, Boolean) -> Unit)? = null
+
     private var buf = ByteArray(0)
     private var mode = -1
     private var vehicleType = 0
@@ -159,13 +163,15 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
             }
             33 -> {  // GLOBAL_POSITION_INT: lat+4 i32(1e7), lon+8 i32(1e7), relative_alt+16 i32(mm)
                 val lat = i32(pay, 4) / 1e7; val lon = i32(pay, 8) / 1e7
-                altM = i32(pay, 16) / 1000.0
+                val rel = i32(pay, 16) / 1000.0
+                altM = rel
                 val pl = lastLat; val po = lastLon
                 if (lastArmed && pl != null && po != null) {
                     val d = equirectM(pl, po, lat, lon)
                     if (d in 0.5..200.0) distM += d           // ignore GPS jitter (<0.5) and teleport/spoof (>200)
                 }
                 lastLat = lat; lastLon = lon
+                onPosition?.invoke(lat, lon, rel, lastArmed)   // background-track buffer tap (#3)
             }
             74 -> {  // VFR_HUD: groundspeed+4 f32. Its alt+8 is AMSL (absolute) — it must NOT
                      // overwrite altM: the notification shows height ABOVE TAKEOFF like the map
