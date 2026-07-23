@@ -140,6 +140,8 @@
         <label class="row" style="font-weight:400;margin:4px 0 0">Запас обходу, м <input id="hazard-clearance" type="number" value="25" min="1" step="1" /></label>
         <button id="haz-import-osm" class="ghost">Підтягнути ЛЕП з OSM (тест)</button>
         <button id="haz-relief" class="ghost">Рельєф: висотні ліміти (карта висот)</button>
+        <label class="row" style="font-weight:400;margin:4px 0 0">Ширина вирізу ЛЕП, м <input id="haz-cut-width" type="number" value="30" min="2" step="1" /></label>
+        <button id="haz-make-cut" class="ghost">ЛЕП → вирізи (з шириною)</button>
         <div id="hazard-osm-warn" class="hint warn" style="display:none">OSM може бути неповним — перевір очима, це НЕ гарантія.</div>
         <div id="hazard-list"></div>
       </details>
