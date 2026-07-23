@@ -363,6 +363,7 @@ Object.assign(window.FMP_TR, {
   "+ ЛЕП": "+ Power line",
   "Запас обходу, м": "Avoidance clearance, m",
   "Підтягнути ЛЕП з OSM (тест)": "Import power lines from OSM (test)",
+  "Рельєф: висотні ліміти (карта висот)": "Relief: altitude limits (elevation map)",
   "OSM може бути неповним — перевір очима, це НЕ гарантія.": "OSM may be incomplete — verify with your eyes, it is NOT a guarantee.",
   "Небезпек: {0} (стовпів {1} · ліній {2})": "Hazards: {0} (poles {1} · lines {2})",
 });
@@ -403,6 +404,11 @@ Object.assign(window.FMP_TR, {
   "Overpass недоступний — спробуй пізніше (планування не заблоковано).": "Overpass is unavailable — try again later (planning is not blocked).",
   "ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима!":
     "No power lines found in OSM for this field — this is NOT proof there are none. Verify with your eyes!",
+  "Небезпек: {0} (стовпів {1} · ліній {2} · рельєф {3})": "Hazards: {0} ({1} poles · {2} lines · {3} relief)",
+  "Висота {0} м мінус запас {1} м → ліміт ≤ 0: на цій висоті лімітує будь-який рельєф. Збільш висоту або зменш запас.": "Altitude {0} m minus clearance {1} m → limit ≤ 0: any relief is limiting at this altitude. Raise the altitude or reduce the clearance.",
+  "Рахую карту висот ({0} точок)…": "Sampling the elevation map ({0} points)…",
+  "Рельєф: {0} зон(и), де поверхня ближче ніж {1} м до площини польоту (макс +{2} м від зльоту). Дані ~90 м — стовпи/дроти НЕ видно, перевір очима! Зони лише показуються (клік — видалити).": "Relief: {0} zone(s) where the surface is closer than {1} m to the flight plane (max +{2} m above takeoff). ~90 m data — poles/wires are NOT visible, verify with your eyes! Zones are display-only (click to delete).",
+  "Рельєф ок: макс перепад +{0} м від точки зльоту, запас до площини польоту ≥ {1} м. (Дані ~90 м — стовпи не видно.)": "Relief OK: max rise +{0} m above takeoff, clearance to the flight plane ≥ {1} m. (~90 m data — poles not visible.)",
   "Підтягнуто {0} об'єктів ЛЕП з OSM (лише показ — перевір очима; уникання вимкнено за замовч.).":
     "Imported {0} power-line objects from OSM (display only — verify with your eyes; avoidance is off by default).",
   // safe-transit (#12) degradation warnings + map tooltip

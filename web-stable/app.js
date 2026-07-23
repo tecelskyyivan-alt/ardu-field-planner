@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.78";
+  const APP_VERSION = "2.5.79";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -760,9 +760,13 @@
   function addHazardLayer(m) {
     let layer;
     if (m.kind === "pole") layer = L.marker([m.geom[0].lat, m.geom[0].lng], { icon: hazardPoleIcon(m), keyboard: false });
+    else if (m.kind === "zone") layer = L.polygon(m.geom.map((p) => [p.lat, p.lng]),
+      { color: "#d84315", weight: 2, dashArray: "4 6", fillColor: "#ff7043", fillOpacity: 0.12 });
     else layer = L.polyline(m.geom.map((p) => [p.lat, p.lng]), hazardStyle(m));
     layer._hz = m;
-    layer.bindTooltip((m.kind === "pole" ? "Стовп" : "ЛЕП") + (m.source === "osm" ? " (OSM — перевір очима!)" : "") + " — клікни, щоб видалити");
+    layer.bindTooltip((m.kind === "pole" ? "Стовп" : m.kind === "zone"
+        ? "Рельєф" + (m.dz != null ? " +" + m.dz + " м" : "") + " (карта висот ~90 м — перевір очима!)"
+        : "ЛЕП") + (m.source === "osm" ? " (OSM — перевір очима!)" : "") + " — клікни, щоб видалити");
     layer.on("click", () => { if (nativeEditActive()) return; drawnItems.removeLayer(layer); clearRoute(); scheduleSaveField(); renderHazardList(); });
     hazardItems.addLayer(layer);
   }
@@ -775,7 +779,7 @@
   function collectHazards() {
     return hazardLayers().map((l) => {
       const m = l._hz || {};
-      return { kind: m.kind, geom: _hzGeom(l, m.kind), source: m.source || "manual", avoid: m.avoid !== false, osm: m.osm || null };
+      return { kind: m.kind, geom: _hzGeom(l, m.kind), source: m.source || "manual", avoid: m.avoid !== false, osm: m.osm || null, dz: (m.dz != null ? m.dz : null) };
     });
   }
   // ClipperLib open-offset: pole (1 vertex) → circle, line → capsule, of half-width metres. These
@@ -790,11 +794,18 @@
     // angle-drag rebuild (~7 Hz) — skipping the extraction for the ones we'd throw away
     // anyway removes that allocation without changing which hazards end up in `hz` (same
     // avoid!==false && geom.length filter as before).
-    const hz = hazardLayers()
-      .filter((l) => (l._hz || {}).avoid !== false)             // same default as collectHazards()'s m.avoid !== false
+    const active = hazardLayers().filter((l) => (l._hz || {}).avoid !== false);   // same default as collectHazards()
+    // Relief ZONES are already area polygons — no Clipper offset needed, pass their rings through.
+    const zoneOut = [];
+    active.forEach((l) => {
+      const m = l._hz || {};
+      if (m.kind === "zone") { const g = _hzGeom(l, "zone"); if (g.length >= 3) zoneOut.push(g); }
+    });
+    const hz = active
+      .filter((l) => (l._hz || {}).kind !== "zone")
       .map((l) => ({ geom: _hzGeom(l, (l._hz || {}).kind) }))
       .filter((m) => m.geom && m.geom.length);
-    if (!C || !hz.length || !(halfWidthM > 0)) { if (!C && hz.length) appLog("[hazard] ClipperLib відсутній — коридори уникання пропущено (небезпеки лишаються видимими)"); return []; }
+    if (!C || !hz.length || !(halfWidthM > 0)) { if (!C && hz.length) appLog("[hazard] ClipperLib відсутній — коридори уникання пропущено (небезпеки лишаються видимими)"); return zoneOut; }
     let la = 0, lo = 0, n = 0;
     hz.forEach((m) => m.geom.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
     la /= n; lo /= n;
@@ -809,8 +820,8 @@
         const sol = new C.Paths(); co.Execute(sol, halfWidthM * SC);
         sol.forEach((path) => { if (path.length >= 3) out.push(toLL(path)); });
       });
-    } catch (e) { appLog("[hazard] офсет коридору не вдався: " + e); return []; }
-    return out;
+    } catch (e) { appLog("[hazard] офсет коридору не вдався: " + e); return zoneOut; }
+    return out.concat(zoneOut);
   }
   function startHazardDraw(kind) {
     cancelToolbarDraw();                                    // stop any active field/exclusion polygon draw
@@ -827,8 +838,10 @@
     const warn = $("hazard-osm-warn");
     if (warn) warn.style.display = hz.some((m) => m.source === "osm") ? "" : "none";
     if (!hz.length) { host.innerHTML = ""; return; }
-    const poles = hz.filter((m) => m.kind === "pole").length, lines = hz.length - poles;
-    host.innerHTML = `<div class="hz-sum">${tf("Небезпек: {0} (стовпів {1} · ліній {2})", hz.length, poles, lines)}</div>`;
+    const poles = hz.filter((m) => m.kind === "pole").length;
+    const zones = hz.filter((m) => m.kind === "zone").length;
+    const lines = hz.length - poles - zones;
+    host.innerHTML = `<div class="hz-sum">${tf("Небезпек: {0} (стовпів {1} · ліній {2} · рельєф {3})", hz.length, poles, lines, zones)}</div>`;
   }
   // EXPERIMENTAL OSM power-line import (Ivan asked «підтягнути ЛЕП для тесту»). NEVER authoritative:
   // a line missing from OSM = false "clear" = danger → imported as source:'osm', avoid:false (display
@@ -1102,12 +1115,71 @@
   // ---- helpers ------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
 
+  // #13-доопрацювання (Іван): небезпеки не лише з OSM — ЛІМІТИ З КАРТИ ВИСОТ. Семпліює
+  // сітку висот (open-meteo, Copernicus ~90 м DSM) над полем і позначає зони, де ПОВЕРХНЯ
+  // (пагорб, гребінь, лісовий масив) підходить до площини польоту ближче, ніж «запас обходу».
+  // ~90 м — це рельєф і великі об'єкти; ОКРЕМІ СТОВПИ/ДРОТИ ТУТ НЕ ВИДНО (повідомлення каже
+  // це прямо). Зони — лише показ (avoid=false, як OSM): рішення завжди за очима оператора.
+  async function importReliefLimits() {
+    const boundary = boundaryFromPolygon();
+    if (!boundary || boundary.length < 3) { setMsg("Спочатку задай поле — рельєф перевіряється в його межах.", "error"); return; }
+    if (!navigator.onLine) { setMsg("Немає інтернету — карта висот недоступна офлайн.", "error"); return; }
+    const alt = parseFloat($("alt").value) || 0;
+    const clr = hazardClearanceM();
+    const limit = alt - clr;
+    if (!(alt > 0) || limit <= 0) {
+      setMsg(tf("Висота {0} м мінус запас {1} м → ліміт ≤ 0: на цій висоті лімітує будь-який рельєф. Збільш висоту або зменш запас.", alt, clr), "warn");
+      return;
+    }
+    const bb = fieldPolygon.getBounds().pad(0.08);
+    const cLat = (bb.getNorth() + bb.getSouth()) / 2;
+    const mlat = 111320, mlng = 111320 * Math.cos(cLat * Math.PI / 180) || 1;
+    const wM = (bb.getEast() - bb.getWest()) * mlng, hM = (bb.getNorth() - bb.getSouth()) * mlat;
+    const step = Math.max(90, Math.max(wM, hM) / 16);      // ≥ роздільність даних (~90 м)
+    const nx = Math.max(2, Math.min(24, Math.round(wM / step) + 1));
+    const ny = Math.max(2, Math.min(24, Math.round(hM / step) + 1));
+    const dLng = (bb.getEast() - bb.getWest()) / (nx - 1), dLat = (bb.getNorth() - bb.getSouth()) / (ny - 1);
+    const pts = [];
+    for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++)
+      pts.push({ lat: bb.getSouth() + iy * dLat, lng: bb.getWest() + ix * dLng, elev: null });
+    // Точка відліку = місце зльоту: дім останньої збірки, або центроїд контуру.
+    let rp = lastHome;
+    if (!rp) { let la = 0, lo = 0; boundary.forEach((p) => { la += p.lat; lo += p.lng; }); rp = { lat: la / boundary.length, lng: lo / boundary.length }; }
+    setMsg(tf("Рахую карту висот ({0} точок)…", nx * ny), null);
+    const all = [rp].concat(pts);
+    let elevs = [];
+    try {
+      for (let off = 0; off < all.length; off += 100) {
+        const chunk = all.slice(off, off + 100);
+        const res = await fetch("https://api.open-meteo.com/v1/elevation?latitude=" +
+          chunk.map((p) => p.lat.toFixed(6)).join(",") + "&longitude=" + chunk.map((p) => p.lng.toFixed(6)).join(","));
+        const j = await res.json();
+        elevs = elevs.concat((j && j.elevation) || []);
+      }
+    } catch (e) { setMsg("Карта висот недоступна: " + e, "error"); return; }
+    if (elevs.length !== all.length) { setMsg("Карта висот недоступна (сервіс відповів не повністю).", "error"); return; }
+    const ref = elevs[0];
+    pts.forEach((p, i) => { p.elev = elevs[i + 1]; });
+    // Повторний запуск замінює попередні рельєф-зони (не дублює).
+    hazardLayers().forEach((l) => { if ((l._hz || {}).source === "relief") drawnItems.removeLayer(l); });
+    const rz = window.GEO_COVER.reliefZones({ nx: nx, ny: ny, pts: pts, ref: ref, limit: limit, halfLatDeg: dLat / 2, halfLngDeg: dLng / 2 });
+    rz.zones.forEach((z) => addHazardLayer({ kind: "zone", geom: z.ring, source: "relief", avoid: false, dz: Math.round(z.maxDz), osm: null }));
+    scheduleSaveField(); renderHazardList();
+    const mx = rz.maxDz != null ? Math.round(rz.maxDz) : 0;
+    if (rz.zones.length) {
+      setMsg(tf("Рельєф: {0} зон(и), де поверхня ближче ніж {1} м до площини польоту (макс +{2} м від зльоту). Дані ~90 м — стовпи/дроти НЕ видно, перевір очима! Зони лише показуються (клік — видалити).", rz.zones.length, clr, mx), "warn");
+    } else {
+      setMsg(tf("Рельєф ок: макс перепад +{0} м від точки зльоту, запас до площини польоту ≥ {1} м. (Дані ~90 м — стовпи не видно.)", mx, clr), "ok");
+    }
+  }
+
   // Hazard-subsystem buttons (#13): wired HERE, not next to their functions above —
   // `$` is a const and does not exist before this line (TDZ). See the note at the
   // hazards section.
   if ($("haz-add-pole")) $("haz-add-pole").addEventListener("click", () => startHazardDraw("pole"));
   if ($("haz-add-line")) $("haz-add-line").addEventListener("click", () => startHazardDraw("line"));
   if ($("haz-import-osm")) $("haz-import-osm").addEventListener("click", () => importOsmPowerLines());
+  if ($("haz-relief")) $("haz-relief").addEventListener("click", () => importReliefLimits());
 
   function setMsg(text, kind) {
     text = t(text);                            // i18n: translate whole-string messages (EN)

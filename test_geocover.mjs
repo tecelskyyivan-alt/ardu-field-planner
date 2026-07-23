@@ -80,5 +80,30 @@ check("coveredHa: no swath → null", G.coveredHa({ covComplete: false, areaHa: 
   check("plausibility: partial stays distance-based capped", G.coveredHa(part) === 4);
 }
 
+{
+  // reliefZones: 4×3 grid, ref 100, limit 20 (flight plane at ref+20+clearance semantics live in the caller)
+  const mk = (elevRows) => {
+    const pts = [];
+    elevRows.forEach((row, iy) => row.forEach((e, ix) =>
+      pts.push({ lat: 50 + iy * 0.001, lng: 31 + ix * 0.001, elev: e })));
+    return { nx: elevRows[0].length, ny: elevRows.length, pts, ref: 100, limit: 20, halfLatDeg: 0.0005, halfLngDeg: 0.0005 };
+  };
+  // two SEPARATE hot cells (corners) → 2 zones; the rest low
+  const r2 = G.reliefZones(mk([[125, 100, 100, 100], [100, 100, 100, 100], [100, 100, 100, 130]]));
+  check("relief: two isolated hot cells → 2 zones", r2.zones.length === 2);
+  check("relief: maxDz + worst tracked", r2.maxDz === 30 && r2.worst.dz === 30);
+  check("relief: zone rings are polygons", r2.zones.every((z) => z.ring.length >= 3));
+  check("relief: zone maxDz per cluster", Math.max(...r2.zones.map((z) => z.maxDz)) === 30);
+  // adjacent hot cells cluster into ONE zone
+  const r1 = G.reliefZones(mk([[125, 126, 100, 100], [100, 127, 100, 100], [100, 100, 100, 100]]));
+  check("relief: adjacent hot cells → 1 zone of 3 cells", r1.zones.length === 1 && r1.zones[0].cells === 3);
+  // nothing above threshold → no zones, stats still reported
+  const r0 = G.reliefZones(mk([[105, 100, 100, 100], [100, 100, 100, 100], [100, 100, 100, 110]]));
+  check("relief: below limit → 0 zones, maxDz 10", r0.zones.length === 0 && r0.maxDz === 10);
+  // null cells ignored
+  const rn = G.reliefZones({ nx: 2, ny: 1, pts: [{ lat: 50, lng: 31, elev: null }, { lat: 50, lng: 31.001, elev: null }], ref: 100, limit: 20, halfLatDeg: 5e-4, halfLngDeg: 5e-4 });
+  check("relief: all-null grid → no zones, no stats", rn.zones.length === 0 && rn.maxDz === null);
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);
