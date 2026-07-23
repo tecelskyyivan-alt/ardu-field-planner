@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.72";
+  const APP_VERSION = "2.5.73";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -868,9 +868,9 @@
     if (!added) setMsg("ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима!", "warn");
     else setMsg(tf("Підтягнуто {0} об'єктів ЛЕП з OSM (лише показ — перевір очима; уникання вимкнено за замовч.).", added), "ok");
   }
-  if ($("haz-add-pole")) $("haz-add-pole").addEventListener("click", () => startHazardDraw("pole"));
-  if ($("haz-add-line")) $("haz-add-line").addEventListener("click", () => startHazardDraw("line"));
-  if ($("haz-import-osm")) $("haz-import-osm").addEventListener("click", () => importOsmPowerLines());
+  // (hazard-button wiring lives AFTER the `const $` declaration below — a top-level
+  // `$(...)` call up here is a TemporalDeadZone ReferenceError that kills the whole
+  // IIFE at boot: map renders, every later feature is dead. Field incident 2.5.72.)
 
   // Adopt a polygon layer (drawn or OSM-loaded) as the active field.
   function adoptField(layer) {
@@ -1101,6 +1101,13 @@
 
   // ---- helpers ------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
+
+  // Hazard-subsystem buttons (#13): wired HERE, not next to their functions above —
+  // `$` is a const and does not exist before this line (TDZ). See the note at the
+  // hazards section.
+  if ($("haz-add-pole")) $("haz-add-pole").addEventListener("click", () => startHazardDraw("pole"));
+  if ($("haz-add-line")) $("haz-add-line").addEventListener("click", () => startHazardDraw("line"));
+  if ($("haz-import-osm")) $("haz-import-osm").addEventListener("click", () => importOsmPowerLines());
 
   function setMsg(text, kind) {
     text = t(text);                            // i18n: translate whole-string messages (EN)
