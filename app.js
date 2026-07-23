@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.79";
+  const APP_VERSION = "2.5.80";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1173,6 +1173,46 @@
     }
   }
 
+  // #13-ТЗ (Іван): «по ЛЕП потрібна кнопка виріз з шириною» — перетворює лінії ЛЕП
+  // (ручні та OSM) на СПРАВЖНІ вирізи-капсули заданої повної ширини. Далі це звичайні
+  // вирізи: маршрут їх обходить, вони зберігаються з полем, йдуть у геозону (#12p3) і
+  // safe-transit. Лінії-джерела лишаються на карті як показ (avoid=false — обхід тепер
+  // забезпечує сам виріз, без подвійного коридору).
+  function hazardLinesToCuts() {
+    const C = window.ClipperLib;
+    if (!C) { setMsg("ClipperLib відсутній — виріз недоступний.", "error"); return; }
+    const w = parseFloat(($("haz-cut-width") || {}).value) || 0;
+    if (!(w > 0)) { setMsg("Задай ширину вирізу, м.", "error"); return; }
+    const lines = hazardLayers().filter((l) => (l._hz || {}).kind === "line");
+    if (!lines.length) { setMsg("Нема ліній ЛЕП — додай «+ ЛЕП» або підтягни з OSM.", "error"); return; }
+    const geoms = lines.map((l) => _hzGeom(l, "line")).filter((g) => g.length >= 2);
+    let la = 0, lo = 0, n = 0;
+    geoms.forEach((g) => g.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
+    la /= n; lo /= n;
+    const mlat = 111320, mlng = (111320 * Math.cos(la * Math.PI / 180)) || 1, SC = 100;
+    const toClip = (g) => g.map((p) => ({ X: Math.round((p.lng - lo) * mlng * SC), Y: Math.round((p.lat - la) * mlat * SC) }));
+    const toLL = (path) => path.map((pt) => [la + pt.Y / SC / mlat, lo + pt.X / SC / mlng]);
+    let made = 0;
+    try {
+      geoms.forEach((g) => {
+        const co = new C.ClipperOffset(2, 0.25 * SC);
+        co.AddPath(toClip(g), C.JoinType.jtRound, C.EndType.etOpenRound);   // line → capsule
+        const sol = new C.Paths(); co.Execute(sol, (w / 2) * SC);
+        sol.forEach((path) => {
+          if (path.length < 3) return;
+          const poly = L.polygon(toLL(path));
+          addExclusionLayer(poly);
+          made++;
+        });
+      });
+    } catch (e) { setMsg("Не вдалося побудувати виріз: " + e, "error"); return; }
+    // The cut now owns the avoidance — demote the source lines to display-only so the
+    // clearance corridor isn't applied on top of the exclusion (no double margin).
+    lines.forEach((l) => { if (l._hz) l._hz.avoid = false; });
+    clearRoute(); scheduleSaveField(); renderHazardList();
+    setMsg(tf("Створено {0} виріз(ів) шириною {1} м з ліній ЛЕП. Перебудуй маршрут — він їх обійде; вирізи підуть і в геозону.", made, w), "ok");
+  }
+
   // Hazard-subsystem buttons (#13): wired HERE, not next to their functions above —
   // `$` is a const and does not exist before this line (TDZ). See the note at the
   // hazards section.
@@ -1180,6 +1220,7 @@
   if ($("haz-add-line")) $("haz-add-line").addEventListener("click", () => startHazardDraw("line"));
   if ($("haz-import-osm")) $("haz-import-osm").addEventListener("click", () => importOsmPowerLines());
   if ($("haz-relief")) $("haz-relief").addEventListener("click", () => importReliefLimits());
+  if ($("haz-make-cut")) $("haz-make-cut").addEventListener("click", () => hazardLinesToCuts());
 
   function setMsg(text, kind) {
     text = t(text);                            // i18n: translate whole-string messages (EN)
