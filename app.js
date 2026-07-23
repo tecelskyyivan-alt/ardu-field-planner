@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.74";
+  const APP_VERSION = "2.5.75";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -3560,9 +3560,37 @@
   }
   // Pause telemetry polling while the screen/app is hidden, resume on return —
   // saves battery + CPU in the field (the mission keeps running on the FC anyway).
+  // #3 field report: while the WebView is frozen (screen off) JS collects no track points —
+  // the map showed a hole between "before" and "after". The native TelemetryService buffers
+  // armed positions (1 Hz) the whole time; on resume we drain them and backfill the map track
+  // and the flight record, so the flown path and the Га/хв stats stay continuous.
+  function drainNativeTrack() {
+    if (!window.AndroidNotify || !window.AndroidNotify.drainTrack) return;
+    try {
+      const rows = JSON.parse(window.AndroidNotify.drainTrack() || "[]");
+      if (!rows.length) return;
+      for (const r of rows) {
+        const t = r[0], la = r[1], ln = r[2], al = r[3];
+        if (droneTrack) {
+          const pts = droneTrack.getLatLngs();
+          const last = pts.length ? pts[pts.length - 1] : null;
+          if (!last || haversineM(last.lat, last.lng, la, ln) > 2) {
+            if (pts.length > 5200) droneTrack.setLatLngs(pts.slice(-5000));
+            droneTrack.addLatLng([la, ln]);
+          }
+        }
+        if (flightRec && t > (flightRec._last || 0)) {
+          flightRec.samples.push({ t: t, lat: la, lon: ln, alt: al, gs: null, bv: null, bp: null, wp: null });
+          flightRec._last = t;
+        }
+      }
+      appLog("track: домальовано " + rows.length + " фонових точок (екран був вимкнений)");
+    } catch (e) { appLog("track drain failed: " + e); }
+  }
+
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { flushLog(); flightRecPersist(true); mavStopPolling(); }
-    else if (mavConnected) mavStartPolling();
+    else if (mavConnected) { drainNativeTrack(); mavStartPolling(); }
   });
 
   function fixName(f) {
