@@ -167,8 +167,11 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
                 }
                 lastLat = lat; lastLon = lon
             }
-            74 -> {  // VFR_HUD: groundspeed+4 f32, alt+8 f32
-                gsMs = f32(pay, 4).toDouble(); altM = f32(pay, 8).toDouble()
+            74 -> {  // VFR_HUD: groundspeed+4 f32. Its alt+8 is AMSL (absolute) — it must NOT
+                     // overwrite altM: the notification shows height ABOVE TAKEOFF like the map
+                     // (GLOBAL_POSITION_INT.relative_alt), else it reads ~120 м on the ground.
+                     // (field-reported on the Бзів SITL session)
+                gsMs = f32(pay, 4).toDouble()
             }
             42 -> {  // MISSION_CURRENT: seq+0 u16 (total+2 optional → ignored, JS pushes flownWpTotal)
                 wpSeq = u16(pay, 0)

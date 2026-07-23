@@ -40,6 +40,16 @@ class MavNotifyParserTest {
         val p = MavNotifyParser { 0L }
         p.push(GPI); assertEquals(25.0, p.snapshot().altM!!, 1e-3)
         p.push(VFR_HUD); assertEquals(8.5, p.snapshot().gsMs!!, 1e-4)
+        // VFR_HUD.alt is AMSL — it must NOT clobber the relative altitude from
+        // GLOBAL_POSITION_INT (field bug: notification showed ~120 м on the ground).
+        assertEquals(25.0, p.snapshot().altM!!, 1e-3)
+    }
+
+    @Test fun vfr_alone_does_not_set_altitude() {
+        val p = MavNotifyParser { 0L }
+        p.push(VFR_HUD)
+        assertEquals(8.5, p.snapshot().gsMs!!, 1e-4)
+        assertNull(p.snapshot().altM)   // AMSL is never shown as height-above-takeoff
     }
 
     @Test fun mission_current_and_progress() {
