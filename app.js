@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.81";
+  const APP_VERSION = "2.5.82";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1795,6 +1795,7 @@
     if (ss.map && ss.map.z != null) {
       try { map.setView([ss.map.lat, ss.map.lng], ss.map.z, { animate: false }); } catch (e) {}
     }
+    if (ss.connType === "handset") ss.connType = "cable";   // legacy: the handset preset was merged into cable
     if (ss.connType) {
       try {
         const tsel = $("mav-conn-type");
@@ -3291,10 +3292,9 @@
   const MAV_DEFAULT_ADDR = { tcp: "127.0.0.1:5760", udp: "0.0.0.0:14550" };
   function mavSyncRows() {
     const t = $("mav-conn-type").value;
-    const isSerial = t === "cable" || t === "handset";
+    const isSerial = t === "cable";
     $("mav-cable-row").style.display = isSerial ? "" : "none";
     $("mav-net-row").style.display = (isSerial || t === "ble") ? "none" : "";
-    if (t === "handset" && $("mav-baud")) $("mav-baud").value = "115200";   // EdgeTX USB-VCP nominal baud (#7)
     const bleRow = $("mav-ble-row");
     if (bleRow) bleRow.style.display = t === "ble" ? "" : "none";
     // Seed the default address only if the field is empty or still holds the
@@ -3572,7 +3572,7 @@
 
   function mavConnString() {
     const t = $("mav-conn-type").value;
-    if (t === "cable" || t === "handset") return $("mav-port").value;   // handset = EdgeTX/ELRS over USB serial (#7)
+    if (t === "cable") return $("mav-port").value;   // USB serial: FC by cable OR an EdgeTX/ELRS handset — same path
     if (t === "ble") return "ble:" + ($("mav-ble-list") ? $("mav-ble-list").value : "");
     const addr = ($("mav-address").value || "").trim();
     // Empty address → sensible auto-default (UDP listens on all interfaces).
@@ -3649,8 +3649,8 @@
       if (mac) { appLog("[restore] авто-реконект BLE до " + mac); window.__fmpBleAutoReconnect(mac, 2500); }
       return;
     }
-    if ((conn === "cable" || conn === "handset") && !IS_ANDROID) return;   // desktop WebSerial: no auto-open (needs a gesture)
-    if (conn !== "cable" && conn !== "handset" && conn !== "udp" && conn !== "tcp") return;
+    if (conn === "cable" && !IS_ANDROID) return;   // desktop WebSerial: no auto-open (needs a gesture)
+    if (conn !== "cable" && conn !== "udp" && conn !== "tcp") return;
     try {
       const tsel = $("mav-conn-type");
       if (tsel && tsel.querySelector('option[value="' + conn + '"]')) { tsel.value = conn; mavSyncRows(); }
