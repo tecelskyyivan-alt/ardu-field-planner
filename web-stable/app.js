@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.77";
+  const APP_VERSION = "2.5.78";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -4029,8 +4029,12 @@
     let distM = window.GEO_COVER.distInField(fr.samples, ring);
     if (distM == null) distM = trackDist;                 // no ring → whole track (still capped)
     const swath_m = (fr.work && fr.work.swath_m) || 0;
-    const covered_ha = window.GEO_COVER.coveredHa({
-      covComplete: comp.covComplete, areaHa: (fr.work && fr.work.area_ha) || 0, swathM: swath_m, distM: distM });
+    const covArgs = { covComplete: comp.covComplete, areaHa: (fr.work && fr.work.area_ha) || 0, swathM: swath_m, distM: distM };
+    const covered_ha = window.GEO_COVER.coveredHa(covArgs);
+    // A "complete" that the flown distance can't plausibly back (short test hop / battery-swap
+    // remainder reaching ITS last WP) must not count as a full-field pass — no cycle credit,
+    // and the row stays «частковий». (field report: 51 га за 3 хв)
+    const fullOk = window.GEO_COVER.fullCreditOk(covArgs);
     const avg_speed_ms = actual_duration > 0 ? (trackDist / actual_duration) : null;
     const rec = {
       started_at: fr.started_at, ended_at: last.t, planned: fr.planned,
@@ -4041,7 +4045,7 @@
         completion_pct: comp.completionPct,
         avg_speed_ms: (avg_speed_ms != null ? Math.round(avg_speed_ms * 10) / 10 : null),
         swath_m: swath_m || null },
-      partial: !!partial || !fr.sawComplete,
+      partial: !!partial || !fullOk,
       field: (fr.work && fr.work.field) || "поле",
       date: new Date(fr.started_at).toISOString().slice(0, 10),
       work: fr.work || null,
@@ -4049,7 +4053,7 @@
     };
     await flogPut(rec);
     await flogTrim(FLOG_MAX_FLIGHTS);
-    await fieldProgressCredit(fr, covered_ha, comp.covComplete);   // #8: credit this flight to its contour
+    await fieldProgressCredit(fr, covered_ha, fullOk);   // #8: credit this flight to its contour
     flightSummaries.push(flogSummary(rec));
     scheduleAutoSync("flight");      // #10: opt-in backup-sync — a finished flight is worth protecting
     const mins = Math.round(actual_duration / 60);

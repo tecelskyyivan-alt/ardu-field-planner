@@ -38,7 +38,9 @@ check("completion: 50% → not complete", G.coverageCompletion({ sawComplete: fa
 check("completion: pct rounds", G.coverageCompletion({ sawComplete: false, wpReached: 10, wpTotal: 21, hasRtl: true }).completionPct === 53); // 10/19=0.526→53
 
 // coveredHa: complete → area_ha; partial → dist*swath/1e4 capped; no swath → null.
-check("coveredHa: complete → area_ha", G.coveredHa({ covComplete: true, areaHa: 12.5, swathM: 20, distM: 999 }) === 12.5);
+// (distM must plausibly cover the area — the old fixture's 999 м for 12.5 га encoded the
+// full-credit bug the plausibility gate now closes; 5000 м × 20 м = 10 га ≥ 60% of 12.5.)
+check("coveredHa: complete → area_ha", G.coveredHa({ covComplete: true, areaHa: 12.5, swathM: 20, distM: 5000 }) === 12.5);
 check("coveredHa: partial = dist*swath/1e4", near(G.coveredHa({ covComplete: false, areaHa: 100, swathM: 20, distM: 5000 }), 10, 1e-6)); // 5000*20/1e4=10
 check("coveredHa: partial capped at area_ha", G.coveredHa({ covComplete: false, areaHa: 3, swathM: 20, distM: 5000 }) === 3);
 check("coveredHa: no swath → null", G.coveredHa({ covComplete: false, areaHa: 100, swathM: 0, distM: 5000 }) === null);
@@ -57,6 +59,25 @@ check("coveredHa: no swath → null", G.coveredHa({ covComplete: false, areaHa: 
   const orig = { done_ha: 5, completed_count: 2 };
   G.applyFieldCredit(orig, 1, false);
   check("credit: does not mutate the input record", orig.done_ha === 5 && orig.completed_count === 2);
+}
+
+{
+  // Plausibility gate (field report: 51 га за 3 хв). Ivan's exact numbers: Бзів 6 ≈ 51.35 га,
+  // 1374 м треку, захват 80 м, sawComplete=true (a SHORT uploaded list finished its last WP).
+  const hop = { covComplete: true, areaHa: 51.35, swathM: 80, distM: 1374 };
+  check("plausibility: short 'complete' hop is NOT full credit", G.fullCreditOk(hop) === false);
+  const hopHa = G.coveredHa(hop);
+  check("plausibility: hop covered = distance-based (~10.99), not the field",
+        Math.abs(hopHa - 1374 * 80 / 1e4) < 0.01 && hopHa < 12);
+  // A real full mission: enough distance to plausibly sweep the field → full area.
+  const full = { covComplete: true, areaHa: 51.35, swathM: 80, distM: 51.35 * 1e4 / 80 * 0.9 };
+  check("plausibility: real complete keeps full-area credit", G.fullCreditOk(full) === true && G.coveredHa(full) === 51.35);
+  // Legacy record without swath info: trust the complete flag (old behaviour).
+  const legacy = { covComplete: true, areaHa: 20, swathM: 0, distM: 500 };
+  check("plausibility: no-swath legacy complete keeps full credit", G.coveredHa(legacy) === 20);
+  // Partial path untouched.
+  const part = { covComplete: false, areaHa: 20, swathM: 8, distM: 5000 };
+  check("plausibility: partial stays distance-based capped", G.coveredHa(part) === 4);
 }
 
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
