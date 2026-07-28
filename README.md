@@ -25,15 +25,26 @@
 agricultural spraying.** Draw a field on a satellite map → generate a boustrophedon
 (“lawnmower”) coverage route → export a mission (`.plan` / `.waypoints`) or **upload it
 straight to the drone over MAVLink** and fly it with **live telemetry**. The app and
-planning engine are self-hosted (no CDN), so it loads and plans with **no connection** —
-only the satellite map needs internet, and you can **pre-cache it per field** to work
-fully offline in the area. Bilingual UI (**Українська / English**).
+planning engine are self-hosted (no CDN), so it loads and plans with **no connection**.
+**Three** things do need internet, and one of them is a safety feature — know them
+before you drive to a field:
+
+| needs internet | host | without it |
+|---|---|---|
+| satellite map | `server.arcgisonline.com` | pre-cache per field and it works offline |
+| terrain altitude-limit zones | `api.open-meteo.com` | no relief zones; the route still builds |
+| **automatic power-line (ЛЕП) detection** | `overpass-api.de`, `overpass.kumi.systems` | **no ЛЕП are found — draw the corridors by hand** |
+
+Bilingual UI (**Українська / English**).
 
 Офлайн-планувальник маршрутів покриття поля + наземна станція (GCS) для ArduCopter.
 Малюєш контур поля → «змійка» покриття → експорт місії або **пряма заливка в дрон по
 MAVLink** (кабель / WiFi-ELRS) + жива телеметрія. Рушій і застосунок працюють **без
-мережі**; супутникова мапа потребує інтернету — або завчасно закешуй район, щоб працювало
-повністю офлайн у полі.
+мережі**. Інтернету потребують **три** речі, а не одна: **супутникова мапа** (кешуй
+район завчасно), **зони обмеження висоти за рельєфом** (сітка висот з
+`api.open-meteo.com`) і — найважливіше — **автоматичний пошук ЛЕП** (Overpass / OSM).
+Без мережі маршрут будується, але рельєфні зони й ЛЕП не з'являються: **опори й дроти
+доведеться позначати вручну**. Плануй це вдома.
 
 ## Platforms / Платформи
 
@@ -56,9 +67,11 @@ MAVLink** (кабель / WiFi-ELRS) + жива телеметрія. Рушій
   spray overlap), edge margin, waypoint de-clustering.
 - 🔄 **Rounded turns** — the copter flies a smooth U-turn at each pass end via the
   autopilot’s `WP_RADIUS_M` (= spacing / 2); no extra waypoints.
-- 📍 **Start/finish anchor** — pulls the route ends toward the drone’s GPS / your GPS /
-  take-off point to cut transit and flight time.
-- 🔋 **Split into sorties** — **N equal-area** sections or by battery time; per-flight export.
+- 🔋 **Split into sorties** — **N equal-area** sections or by battery time.
+  ⚠️ **Engine only, no UI yet.** `build_route` honours `split.mode` = `n_area` /
+  `battery_time`, but the app sends neither, and the sector-line drawing tool was
+  removed, so in the shipped app every plan is a single flight. Reachable by calling
+  the engine directly; see `tests/test_split_budget.py`.
 - ⏱️ **Realistic mission time** — take-off + transit + cruise + turns + RTL + landing.
 - 📈 **Flight log + calibration** — every real AUTO flight is logged offline (IndexedDB);
   plan-vs-actual calibrates the time / battery estimate to *your* drone.
