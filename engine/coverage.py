@@ -732,29 +732,129 @@ def optimal_angle(boundary, spacing, step=5, exclusions=None, return_route=False
     return (best_a, best_wps) if return_route else best_a
 
 
-def split_route_by_time(waypoints, speed_mps, max_seconds, reserve=0.2):
-    """Split a coverage route into separate flights, each within `max_seconds` of
-    flying time (a fraction `reserve` is held back for take-off / return-to-home).
-    Returns a list of waypoint sub-lists. One flight if it all fits."""
+def split_route_by_time(waypoints, speed_mps, max_seconds, reserve=0.2, *,
+                        home=None, wp_alt=0.0, takeoff_alt=None, transit_speed=None,
+                        climb_rate=None, descent_rate=None, accel=None,
+                        turn_penalty_s=None, rtl=True, cal=None):
+    """Split a coverage route into flights that each fit `max_seconds`.
+
+    WITH `home` (the correct mode): every candidate flight is budgeted with the
+    SAME model that reports the duration to the pilot — `estimate_mission_time` —
+    so a flight the planner produced can never be one the planner then calls too
+    long. Take-off climb, the home->start transit, cruise, the decel/accel lost at
+    each turn, RTL and the landing descent all count against the budget.
+
+    WITHOUT `home`: falls back to cruise-time only, holding back the fraction
+    `reserve` for everything else. THIS MODE UNDER-BUDGETS, which is why `home`
+    exists — see below.
+
+    WHY THE FRACTION WAS WRONG (measured 2026-07-29 over the four bench fields in
+    tests/route_cases.py, spacing 10/20/40 m, battery 8-30 min, at a realistic
+    35 m AGL). The held-back 20 % is a fraction of the BUDGET, but the thing it
+    must cover does not scale with the budget at all: the climb scales with
+    altitude, the turn loss with how many passes the spacing produces, and the
+    transit and RTL with how far home is. Measured, that overhead ran from 22 %
+    to 57 % of the budget, so 25 of the swept configurations produced flights
+    longer than the endurance they were split to respect — worst +3.47 min on a
+    12 min battery, i.e. a 29 % overrun on a number a pilot plans a sortie from.
+
+    The accumulation below mirrors `estimate_mission_time` term for term rather
+    than calling it per candidate, which would be O(n^2) and is felt in Pyodide.
+    That duplication is deliberate and it is GUARDED: the tests assert every
+    returned flight satisfies estimate_mission_time(...)["total_s"] <= max_seconds,
+    so the two drifting apart fails the suite rather than the aircraft.
+    """
     if not waypoints or len(waypoints) < 2 or speed_mps <= 0 or max_seconds <= 0:
         return [list(waypoints)]
-    budget = max_seconds * (1.0 - reserve)
-    flights, cur, t = [], [waypoints[0]], 0.0
-    for a, b in zip(waypoints, waypoints[1:]):
-        seg = haversine(a[0], a[1], b[0], b[1]) / speed_mps
-        if t + seg > budget and len(cur) >= 2:
-            # End this flight at a; the NEXT flight RESUMES at a and re-flies the
-            # a->b leg, so the segment is never dropped (drone returns home,
-            # relaunches, flies back to a, continues). seg may exceed budget for
-            # one very long leg — we still fly it rather than lose coverage.
+
+    speed = max(float(speed_mps), 0.1)
+
+    if home is None:                    # legacy cruise-only budget
+        budget = max_seconds * (1.0 - reserve)
+        flights, cur, t = [], [waypoints[0]], 0.0
+        for a, b in zip(waypoints, waypoints[1:]):
+            seg = haversine(a[0], a[1], b[0], b[1]) / speed
+            if t + seg > budget and len(cur) >= 2:
+                flights.append(cur)
+                cur, t = [a, b], seg
+            else:
+                cur.append(b)
+                t += seg
+        if len(cur) >= 2:
             flights.append(cur)
-            cur, t = [a, b], seg
+        elif flights:
+            flights[-1].append(cur[-1])
+        return flights
+
+    tspeed = max(float(transit_speed or speed), 0.1)
+    crate = float(climb_rate or TAKEOFF_CLIMB_RATE)
+    drate = float(descent_rate or LAND_DESCENT_RATE)
+    acc = float(accel or WP_ACCEL)
+    per = float(turn_penalty_s) if turn_penalty_s is not None else speed / acc
+
+    mult = 1.0
+    if isinstance(cal, dict):
+        try:
+            mult = float(cal.get("time_mult") or 1.0)
+        except (TypeError, ValueError):
+            mult = 1.0
+        if not (0.2 <= mult <= 5.0):
+            mult = 1.0
+
+    # Constant for every flight: the climb, and the descent if it returns home.
+    fixed = (float(takeoff_alt if takeoff_alt is not None else wp_alt) / crate
+             + (float(wp_alt) / drate if rtl else 0.0))
+
+    lat0, lon0 = float(home[0]), float(home[1])
+
+    def _transit(p):
+        return haversine(lat0, lon0, p[0], p[1]) / tspeed
+
+    def _rtl(p):
+        return (haversine(p[0], p[1], lat0, lon0) / tspeed) if rtl else 0.0
+
+    def _turn(p_prev, p_mid, p_next):
+        """Same corner penalty estimate_mission_time applies, same projection."""
+        a = latlon_to_local(p_prev[0], p_prev[1], lat0, lon0)
+        m = latlon_to_local(p_mid[0], p_mid[1], lat0, lon0)
+        b = latlon_to_local(p_next[0], p_next[1], lat0, lon0)
+        ax, ay = m[0] - a[0], m[1] - a[1]
+        bx, by = b[0] - m[0], b[1] - m[1]
+        na, nb = math.hypot(ax, ay), math.hypot(bx, by)
+        if na < 1e-6 or nb < 1e-6:
+            return 0.0
+        cosang = max(-1.0, min(1.0, (ax * bx + ay * by) / (na * nb)))
+        return math.acos(cosang) / math.pi * per
+
+    wps = [(float(p[0]), float(p[1])) for p in waypoints]
+    flights = []
+    cur = [wps[0]]
+    cruise = 0.0
+    turn = 0.0
+    lead = _transit(wps[0])
+
+    for b in wps[1:]:
+        a = cur[-1]
+        seg = haversine(a[0], a[1], b[0], b[1]) / speed
+        # the corner at `a` only becomes real once a leg leaves it
+        add_turn = _turn(cur[-2], a, b) if len(cur) >= 2 else 0.0
+        total = (fixed + lead + cruise + seg + turn + add_turn + _rtl(b)) * mult
+        if total > max_seconds and len(cur) >= 2:
+            # Close here. The NEXT flight RESUMES at `a` and re-flies a->b, so no
+            # segment is ever dropped. A single leg longer than the whole budget
+            # is still flown rather than losing coverage — that is a field the
+            # battery cannot cover, and silently omitting it would be worse.
+            flights.append(cur)
+            cur = [a, b]
+            cruise, turn, lead = seg, 0.0, _transit(a)
         else:
             cur.append(b)
-            t += seg
+            cruise += seg
+            turn += add_turn
+
     if len(cur) >= 2:
         flights.append(cur)
-    elif flights:                       # a lone trailing point joins the last flight
+    elif flights:
         flights[-1].append(cur[-1])
     return flights
 
@@ -1131,29 +1231,31 @@ def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900,
 
 def overlap_optimal_angle(cover, spacing, home, field_boundary=None, exclusions=None,
                           anchor=None, step=2, return_route=False, rtl=True, speed=12.0):
-    """Sweep heading (deg) giving the LEAST true spray overlap for an ALWAYS-ON
-    sprayer. Unlike optimal_angle (which minimizes pass LENGTH), this scores each
-    candidate by mission_overlap over the FULL flown path (lead-in + passes +
-    connectors + RTL) — where almost all the double-spray actually comes from,
-    because the lead-in/RTL geometry depends on the sweep heading. Measured ~-46%
-    overlap vs min-path on the benchmark fields, for ~+1% time.
+    """Sweep heading (deg) giving the SHORTEST mission TIME.
 
-    `cover` = the (already-inset) area the passes run on; `field_boundary` = the
-    real field, scored for overlap; `home`/`anchor` are (lat,lon). step=2 is the
-    validated sweet spot (step=1 is ~equal for 2x compute). With return_route the
-    winning route is returned too (no rebuild)."""
+    ⚠️ THE NAME IS HISTORICAL AND THIS FUNCTION NO LONGER SCORES OVERLAP. It once
+    scored candidates with `mission_overlap` and this docstring claimed ~-46 %
+    overlap against min-path for ~+1 % time. Ivan then chose Variant A — "рахуєш
+    лише час" — and the implementation was changed to score time alone while the
+    docstring was left behind, so it advertised a measurement the code had stopped
+    taking. The -46 % figure applied to code that no longer runs; do not quote it.
+    `field_boundary` is now accepted only for call compatibility and is unused.
+
+    Scored per heading: take-off climb + coverage cruise + the decel/accel lost at
+    each turn + landing descent. Take-off and landing ARE counted (Ivan: "зліт і
+    посадка повинні бути") — they are equal for every heading so they cannot bias
+    it. The lead-in (home->first) and RTL (last->home) are EXCLUDED so the heading
+    is never tilted merely to bring the start or finish near the take-off point.
+    Coverage is NOT scored and there is NO gate: the fastest heading wins outright,
+    and on some fields it tilts a few degrees and leaves small edge slivers.
+
+    `cover` = the (already-inset) area the passes run on; `home`/`anchor` are
+    (lat,lon). step=2 is the validated sweet spot (step=1 is ~equal for 2x
+    compute). With return_route the winning route is returned too (no rebuild)."""
     if not cover or len(cover) < 3:
         return (0.0, None) if return_route else 0.0
-    fb = field_boundary if (field_boundary and len(field_boundary) >= 3) else cover
     a0 = anchor if anchor is not None else home
-    # THE ONLY criterion is MINIMUM MISSION TIME (Ivan, Variant A: "рахуєш лише час").
-    # For each heading score ONLY the time = take-off climb + coverage cruise along the
-    # passes + the decel/accel lost at each turn + landing descent. ZLIT (take-off) and
-    # POSADKA (landing) ARE counted ("зліт і посадка повинні бути") — they're equal for
-    # every heading so they don't bias it; the lead-in (home→first) and RTL (last→home)
-    # are EXCLUDED so the heading is never tilted just to bring the start/finish near the
-    # take-off. Coverage is NOT scored and there is NO gate — the fastest heading wins
-    # outright (it may tilt a few degrees and leave small edge slivers on some fields).
+    # Scoring rationale lives in the docstring above (Ivan, Variant A).
     step = max(1, int(step))
     # Кут-незалежні інваріанти — один раз на перебір (не 180/step разів).
     field = _free_polygon(cover, exclusions)

@@ -260,7 +260,14 @@ class Api:
                     flights = split_route_by_area(wps, spacing, int(split.get("n", 2) or 2))
                 elif split_mode == "battery_time" or (not split_mode and battery_min > 0):
                     bm = float(split.get("battery_min", battery_min) or battery_min)
-                    flights = split_route_by_time(wps, speed, bm * 60) if bm > 0 else [wps]
+                    # Budget with the SAME model that reports the duration, not a
+                    # flat fraction of it — the climb, transit, turn losses and RTL
+                    # do not scale with the battery, so a fixed reserve produced
+                    # flights longer than the endurance they were split for.
+                    flights = split_route_by_time(
+                        wps, speed, bm * 60,
+                        home=home, wp_alt=alt, takeoff_alt=takeoff_alt,
+                        rtl=rtl, cal=cal) if bm > 0 else [wps]
                 else:
                     flights = [wps]
 
