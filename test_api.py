@@ -22,11 +22,14 @@ print("build_route ok:", res["ok"], "| count:", res["count"],
       "| dur_s:", res["duration_s"])
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-print("export .waypoints ->", api.export("waypoints"))
+wp_res = api.export("waypoints")
+print("export .waypoints ->", wp_res)
 print("export .plan      ->", api.export("plan"))
 
-# Show the first few lines of the generated waypoints file.
-with open("mission.waypoints", encoding="utf-8") as f:
+# Show the first few lines of the generated waypoints file. Read the path back
+# from the export result rather than assuming the cwd — exports moved into
+# exports/ and this line had been failing silently ever since.
+with open(wp_res["path"], encoding="utf-8") as f:
     head = "".join(f.readlines()[:4])
 print("--- mission.waypoints (head) ---")
 print(head)
