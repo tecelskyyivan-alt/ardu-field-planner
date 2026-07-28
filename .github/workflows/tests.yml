@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: pip install shapely numpy pymavlink pyserial
+      - name: Run Python tests
+        run: |
+          python test_core.py
+          python test_features.py
+          python test_serve.py
+          python test_split.py
+          python test_ui.py
+          python test_gaps.py
+          python test_safe_transit.py
+          python test_api_safe_transit.py
+          python test_v24.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: JS syntax + MAVLink/geometry tests
+        run: |
+          node --check web-stable/app.js
+          node --check web-stable/engine.js
+          node --check web-stable/engine-worker.js
+          node test_jsmav.mjs
+          node test_geocover.mjs
+          node test_jsfence.mjs
+          node test_boot.mjs

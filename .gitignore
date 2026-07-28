@@ -61,3 +61,6 @@ config.local.js
 tests/fixtures/
 .venv-photo/
 data/gazetteer.sqlite
+
+# SITL binary — regenerable from ArduPilot source, not history material
+sitl/arducopter
