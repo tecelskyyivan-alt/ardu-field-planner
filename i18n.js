@@ -365,8 +365,8 @@ Object.assign(window.FMP_TR, {
   "Підтягнути ЛЕП з OSM (тест)": "Import power lines from OSM (test)",
   "Вирізи ЛЕП / рельєф": "Power-line cuts / relief",
   "Ширина вирізу, м": "Cut width, m",
-  "🔍 Знайти ЛЕП і вирізати (OSM)": "🔍 Find power lines and cut (OSM)",
-  "✏️ Накреслити виріз вручну": "✏️ Draw a cut manually",
+  "Знайти ЛЕП і вирізати (OSM)": "Find power lines and cut (OSM)",
+  "Накреслити виріз вручну": "Draw a cut manually",
   "OSM неповний — перевір очима, це НЕ гарантія. Немає ЛЕП в OSM? Накресли виріз вручну.": "OSM is incomplete — verify with your eyes, it is NOT a guarantee. No lines in OSM? Draw a cut manually.",
   "Запас висоти над рельєфом, м": "Height clearance over relief, m",
   "Рельєф: висотні ліміти (карта висот)": "Relief: altitude limits (elevation map)",
@@ -430,4 +430,104 @@ Object.assign(window.FMP_TR, {
   "Безпечний шлях до старту не побудовано — зліт напряму до першої точки.":
     "Safe path to the start could not be built — taking off straight to the first waypoint.",
   "Безпечний шлях додому не побудовано — RTL напряму.": "Safe path home could not be built — RTL straight.",
+});
+
+// ---- map drawing tools (Leaflet.draw) --------------------------------------
+// Leaflet.draw's own strings are English; app.js feeds it the Ukrainian below via
+// L.drawLocal and re-applies them (through t()) on a language switch.
+Object.assign(window.FMP_TR, {
+  "Скасувати креслення": "Cancel drawing",
+  "Завершити креслення": "Finish drawing",
+  "Завершити": "Finish",
+  "Видалити останню точку": "Delete the last point",
+  "Прибрати точку": "Undo point",
+  "Накреслити контур поля або виріз": "Draw a field boundary or a cut-out",
+  "Натисни на карті, щоб почати межу": "Click the map to start the boundary",
+  "Натисни, щоб додати точку": "Click to add a point",
+  "Натисни першу точку, щоб замкнути": "Click the first point to close the shape",
+  "Зберегти зміни": "Save changes",
+  "Скасувати зміни": "Discard changes",
+  "Видалити все": "Delete all",
+  "Редагувати вузли": "Edit vertices",
+  "Немає що редагувати": "Nothing to edit",
+  "Видалити фігуру": "Delete a shape",
+  "Немає що видаляти": "Nothing to delete",
+  "Тягни вузли, щоб виправити межу": "Drag the vertices to correct the boundary",
+  "«Скасувати» — відкинути зміни": "«Discard changes» reverts your edits",
+  "Натисни на фігуру, щоб видалити": "Click a shape to delete it",
+  "Телеметрія на карті": "Telemetry on the map",
+});
+
+// ---- static UI strings that had no translation yet -------------------------
+Object.assign(window.FMP_TR, {
+  "BLE-пристрій": "BLE device",
+  "— натисни «Сканувати» —": "— press «Scan» —",
+  "Сканувати": "Scan",
+  "Польотник зі SpeedyBee-Bluetooth або BLE-UART модуль. На BT-UART польотника має бути MAVLink (SERIALx_PROTOCOL=2), не MSP.":
+    "A flight controller with SpeedyBee Bluetooth, or a BLE-UART module. The controller's BT UART must be set to MAVLink (SERIALx_PROTOCOL=2), not MSP.",
+  "Якщо політник мовчить по Bluetooth — просто підключись раз по USB-OTG або WiFi: додаток сам налаштує його Bluetooth і перепідключиться.":
+    "If the controller stays silent over Bluetooth, connect once over USB-OTG or WiFi: the app configures its Bluetooth itself and reconnects.",
+  "Пауза місії": "Pause the mission",
+  "Пауза тримає дрон на маршруті й на висоті — продовження без ризику.":
+    "Pause holds the drone on the route at altitude — resuming is safe.",
+  "Продовжувати місію після заміни батареї": "Resume the mission after a battery swap",
+  "Мова / Language": "Language / Мова",
+  "= крок": "= spacing",
+});
+
+// ---- «Додаток» tab, rebuilt as one card per platform ------------------------
+Object.assign(window.FMP_TR, {
+  "Обприскування поля · ArduCopter та ArduPlane": "Field spraying · ArduCopter and ArduPlane",
+  "Працює офлайн. Встановив раз — далі оновлюється звідси.":
+    "Works offline. Install once — it updates itself from here.",
+  "Веб-версія оновиться миттєво, APK — завантажиться й запропонує встановлення.":
+    "The web version updates instantly; the APK downloads and offers to install.",
+  "Android — APK": "Android — APK",
+  "Повний зв'язок з польотником: USB-кабель, Bluetooth, WiFi. Завантаж → дозволь встановлення з невідомих джерел → відкрий.":
+    "Full link to the flight controller: USB cable, Bluetooth, WiFi. Download → allow installation from unknown sources → open.",
+  "Завантажити APK": "Download the APK",
+  "У браузері на Android — лише планування: доступу до USB браузер не має.":
+    "In an Android browser it plans only — the browser has no USB access.",
+  "ПК — Windows / Mac": "PC — Windows / Mac",
+  "Планування + дрон по USB-кабелю (WebSerial). Встанови окремим застосунком, щоб працювало офлайн.":
+    "Planning + the drone over a USB cable (WebSerial). Install it as its own app to work offline.",
+  "Встановити як додаток": "Install as an app",
+  "У Chrome: меню (⋮) → «Встановити додаток».": "In Chrome: menu (⋮) → «Install app».",
+  "iPhone / iPad": "iPhone / iPad",
+  "скоро": "soon",
+  "Apple не дозволяє ставити додатки із сайту. Збірка готова й перевірена, але чекає на TestFlight. Зв'язок з дроном на iOS — лише WiFi / ELRS-бекпак.":
+    "Apple does not allow installing apps from a website. The build is ready and tested but waiting on TestFlight. On iOS the drone link is WiFi / ELRS backpack only.",
+  "Бета-збірка": "Beta build",
+  "Стара експериментальна гілка інтерфейсу": "An old experimental interface branch",
+  "Ставиться": "Installs",
+  "окремо": "separately",
+  "Завантажити бету": "Download the beta",
+});
+
+Object.assign(window.FMP_TR, {
+  "Записи зʼявляться після першого польоту з підключеним дроном — наліт, площа, га/хв.":
+    "Records appear after the first flight with a connected drone — airtime, area, ha/min.",
+});
+
+// ---- wording fixes: one term per concept, labels that match what messages say ----
+Object.assign(window.FMP_TR, {
+  "Круглий розворот (діаметр = крок проходів)": "Rounded turn (diameter = pass spacing)",
+  "Дрон закруглює розворот у кінці кожного проходу радіусом «крок / 2» — радіус виставляється автопілоту при заливці місії (будь-яким зʼєднанням; на INAV не діє). Точок маршруту не додається; на більшому радіусі дрон трохи зрізає торці проходів.":
+    "The drone rounds the turn at the end of each pass with a radius of «spacing / 2» — the radius is set on the autopilot when the mission is uploaded (over any link; INAV ignores it). No extra waypoints are added; with a larger radius the drone trims the pass ends slightly.",
+  "Залити місію в дрон": "Upload the mission to the drone",
+  "Немає збережених полів. Намалюй контур на карті — поле збережеться саме.":
+    "No saved fields yet. Draw a boundary on the map — the field saves itself.",
+  "У браузері на Android USB йде через WebUSB — працює не з кожним польотником. Для польоту бери APK.":
+    "In an Android browser USB goes through WebUSB — it does not work with every flight controller. For flying, use the APK.",
+  "Карту НЕ збережено: жоден тайл не завантажився. Перевір мережу й спробуй ще раз.":
+    "The map was NOT saved: not a single tile downloaded. Check the network and try again.",
+});
+
+Object.assign(window.FMP_TR, {
+  "Оновлення для цієї збірки приходять через Google Play — відкрий Play і онови застосунок там.":
+    "This build updates through Google Play — open Play and update the app there.",
+});
+
+Object.assign(window.FMP_TR, {
+  "Політика конфіденційності": "Privacy policy",
 });
