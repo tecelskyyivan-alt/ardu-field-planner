@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.82";
+  const APP_VERSION = "2.5.84";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -84,6 +84,9 @@
     applyLangToDom();
     const btn = document.getElementById("lang-toggle");
     if (btn) btn.textContent = LANG === "en" ? "UA" : "EN";   // shows the OTHER language
+    // The drawing tools read their strings at tooltip time — re-apply so the map
+    // toolbar follows the language switch too (hoisted; a no-op before setup).
+    try { applyDrawLocale(); } catch (e) {}
     if (!(opts && opts.silent) && typeof rerenderDynamic === "function") { try { rerenderDynamic(); } catch (e) {} }
   }
 
@@ -278,40 +281,39 @@
   // standard locate control (Ivan moved it off the panel). Toggles the live blue
   // dot. Calls toggleMyLocation() (defined with the geolocation code below — a
   // hoisted function, so it resolves at click time).
-  let _locateBtn = null;
-  const LocateControl = L.Control.extend({
+  // «Моє місце» · «Стежити за дроном» · «Телеметрія на карті» are three related view
+  // toggles, so they share ONE toolbar group instead of floating as three separate
+  // boxes down the map edge (five stacked control boxes read as clutter, especially
+  // on a phone). Same anchors, same handlers, same ids in the code — only the
+  // container is shared; each button keeps its own class for its active colour.
+  let _locateBtn = null, _followBtn = null, _overlayBtn = null;
+  let mavOverlayOn = true;
+  const MapToolsControl = L.Control.extend({
     options: { position: "topleft" },
     onAdd: function () {
-      const div = L.DomUtil.create("div", "leaflet-bar leaflet-control locate-ctl");
-      const a = L.DomUtil.create("a", "", div);
-      a.href = "#"; a.title = "Моє місце (наживо)"; a.setAttribute("role", "button");
-      a.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>';
+      const div = L.DomUtil.create("div", "leaflet-bar leaflet-control map-tools");
+      const mk = function (cls, title, svg, fn) {
+        const a = L.DomUtil.create("a", cls, div);
+        a.href = "#"; a.title = title; a.setAttribute("role", "button");
+        a.setAttribute("aria-label", title);
+        a.innerHTML = svg;
+        L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); fn(); });
+        return a;
+      };
+      _locateBtn = mk("locate-btn", "Моє місце (наживо)",
+        '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
+        function () { toggleMyLocation(); });
+      _followBtn = mk("follow-btn", "Стежити за дроном",
+        '<svg class="ic" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2"/></svg>',
+        function () { toggleFollow(); });
+      _overlayBtn = mk("overlay-btn", "Телеметрія на карті",
+        '<svg class="ic" viewBox="0 0 24 24"><path d="M3 5h18M3 12h13M3 19h9"/></svg>',
+        function () { toggleOverlay(); });
       L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); toggleMyLocation(); });
-      _locateBtn = a;
       return div;
     },
   });
-  map.addControl(new LocateControl());
-
-  // «Стежити за дроном» toolbar button next to «Моє місце» (moved off the Flight
-  // panel). Drives the hidden #mav-follow checkbox, so its wiring (mavFollow +
-  // session persistence) is unchanged. `.active` = accent highlight when following.
-  let _followBtn = null;
-  const FollowControl = L.Control.extend({
-    options: { position: "topleft" },
-    onAdd: function () {
-      const div = L.DomUtil.create("div", "leaflet-bar leaflet-control follow-ctl");
-      const a = L.DomUtil.create("a", "", div);
-      a.href = "#"; a.title = "Стежити за дроном"; a.setAttribute("role", "button");
-      a.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2"/></svg>';
-      L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); toggleFollow(); });
-      _followBtn = a;
-      return div;
-    },
-  });
-  map.addControl(new FollowControl());
+  map.addControl(new MapToolsControl());
   function syncFollowBtn() { if (_followBtn) _followBtn.classList.toggle("active", !!mavFollow); }
   function setFollow(v) {
     const cb = $("mav-follow");
@@ -321,22 +323,7 @@
   }
   function toggleFollow() { setFollow(!mavFollow); }
 
-  // ---- on-map telemetry overlay toggle (#11) — top-left, below the follow button ----
-  let mavOverlayOn = true, _overlayBtn = null;
-  const OverlayControl = L.Control.extend({
-    options: { position: "topleft" },
-    onAdd: function () {
-      const div = L.DomUtil.create("div", "leaflet-bar leaflet-control overlay-ctl");
-      const a = L.DomUtil.create("a", "", div);
-      a.href = "#"; a.title = "Телеметрія на карті"; a.setAttribute("role", "button");
-      a.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M3 5h18M3 12h13M3 19h9"/></svg>';
-      L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); toggleOverlay(); });
-      _overlayBtn = a;
-      return div;
-    },
-  });
-  map.addControl(new OverlayControl());
+  // ---- on-map telemetry overlay toggle (#11) — third button of the shared bar ----
   function syncOverlayBtn() { if (_overlayBtn) _overlayBtn.classList.toggle("active", !!mavOverlayOn); }
   function setOverlay(v) {
     mavOverlayOn = !!v; sessionPatch({ overlay: mavOverlayOn }); syncOverlayBtn();
@@ -499,6 +486,39 @@
   let overlapLayer = null;        // double-sprayed area (drawn over the swath)
   let gapLayer = null;            // unsprayed gaps between passes (#9)
   let transitLayer = null;        // safe ingress/egress detour legs (#12, viz only)
+
+  // Leaflet.draw ships English strings, so the app's most-used interaction — drawing
+  // the field — spoke English inside a Ukrainian UI: the action bar read
+  // «Контур · Виріз · Finish · Delete last point · Cancel» and the tooltip that
+  // follows the finger said "Click to start drawing shape". Everything the drawing
+  // tools say is translated here. The strings are read by Leaflet.draw at the moment
+  // it builds a tooltip, so re-applying this on a language switch is enough.
+  function applyDrawLocale() {
+    if (!window.L || !L.drawLocal) return;
+    const D = L.drawLocal;
+    D.draw.toolbar.actions = { title: t("Скасувати креслення"), text: t("Скасувати") };
+    D.draw.toolbar.finish = { title: t("Завершити креслення"), text: t("Завершити") };
+    D.draw.toolbar.undo = { title: t("Видалити останню точку"), text: t("Прибрати точку") };
+    D.draw.toolbar.buttons.polygon = t("Накреслити контур поля або виріз");
+    D.draw.handlers.polygon.tooltip = {
+      start: t("Натисни на карті, щоб почати межу"),
+      cont: t("Натисни, щоб додати точку"),
+      end: t("Натисни першу точку, щоб замкнути"),
+    };
+    D.edit.toolbar.actions.save = { title: t("Зберегти зміни"), text: t("Зберегти") };
+    D.edit.toolbar.actions.cancel = { title: t("Скасувати зміни"), text: t("Скасувати") };
+    D.edit.toolbar.actions.clearAll = { title: t("Видалити все"), text: t("Видалити все") };
+    D.edit.toolbar.buttons.edit = t("Редагувати вузли");
+    D.edit.toolbar.buttons.editDisabled = t("Немає що редагувати");
+    D.edit.toolbar.buttons.remove = t("Видалити фігуру");
+    D.edit.toolbar.buttons.removeDisabled = t("Немає що видаляти");
+    D.edit.handlers.edit.tooltip = {
+      text: t("Тягни вузли, щоб виправити межу"),
+      subtext: t("«Скасувати» — відкинути зміни"),
+    };
+    D.edit.handlers.remove.tooltip = { text: t("Натисни на фігуру, щоб видалити") };
+  }
+  applyDrawLocale();
 
   const drawControl = new L.Control.Draw({
     draw: {
@@ -1986,7 +2006,12 @@
       for (let k = 0; k < 8; k++) next();
     });
     $("dl-map").disabled = false;
-    setMsg(`Карту збережено офлайн: ${urls.length} тайлів${fail ? ` (${fail} пропущено)` : ""}. Район працює без мережі.`, "ok");
+    // Report what actually landed: with no network EVERY tile fails, and the old text
+    // still said «збережено … Район працює без мережі», which is the opposite of true.
+    const okTiles = urls.length - fail;
+    if (!okTiles) setMsg("Карту НЕ збережено: жоден тайл не завантажився. Перевір мережу й спробуй ще раз.", "error");
+    else if (fail) setMsg(`Карту збережено частково: ${okTiles} з ${urls.length} тайлів (${fail} не вдалося). Місцями буде порожньо — повтори при кращій мережі.`, "warn");
+    else setMsg(`Карту збережено офлайн: ${urls.length} тайлів. Район працює без мережі.`, "ok");
   }
   $("dl-map").addEventListener("click", downloadOfflineMap);
   $("clear").addEventListener("click", () => {
@@ -2324,7 +2349,7 @@
     let recs = await fldAll();
     if (recs === null) { const o = lpAll(); recs = Object.keys(o).map((n) => Object.assign({ name: n }, o[n])); }
     recs = (recs || []).filter((r) => r.field && r.field.length >= 3);
-    if (!recs.length) { setMsg("Немає збережених полів. Намалюй контур і збережи ().", null); return; }
+    if (!recs.length) { setMsg("Немає збережених полів. Намалюй контур на карті — поле збережеться саме.", null); return; }
     clearSavedOverview();
     overviewLayer = L.layerGroup().addTo(map);
     let bounds = null;
@@ -4042,7 +4067,12 @@
     const chip = (r, lbl) => `<button class="chip${statsRange === r ? " active" : ""}" data-range="${r}" aria-pressed="${statsRange === r}">${t(lbl)}</button>`;
     let html = `<div class="stats-chips">${chip("hour", "з початку години")}${chip("day", "з початку дня")}${chip("all", "усе")}</div>`;
     if (!rows.length) {
-      host.innerHTML = html + `<div class="msg">${t("Немає польотів за обраний період.")}</div>`;
+      // A proper empty state, not a bare grey line: say what will appear here and when.
+      host.innerHTML = html + `<div class="empty-state">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5h16M6.5 19.5V12M11 19.5V7M15.5 19.5v-5M20 19.5V9.5"/></svg>
+        <div>${t("Немає польотів за обраний період.")}</div>
+        <div class="es-sub">${t("Записи зʼявляться після першого польоту з підключеним дроном — наліт, площа, га/хв.")}</div>
+      </div>`;
       _bindStatsChips(); return;
     }
     let secTot = 0, distTot = 0, covTot = 0, covDurMin = 0;
@@ -5043,7 +5073,16 @@
     for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; }
     return false;
   }
+  // A Play-distributed build has no AndroidUpdate bridge (Play forbids an app installing
+  // APKs, so that bridge is compiled out of the `play` build type). Updating it means
+  // going to the store, not to our own server — say so instead of running the web
+  // service-worker path, which would just reload the same bundled app.
+  const IS_STORE_BUILD = IS_ANDROID && !window.AndroidUpdate;
   async function checkUpdate() {
+    if (IS_STORE_BUILD) {
+      setMsg("Оновлення для цієї збірки приходять через Google Play — відкрий Play і онови застосунок там.", null);
+      return;
+    }
     setMsg("Перевіряю оновлення на сервері…", null);
     // 1) Get the server's latest version.
     let latest = "";
@@ -5088,6 +5127,23 @@
     } catch (e) { location.reload(); }
   }
   if ($("check-update")) $("check-update").addEventListener("click", checkUpdate);
+
+  // The «Додаток» tab used to state the APK version as literal text, so it went stale
+  // the moment a build shipped (it still claimed v2.5.36 at v2.5.82). Both download
+  // labels now come from the server's own manifests; offline they simply stay blank.
+  (async function fillDownloadVersions() {
+    const put = (id, v) => { const el = $(id); if (el && v) el.textContent = "v" + v; };
+    const read = async (file) => {
+      try {
+        const r = await fetch(API_BASE + "/" + file + "?t=" + Date.now(),
+                              { cache: "no-store", credentials: "include" });
+        if (!r.ok) return "";
+        return (await r.json()).version || "";
+      } catch (e) { return ""; }
+    };
+    if ($("apk-ver")) put("apk-ver", await read("version.json"));
+    if ($("beta-ver")) put("beta-ver", await read("beta-version.json"));
+  })();
 
   // ---- Backup-sync (opt-in, OFF by default): push/pull key app state to Ivan's own
   // server (#10) — protects fields / flight stats / settings against a lost or
