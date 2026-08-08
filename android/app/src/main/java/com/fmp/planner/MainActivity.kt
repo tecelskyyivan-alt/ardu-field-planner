@@ -185,9 +185,25 @@ class MainActivity : Activity() {
         // without this the padding wouldn't apply until some later relayout (or never).
         androidx.core.view.ViewCompat.requestApplyInsets(webView)
         pendingKml = readKmlFromIntent(intent)          // launched via "Open with" / share a .kml?
+        registerBackHandler()
         webView.loadUrl("https://appassets.androidplatform.net/")
     }
 
+    // Back navigation. Android 16 (targetSdk 36) turns PREDICTIVE BACK on by default, and
+    // then the framework routes the gesture through OnBackInvokedDispatcher — the legacy
+    // onBackPressed() below is no longer called, so without this the first back press would
+    // leave the app instead of stepping back inside the WebView (e.g. from the privacy page).
+    private fun registerBackHandler() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+        ) {
+            if (webView.canGoBack()) webView.goBack() else finish()
+        }
+    }
+
+    /** Pre-Android-13 path; on 13+ registerBackHandler() takes over. */
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }

@@ -40,8 +40,8 @@ class LogBridge(private val ctx: Context, private val web: WebView) {
     private val queueDir: File by lazy { File(ctx.filesDir, "logqueue").apply { mkdirs() } }
 
     companion object {
-        private const val URL_STR = ""   // self-host: set your log endpoint to enable (empty = disabled)
-        private const val AUTH = ""      // self-host: "user:pass" for the endpoint basic-auth
+        private val URL_STR = if (BuildConfig.FMP_SERVER_BASE.isEmpty()) "" else BuildConfig.FMP_SERVER_BASE + "/api/log"   // self-host: set your log endpoint to enable (empty = disabled)
+        private val AUTH = BuildConfig.FMP_SERVER_AUTH   // from android/server.properties; empty in the Play build
         private const val QUEUE_CAP = 40                   // max payloads kept on disk (newest wins)
     }
 
@@ -74,6 +74,7 @@ class LogBridge(private val ctx: Context, private val web: WebView) {
 
     /** POST one payload. Returns true on HTTP 2xx. */
     private fun post(json: String): Boolean {
+        if (URL_STR.isEmpty()) return false      // no server configured in this build
         return try {
             val con = URL(URL_STR).openConnection() as HttpURLConnection
             con.requestMethod = "POST"

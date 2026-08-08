@@ -64,3 +64,6 @@ data/gazetteer.sqlite
 
 # SITL binary — regenerable from ArduPilot source, not history material
 sitl/arducopter
+
+# local server credentials for the log / sync / photo bridges (never commit)
+android/server.properties

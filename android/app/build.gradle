@@ -3,20 +3,37 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Optional, never committed: android/server.properties with
+//   base=https://your.server/ai
+//   auth=user:password
+def _sp = new Properties()
+if (rootProject.file("server.properties").exists())
+    _sp.load(new FileInputStream(rootProject.file("server.properties")))
+def fmpServerBase = _sp.getProperty("base", "")
+def fmpServerAuth = _sp.getProperty("auth", "")
+
 android {
     namespace 'com.fmp.planner'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.fmp.planner"
         minSdk 24
-        targetSdk 35
-        versionCode 99
-        versionName "2.5.82"
+        targetSdk 36
+        versionCode 103
+        versionName "2.5.84"
         // In-app APK self-update: ON for the self-distributed builds, OFF for Play
         // (Google Play forbids apps installing APKs themselves). Gates the AndroidUpdate
         // bridge in MainActivity; the `play` build also strips REQUEST_INSTALL_PACKAGES.
         buildConfigField "boolean", "SELF_UPDATE", "true"
+        // Server used by the optional log / photo-import / backup-sync bridges. Kept OUT of
+        // the source tree: a build reads it from `android/server.properties` (gitignored),
+        // so the public repo stays credential-free and nothing is baked into a build that
+        // does not need it. The `play` build type below forces it EMPTY — a Play-distributed
+        // binary is public, and a shared basic-auth credential in it is a credential leak;
+        // there the features stay inert until the user points the app at their own server.
+        buildConfigField "String", "FMP_SERVER_BASE", "\"${fmpServerBase}\""
+        buildConfigField "String", "FMP_SERVER_AUTH", "\"${fmpServerAuth}\""
     }
 
     buildFeatures { buildConfig true }   // BuildConfig.DEBUG → gate WebView debugging
@@ -63,6 +80,9 @@ android {
         play {
             initWith release
             buildConfigField "boolean", "SELF_UPDATE", "false"
+            // No shared credential in a publicly distributed binary.
+            buildConfigField "String", "FMP_SERVER_BASE", "\"\""
+            buildConfigField "String", "FMP_SERVER_AUTH", "\"\""
         }
     }
 
@@ -87,6 +107,16 @@ android {
         resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}'] }
     }
 }
+
+// The Play track must always sit ABOVE the self-distributed APK: if a sideloaded build
+// had an equal or higher versionCode, installing from Play would look like a downgrade
+// and be refused. One counter in defaultConfig, fixed +100 offset for the Play variant.
+androidComponents {
+    onVariants(selector().withBuildType("play")) { variant ->
+        variant.outputs.each { it.versionCode.set(android.defaultConfig.versionCode + 100) }
+    }
+}
+
 
 dependencies {
     implementation 'androidx.webkit:webkit:1.11.0'              // WebViewAssetLoader

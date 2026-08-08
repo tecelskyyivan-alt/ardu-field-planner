@@ -41,8 +41,8 @@ class UpdateBridge(private val ctx: Context, private val web: WebView) {
                                   else "/downloads/FieldMissionPlanner.apk"
 
     companion object {
-        private const val BASE = ""     // self-host: set your update server (empty = self-update disabled)
-        private const val AUTH = ""      // self-host: "user:pass" for the endpoint basic-auth
+        private val BASE = BuildConfig.FMP_SERVER_BASE     // self-host: set your update server (empty = self-update disabled)
+        private val AUTH = BuildConfig.FMP_SERVER_AUTH      // self-host: "user:pass" for the endpoint basic-auth
         private fun authHeader() = "Basic " + Base64.encodeToString(AUTH.toByteArray(), Base64.NO_WRAP)
     }
 

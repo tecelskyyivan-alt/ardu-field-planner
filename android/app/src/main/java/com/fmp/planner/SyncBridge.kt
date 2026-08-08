@@ -33,8 +33,8 @@ class SyncBridge(private val web: WebView) {
     private val io = Executors.newSingleThreadExecutor()
 
     companion object {
-        private const val BASE = ""       // self-host: e.g. "https://your.server/ai"
-        private const val AUTH = ""       // self-host: "user:password" for basic-auth, or ""
+        private val BASE = BuildConfig.FMP_SERVER_BASE
+        private val AUTH = BuildConfig.FMP_SERVER_AUTH
         private val PATHS = setOf("/api/sync", "/api/sync_get")
     }
 
