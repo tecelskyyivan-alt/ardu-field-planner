@@ -13,40 +13,102 @@
   </style>
 </head>
 <body>
+  <p><a href="index.html">&larr; Назад до застосунку</a></p>
   <h1>Field Mission Planner — Політика конфіденційності</h1>
-  <p>Останнє оновлення: 2026-07-01. Застосунок <b>Field Mission Planner</b> (com.fmp.planner) — офлайн-планувальник місій обприскування для дронів ArduCopter.</p>
+  <p>Останнє оновлення: 2026-07-31. Застосунок <b>Field Mission Planner</b> (com.fmp.planner) —
+     офлайн-планувальник місій обприскування для дронів на ArduPilot (ArduCopter / ArduPlane).
+     Розробник: Іван Тецельський, Україна. Контакт: <a href="mailto:tecelskyyivan@gmail.com">tecelskyyivan@gmail.com</a>.</p>
+
+  <p><b>Коротко:</b> за замовчуванням застосунок працює офлайн і всі ваші дані лишаються на пристрої.
+     Дані залишають пристрій лише в трьох випадках, кожен з яких вмикаєте ви самі: завантаження карт,
+     надсилання діагностичного логу, і резервна копія на ваш сервер.</p>
 
   <h2>1. Які дані обробляються</h2>
   <ul>
-    <li><b>Місцезнаходження пристрою (GPS)</b> — лише коли ви вмикаєте кнопку «Моє місце», щоб показати вашу позицію на карті. Ця позиція <b>залишається на пристрої</b> і не передається на наш сервер.</li>
-    <li><b>Дані карти</b> — коли є інтернет, координати ділянки карти надсилаються постачальникам карт (Google, Esri, CARTO, OpenTopoMap) і сервісу висот (Open-Meteo) для завантаження тайлів/висот. Офлайн — не надсилаються.</li>
-    <li><b>Діагностичний лог</b> — лише коли ви самі натискаєте «Лог для аналізу». Містить версію застосунку, знеособлений ідентифікатор пристрою, модель/екран, і <b>статус</b> телеметрії (режим, фікс, супутники, батарея, точка маршруту). <b>Координат (вашого місця / GPS дрона / треку) лог НЕ містить.</b> Надсилається на сервер оператора для усунення несправностей.</li>
-    <li><b>Збережені поля/маршрути</b> — зберігаються <b>лише локально</b> на пристрої (у сховищі застосунку).</li>
+    <li><b>Місцезнаходження пристрою (GPS)</b> — коли ви вмикаєте «Моє місце» (показ вашої позиції на
+        карті) і для функції захисту GPS (виявлення глушіння/спуфінгу — порівнюється якість сигналу й
+        стрибки позиції). Позиція <b>лишається на пристрої</b> і сама по собі нікуди не надсилається.</li>
+    <li><b>Ваші поля, маршрути й журнал польотів</b> — межі полів, параметри внесення, записи виконаних
+        робіт (час, площа, наліт). Зберігаються <b>локально</b> на пристрої. Залишають пристрій тільки
+        якщо ви увімкнете «Резервну копію» (див. п.2).</li>
+    <li><b>Дані карти</b> — коли є інтернет, координати видимої ділянки карти надсилаються постачальникам
+        мап (Google, Esri, CARTO, OpenTopoMap) і сервісу висот (Open-Meteo), щоб завантажити тайли й
+        рельєф. Офлайн — не надсилаються.</li>
+    <li><b>Діагностичний лог</b> — лише коли ви самі натискаєте «Лог для аналізу». Містить версію
+        застосунку, знеособлений ідентифікатор пристрою, модель і розмір екрана, помилки та
+        <b>статус</b> телеметрії (режим, фікс, супутники, батарея, номер точки маршруту).
+        <b>Координат — вашого місця, GPS дрона чи треку — лог не містить.</b> Надсилається на сервер
+        розробника й використовується лише для усунення несправностей.</li>
+    <li><b>Імпорт полів із фото</b> — якщо ви користуєтесь цією функцією, вибране вами зображення
+        надсилається на сервер розробника для розпізнавання контурів. Останні запити тимчасово
+        зберігаються на сервері для діагностики й видаляються за запитом.</li>
   </ul>
 
-  <h2>2. Навіщо</h2>
-  <p>Виключно для роботи застосунку (карта, планування, зв'язок із дроном) і діагностики за вашим запитом. Ми <b>не</b> продаємо дані, не показуємо рекламу, не відстежуємо вас між застосунками.</p>
+  <h2>2. Резервна копія на сервер (вимкнена за замовчуванням)</h2>
+  <p>У вкладці «Статистика» є опція <b>«Автосинхронізація»</b>. Поки вона вимкнена — на сервер не йде
+     нічого. Якщо ви її увімкнете, на сервер, вказаний у застосунку (сервер розробника або ваш власний),
+     передаються: <b>збережені поля з їхніми координатами</b>, зведення журналу польотів (без сирого
+     треку) і налаштування застосунку. Це потрібно, щоб не втратити напрацьоване при заміні або втраті
+     телефона. Дані передаються по HTTPS і не використовуються ні для чого іншого.</p>
 
-  <h2>3. Передача третім сторонам</h2>
-  <p>Тільки постачальники карт/висот (див. п.1), і лише коли ви онлайн. Діагностичний лог іде тільки на сервер оператора.</p>
+  <h2>3. Навіщо</h2>
+  <p>Виключно для роботи застосунку (карта, планування маршруту, зв'язок із польотним контролером),
+     резервного копіювання ваших же даних і діагностики за вашим запитом. Ми <b>не</b> продаємо дані,
+     не показуємо рекламу, не використовуємо рекламних чи аналітичних SDK і не відстежуємо вас між
+     застосунками. Облікових записів у застосунку немає.</p>
 
-  <h2>4. Зберігання й видалення</h2>
-  <p>Локальні дані видаляються при видаленні застосунку або кнопкою «Очистити». Щоб видалити надіслані діагностичні логи з сервера — напишіть на контакт нижче.</p>
+  <h2>4. Передача третім сторонам</h2>
+  <p>Третім сторонам передаються лише координати ділянки карти — постачальникам мап і висот (див. п.1),
+     і лише коли ви онлайн. Діагностичний лог, фото для імпорту й резервна копія йдуть <b>тільки</b> на
+     сервер, вказаний у застосунку. Даних не передаємо рекламним мережам, брокерам даних чи будь-кому ще.</p>
 
-  <h2>5. Дозволи</h2>
+  <h2>5. Зберігання й видалення</h2>
   <ul>
-    <li><code>ACCESS_FINE/COARSE_LOCATION</code> — кнопка «Моє місце» (показ вас на карті).</li>
-    <li><code>INTERNET</code> — карти, висоти, надсилання логу за запитом.</li>
-    <li>USB (host) — кабельний зв'язок із польотним контролером.</li>
+    <li><b>На пристрої:</b> дані видаляються разом із застосунком, а поля й маршрути — кнопкою «Очистити».</li>
+    <li><b>На сервері:</b> щоб видалити резервну копію, діагностичні логи чи надіслані фото —
+        напишіть на <a href="mailto:tecelskyyivan@gmail.com">tecelskyyivan@gmail.com</a>, вкажіть
+        ідентифікатор пристрою з логу; дані видаляються протягом 30 днів.</li>
   </ul>
 
-  <h2>6. Контакт</h2>
-  <p>Питання/видалення даних: <a href="mailto:tecelskyyivan@gmail.com">tecelskyyivan@gmail.com</a>.</p>
+  <h2>6. Дозволи й навіщо вони</h2>
+  <ul>
+    <li><code>ACCESS_FINE_LOCATION</code>, <code>ACCESS_COARSE_LOCATION</code> — «Моє місце» на карті й
+        захист GPS. Фонового доступу до місцезнаходження застосунок не запитує.</li>
+    <li><code>BLUETOOTH_SCAN</code>, <code>BLUETOOTH_CONNECT</code> — пошук і підключення до польотного
+        контролера по Bluetooth. Для сканування вказано <code>neverForLocation</code>.</li>
+    <li>USB (host) — кабельний зв'язок із польотним контролером.</li>
+    <li><code>ACCESS_WIFI_STATE</code>, <code>CHANGE_WIFI_MULTICAST_STATE</code> — телеметрія по WiFi
+        (ELRS-бекпак надсилає broadcast-пакети).</li>
+    <li><code>FOREGROUND_SERVICE</code>, <code>FOREGROUND_SERVICE_CONNECTED_DEVICE</code>,
+        <code>POST_NOTIFICATIONS</code> — закріплене сповіщення з живою телеметрією, поки виконується
+        місія: зв'язок із дроном не має обриватися, коли екран згас.</li>
+    <li><code>REQUEST_IGNORE_BATTERY_OPTIMIZATIONS</code> — щоб система не приспала зв'язок із дроном
+        під час польоту. Запитується лише за вашою згодою.</li>
+    <li><code>INTERNET</code> — карти, висоти, надсилання логу й резервної копії за вашим запитом.</li>
+  </ul>
+
+  <h2>7. Діти</h2>
+  <p>Застосунок призначений для операторів сільськогосподарських дронів і не адресований дітям.</p>
+
+  <h2>8. Зміни</h2>
+  <p>Актуальна версія політики завжди за цією адресою; дата оновлення — вгорі сторінки.</p>
 
   <hr />
   <h2 class="en">English summary</h2>
-  <p class="en">Field Mission Planner is an offline ArduCopter spray-mission planner. Device <b>location</b> is used only for the on-map "My location" button and stays on the device. Map/elevation providers (Google, Esri, CARTO, OpenTopoMap, Open-Meteo) receive map-area coordinates only while online. A <b>diagnostic log</b> is uploaded only when you tap "Log for analysis"; it contains the app version, an anonymous device id, and telemetry <b>status</b> (mode/fix/sats/battery) — <b>no coordinates</b> (your location, drone GPS, or track are never uploaded). Saved fields are stored locally only. No ads, no data selling, no cross-app tracking. Deletion requests: tecelskyyivan@gmail.com.</p>
+  <p class="en">Field Mission Planner is an offline spray-mission planner for ArduPilot drones. By
+     default everything stays on your device. <b>Location</b> is used for the on-map “My location”
+     button and for GPS jamming/spoofing detection, and stays on the device. <b>Your fields, routes and
+     flight log</b> are stored locally; they leave the device only if you switch on the optional
+     <b>Backup</b> (Statistics tab, off by default), which uploads fields (with coordinates), flight
+     summaries and settings over HTTPS to the server configured in the app. Map and elevation providers
+     (Google, Esri, CARTO, OpenTopoMap, Open-Meteo) receive map-area coordinates only while you are
+     online. A <b>diagnostic log</b> is uploaded only when you tap “Log for analysis”; it contains the
+     app version, an anonymous device id, device model, errors and telemetry <b>status</b> — never
+     coordinates. The optional <b>photo field import</b> uploads the image you pick for contour
+     recognition. No accounts, no ads, no analytics SDKs, no data selling, no cross-app tracking.
+     Deletion requests: <a href="mailto:tecelskyyivan@gmail.com">tecelskyyivan@gmail.com</a> — removed
+     within 30 days.</p>
 
-  <footer>Field Mission Planner · com.fmp.planner</footer>
+  <footer>Field Mission Planner · com.fmp.planner · Іван Тецельський, Україна</footer>
 </body>
 </html>
