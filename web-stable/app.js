@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.84";
+  const APP_VERSION = "2.5.85";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -649,7 +649,7 @@
     if (layer.setStyle) {
       layer.setStyle({ color: "#ff4d4d", weight: 2, fillOpacity: 0.2, dashArray: "4 4" });
     }
-    layer.bindTooltip("Виріз — клікни, щоб видалити (або «Редагувати вирізи» для вузлів)");
+    layer.bindTooltip(t("Виріз — клікни, щоб видалити (або «Редагувати вирізи» для вузлів)"));
     layer.on("click", () => {
       // In ANY editing mode (custom exclusion-edit OR the native Leaflet.draw
       // edit/delete toolbar) the click belongs to that tool — don't quick-delete.
@@ -1038,7 +1038,7 @@
       if (res.cover && res.cover.length)
         insetLayer = L.polygon(res.cover.map((p) => [p.lat, p.lng]), {
           color: "#5fd3a3", weight: 1.5, dashArray: "6 5", fill: false,
-        }).addTo(map).bindTooltip("Межа проходів (півширини внесення від краю)");
+        }).addTo(map).bindTooltip(t("Межа проходів (півширини внесення від краю)"));
       const pts = res.waypoints.map((p) => [p.lat, p.lng]);
       lastRoute = pts;
       lastHome = res.home ? { lat: res.home.lat, lng: res.home.lng } : null;
@@ -1051,8 +1051,8 @@
       if (res.calibration) lastCalibration = res.calibration;
       routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
       routeMarkers = L.featureGroup([
-        L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 }).bindTooltip("Старт"),
-        L.circleMarker(pts[pts.length - 1], { radius: 5, color: "#ff7b72", fillOpacity: 1 }).bindTooltip("Фініш"),
+        L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 }).bindTooltip(t("Старт")),
+        L.circleMarker(pts[pts.length - 1], { radius: 5, color: "#ff7b72", fillOpacity: 1 }).bindTooltip(t("Фініш")),
       ]).addTo(map);
       if (s.statsHtml && $("stats")) { $("stats").innerHTML = s.statsHtml; $("stats").classList.remove("hidden"); }
       ["exp-wp", "exp-plan", "exp-fence", "exp-fencemp", "exp-geojson"]
@@ -1153,7 +1153,7 @@
         const j = await res.json();
         elevs = elevs.concat((j && j.elevation) || []);
       }
-    } catch (e) { setMsg("Карта висот недоступна: " + e, "error"); return; }
+    } catch (e) { setMsg(t("Карта висот недоступна: ") + e, "error"); return; }
     if (elevs.length !== all.length) { setMsg("Карта висот недоступна (сервіс відповів не повністю).", "error"); return; }
     const ref = elevs[0];
     pts.forEach((p, i) => { p.elev = elevs[i + 1]; });
@@ -1413,7 +1413,32 @@
   let buildSeq = 0;          // newest dispatched build wins (drop stale live results)
   let liveTimer = null;      // debounce handle for live angle rebuilds
 
+  // On the APK Pyodide runs on the MAIN THREAD, so a build freezes the whole UI while
+  // the button stays enabled and looks untouched — a second tap just queues another
+  // freeze. The guard lives here because every caller (the button, Enter on the map,
+  // the pre-upload rebuild) routes through this one function.
+  let buildInFlight = null;
   async function buildRoute(opts = {}) {
+    // Live rebuilds (angle drag, vertex edit) are already debounced and race-proofed
+    // by buildSeq, and blocking them would stall the drag.
+    if (opts && opts.live) return buildRouteInner(opts);
+    // A second request rides the build already running rather than being dropped:
+    // mavUpload() awaits this to get the fixed-wing arcs baked in before it uploads.
+    if (buildInFlight) return buildInFlight;
+    const btn = $("build");
+    buildInFlight = (async () => {
+      if (btn) btn.disabled = true;
+      // Yield a frame so the disabled button actually PAINTS before the main-thread
+      // engine blocks it; without this the freeze is indistinguishable from a dead
+      // tap. rAF alone never fires when the app is backgrounded, hence the timeout.
+      await new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
+      try { return await buildRouteInner(opts); }
+      finally { if (btn) btn.disabled = false; }
+    })();
+    try { return await buildInFlight; } finally { buildInFlight = null; }
+  }
+
+  async function buildRouteInner(opts = {}) {
     const live = !!opts.live;             // quiet rebuild while the user drags the angle
     if (!live) commitActiveDraw();        // auto-finish a forgotten in-progress drawing first
     const boundary = boundaryFromPolygon();
@@ -1505,7 +1530,7 @@
       const ins = res.cover.map((p) => [p.lat, p.lng]);
       insetLayer = L.polygon(ins, {
         color: "#5fd3a3", weight: 1.5, dashArray: "6 5", fill: false,
-      }).addTo(map).bindTooltip("Межа проходів (півширини внесення від краю)");
+      }).addTo(map).bindTooltip(t("Межа проходів (півширини внесення від краю)"));
     }
 
     // Spray footprint overlay: the swept SWATH (green, width = spacing) and the
@@ -1525,21 +1550,21 @@
             L.polygon(ring.map((p) => [p.lat, p.lng]), {
               color: "#0077b6", weight: 1.5, opacity: 0.9,
               fillColor: "#00c2ff", fillOpacity: 0.35, interactive: false,
-            }))).addTo(map).bindTooltip("Площа внесення (ширина смуги = крок)");
+            }))).addTo(map).bindTooltip(t("Площа внесення (ширина смуги = крок)"));
         }
         if (res.overlap_geo && res.overlap_geo.length) {
           overlapLayer = L.featureGroup(res.overlap_geo.map((ring) =>
             L.polygon(ring.map((p) => [p.lat, p.lng]), {
               color: "#c0392b", weight: 0.5, opacity: 0.55,
               fillColor: "#ff3b30", fillOpacity: 0.3, interactive: false,
-            }))).addTo(map).bindTooltip("Накладання — подвійне внесення");
+            }))).addTo(map).bindTooltip(t("Накладання — подвійне внесення"));
         }
         if (res.gap_geo && res.gap_geo.length) {
           gapLayer = L.featureGroup(res.gap_geo.map((ring) =>
             L.polygon(ring.map((p) => [p.lat, p.lng]), {
               color: "#b8860b", weight: 1, opacity: 0.9,
               fillColor: "#ffd166", fillOpacity: 0.4, interactive: false,
-            }))).addTo(map).bindTooltip("Прогалини — пропущено (не оброблено)");
+            }))).addTo(map).bindTooltip(t("Прогалини — пропущено (не оброблено)"));
         }
         if (routeLayer && routeLayer.bringToFront) routeLayer.bringToFront();
         if (routeMarkers && routeMarkers.bringToFront) routeMarkers.bringToFront();
@@ -1575,7 +1600,7 @@
             if (t.egress_ok && t.egress.length > 1) legs.push(L.polyline(t.egress.map((p) => [p.lat, p.lng]),
               { color: "#2f80ed", weight: 3, opacity: 0.9, dashArray: "6 6", interactive: false }));
             if (legs.length) transitLayer = L.featureGroup(legs).addTo(map)
-              .bindTooltip("Безпечний шлях на старт / додому");
+              .bindTooltip(t("Безпечний шлях на старт / додому"));
             if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — політ напряму. Перевір межу поля та вирізи.", "warn");
             if (!t.egress_ok) setMsg("Безпечний шлях додому не побудовано — політ напряму. Перевір межу поля та вирізи.", "warn");
           }
@@ -1592,9 +1617,9 @@
     if (pts.length) {
       routeMarkers = L.featureGroup([
         L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 })
-          .bindTooltip("Старт"),
+          .bindTooltip(t("Старт")),
         L.circleMarker(pts[pts.length - 1], { radius: 5, color: "#ff7b72", fillOpacity: 1 })
-          .bindTooltip("Фініш"),
+          .bindTooltip(t("Фініш")),
       ]).addTo(map);
     }
     // (The takeoff "HOME" marker at the field centroid was removed — it cluttered
@@ -1606,7 +1631,7 @@
       sectorsLayer = L.featureGroup(res.sectors.map((sec, i) =>
         L.polygon(sec.map((p) => [p.lat, p.lng]),
           { color: palette[i % palette.length], weight: 2, fillOpacity: 0.06 })
-          .bindTooltip("Сектор " + (i + 1)))).addTo(map);
+          .bindTooltip(t("Сектор ") + (i + 1)))).addTo(map);
     }
 
     $("stats").innerHTML =
@@ -1688,7 +1713,7 @@
     const a = api();
     if (!a) { setMsg("pywebview API недоступний.", "error"); return; }
     const res = await a.export(fmt);
-    if (res && res.ok) setMsg("Збережено: " + res.path, "ok");
+    if (res && res.ok) setMsg(t("Збережено: ") + res.path, "ok");
     else if (res && res.cancelled) setMsg("Скасовано.", null);
     else setMsg((res && res.error) || "Не вдалося зберегти.", "error");
   }
@@ -2015,6 +2040,13 @@
   }
   $("dl-map").addEventListener("click", downloadOfflineMap);
   $("clear").addEventListener("click", () => {
+    // One tap drops the contour, the cut-outs, the hazards, the route AND the
+    // auto-saved field — none of it undoable, and the button sits in the panel the
+    // operator thumbs through in the field. Ask, but only when there is something
+    // to lose (confirming an empty map is just a second tap).
+    if ((fieldPolygon || collectExclusions().length || hazardLayers().length ||
+         (lastRoute && lastRoute.length)) &&
+        !confirm(t("Очистити поле? Контур, вирізи та маршрут буде видалено. Скасувати це неможливо."))) return;
     setContourEdit(false);
     const _eb = $("edit-contour"); if (_eb) _eb.disabled = true;
     drawnItems.clearLayers();
@@ -2096,7 +2128,7 @@
       && pos.coords.speed != null && pos.coords.speed > 0.6) ? pos.coords.heading : null;
     if (!myLocMarker) {
       myLocMarker = L.marker([ll.lat, ll.lng], { icon: myLocIcon(hdg), zIndexOffset: 1600 })
-        .addTo(map).bindTooltip("Я тут");
+        .addTo(map).bindTooltip(t("Я тут"));
     } else { myLocMarker.setLatLng([ll.lat, ll.lng]); myLocMarker.setIcon(myLocIcon(hdg)); }
     if (acc > 0) {
       if (!myLocCircle) myLocCircle = L.circle([ll.lat, ll.lng], { radius: acc, color: "#2d7ff9",
@@ -2370,11 +2402,11 @@
             + tf("зроблено {0} · лишилось {1} га", doneHa.toFixed(1), leftHa.toFixed(1)) + "<br>"
             + tf("виконано {0} {1}", cc, plurCount(cc)) + "</span>",
           iconSize: [178, 62], iconAnchor: [89, 31] }) }).addTo(overviewLayer);
-      poly.bindTooltip("Натисни, щоб працювати з «" + esc(r.name || "Поле") + "»");
+      poly.bindTooltip(t("Натисни, щоб працювати з «") + esc(r.name || "Поле") + "»");
       poly.on("click", (e) => {
         L.DomEvent.stop(e); clearSavedOverview();
         applyProject(r); currentFieldName = r.name || "";
-        setMsg("Поле «" + (r.name || "Поле") + "» обрано для роботи. Натисни «Побудувати маршрут».", "ok");
+        setMsg(t("Поле «") + (r.name || "Поле") + "» обрано для роботи. Натисни «Побудувати маршрут».", "ok");
       });
     });
     if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
@@ -2464,7 +2496,7 @@
       created: now, updated: now, area_ha: lastFieldAreaHa || 0,
       done_ha: 0, completed_count: 0, last_flight_at: null };
     const ok = await fldPut(rec);
-    if (!ok) { try { lpSave(name, rec); } catch (e) { setMsg("Не вдалося зберегти: " + e, "error"); return; } }
+    if (!ok) { try { lpSave(name, rec); } catch (e) { setMsg(t("Не вдалося зберегти: ") + e, "error"); return; } }
     currentFieldName = name;
     setMsg(`Поле збережено автоматично як «${name}» (на цьому пристрої).`, "ok");
   });
@@ -2506,7 +2538,7 @@
     const reader = new FileReader();
     reader.onload = () => {
       try { applyProject(JSON.parse(reader.result)); setMsg("Проєкт завантажено з файлу.", "ok"); }
-      catch (e) { setMsg("Помилка читання проєкту: " + e, "error"); }
+      catch (e) { setMsg(t("Помилка читання проєкту: ") + e, "error"); }
     };
     reader.readAsText(file);
     ev.target.value = "";
@@ -2703,16 +2735,16 @@
       if (!idxs.length) return;
       if (idxs.length === 1) {
         const c = contours[idxs[0]]; clearImportPick(); adoptContour(c); currentFieldName = c.name;
-        setMsg("Обрано «" + c.name + "». Автозбереження — при заливці в дрон.", "ok"); return;
+        setMsg(t("Обрано «") + c.name + "». Автозбереження — при заливці в дрон.", "ok"); return;
       }
       if (!window.ClipperLib) { setMsg("Модуль об'єднання недоступний.", "error"); return; }
       const u = unionContours(idxs.map((n) => contours[n]));
       if (!u.ok) { setMsg(u.error, "error"); return; }
-      if (u.outers.length !== 1) { setMsg("Вибрані контури не суміжні — в одне суцільне поле не зливаються (" + u.outers.length + " окремих частин). Обери контури, що торкаються.", "error"); return; }
+      if (u.outers.length !== 1) { setMsg(t("Вибрані контури не суміжні — в одне суцільне поле не зливаються (") + u.outers.length + " окремих частин). Обери контури, що торкаються.", "error"); return; }
       clearImportPick();
       adoptContour({ name: "Об'єднане поле", ring: u.outers[0], holes: u.holes });
       currentFieldName = "Об'єднане поле";
-      setMsg("Об'єднано " + idxs.length + " контурів у одне поле.", "ok");
+      setMsg(t("Об'єднано ") + idxs.length + " контурів у одне поле.", "ok");
     });
     map.getContainer().appendChild(b); importPickBtn = b;
     updateBtn();
@@ -2757,12 +2789,12 @@
     if (res.contours.length === 1) {
       const c = res.contours[0];
       adoptContour(c); currentFieldName = c.name;
-      setMsg("Імпортовано контур із .kml" + (c.holes.length ? " (+" + c.holes.length + " вирізів)" : "") + ".", "ok");
+      setMsg(t("Імпортовано контур із .kml") + (c.holes.length ? " (+" + c.holes.length + " вирізів)" : "") + ".", "ok");
     } else {
       showImportedContours(res.contours);
     }
   }
-  window.__fmpImportKml = function (text, name) { try { importKmlText(String(text), name); } catch (e) { setMsg("Помилка читання KML: " + e, "error"); } };
+  window.__fmpImportKml = function (text, name) { try { importKmlText(String(text), name); } catch (e) { setMsg(t("Помилка читання KML: ") + e, "error"); } };
   // Native bridges (Android UDP/serial) push socket-level diagnostics here so a failed
   // WiFi/MAVLink connection is visible in the app log (тап на версію → «Лог»).
   window.__fmpNativeLog = function (s) { try { appLog(String(s)); } catch (e) {} };
@@ -3453,7 +3485,7 @@
       for (const k of Object.keys(found)) delete found[k];
       render();
       let r = null;
-      try { r = window.AndroidBle.startScan(); } catch (e) { setMsg("BLE-скан недоступний: " + e, "error"); return; }
+      try { r = window.AndroidBle.startScan(); } catch (e) { setMsg(t("BLE-скан недоступний: ") + e, "error"); return; }
       try {
         const j = JSON.parse(r);
         if (j && j.ok === false) { setMsg(j.error || "Скан не запустився.", "error"); return; }
@@ -3563,7 +3595,7 @@
           appLog("[auto-ble] BT-UART вже MAVLink (" + already.join(",") + ") — нічого робити");
           if (p.mac) {
             blePendingClear();
-            setMsg("Bluetooth уже налаштований (" + already.join(", ") + "), але минула BLE-спроба мовчала — надішли лог кнопкою «Лог».", "error");
+            setMsg(t("Bluetooth уже налаштований (") + already.join(", ") + "), але минула BLE-спроба мовчала — надішли лог кнопкою «Лог».", "error");
           }
         } else {
           appLog("[auto-ble] вільного/MSP UART не знайдено — нічого не чіпаю");
@@ -3579,7 +3611,7 @@
         await a.mav_set_param({ name: target + "_BAUD", value: 115 });
       blePendingClear();
       appLog("[auto-ble] " + target + " → MAVLink@115200, перезавантажую плату");
-      setMsg("Bluetooth налаштовано (" + target + "). Перезавантажую плату і перепідключусь сам…", "ok");
+      setMsg(t("Bluetooth налаштовано (") + target + "). Перезавантажую плату і перепідключусь сам…", "ok");
       const rr = await a.mav_reboot();
       if (!rr.ok) appLog("[auto-ble] reboot без ACK (" + (rr.error || "таймаут") + ") — чекаю довше");
       try { mavDisconnect(); } catch (e) {}
@@ -3656,7 +3688,7 @@
       }
     } catch (e) {
       $("mav-connect").disabled = false;
-      setMsg("Помилка підключення: " + e, "error");
+      setMsg(t("Помилка підключення: ") + e, "error");
     } finally {
       mavConnecting = false;
     }
@@ -4558,7 +4590,7 @@
     if (!targetMarker) {
       targetMarker = L.circleMarker(to, {
         radius: 9, color: "#ffd24a", weight: 3, fill: false, opacity: 0.95,
-      }).addTo(map).bindTooltip("Наступна точка");
+      }).addTo(map).bindTooltip(t("Наступна точка"));
       targetLine = L.polyline([from, to], {
         color: "#ffd24a", weight: 1.5, dashArray: "5 6", opacity: 0.7,
       }).addTo(map);
@@ -4580,7 +4612,7 @@
       const icon = L.divIcon({ className: "home-marker",
         html: '<div class="home-marker"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12l8-7 8 7"/><path d="M6 10.5V20h12v-9.5"/></svg></div>',
         iconSize: [20, 20], iconAnchor: [10, 18] });
-      liveHomeMarker = L.marker(pos, { icon }).addTo(map).bindTooltip("HOME дрона (точка arm)");
+      liveHomeMarker = L.marker(pos, { icon }).addTo(map).bindTooltip(t("HOME дрона (точка arm)"));
     } else {
       liveHomeMarker.setLatLng(pos);
     }
@@ -4595,7 +4627,7 @@
       html: `<div style="transform:rotate(${rh}deg);font-size:20px;line-height:20px;color:#ff3b30">▲</div>`,
       iconSize: [22, 22], iconAnchor: [11, 11] });
     if (!droneMarker) {
-      droneMarker = L.marker(pos, { icon: makeIcon(), zIndexOffset: 1000 }).addTo(map).bindTooltip("Дрон");
+      droneMarker = L.marker(pos, { icon: makeIcon(), zIndexOffset: 1000 }).addTo(map).bindTooltip(t("Дрон"));
       droneTrack = L.polyline([pos], { color: "#ffd24a", weight: 2, opacity: 0.8 }).addTo(map);
       _lastDroneHdg = rh;
       // Center on the drone the first time we see it, so it's never lost.
@@ -4752,7 +4784,7 @@
         try { _prevFlownRaw != null ? localStorage.setItem(FLOWN_KEY, _prevFlownRaw) : localStorage.removeItem(FLOWN_KEY); } catch (e) {}
       }
     } catch (e) {
-      setMsg("Помилка заливки: " + e, "error");
+      setMsg(t("Помилка заливки: ") + e, "error");
       try { _prevFlownRaw != null ? localStorage.setItem(FLOWN_KEY, _prevFlownRaw) : localStorage.removeItem(FLOWN_KEY); } catch (e2) {}
     } finally {
       $("mav-upload").disabled = !mavConnected;
@@ -4814,7 +4846,7 @@
         setMsg(tf("Залишок залито ({0} пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({1}) — link заслабкий.",
           r.count, rv.error || t("таймаут")) + " " + tail, "warn");
       } else {
-        setMsg("Залишок залито (" + r.count + " пунктів). " + tail, "ok");
+        setMsg(t("Залишок залито (") + r.count + " пунктів). " + tail, "ok");
       }
     } finally {
       $("mav-start").disabled = !mavConnected;
@@ -4831,8 +4863,8 @@
       if (transitLayer) { map.removeLayer(transitLayer); transitLayer = null; }
       routeLayer = L.polyline(pts, { color: "#ff8c2d", weight: 2.5, opacity: 0.95 }).addTo(map);
       routeMarkers = L.featureGroup([
-        L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 }).bindTooltip("Старт"),
-        L.circleMarker(pts[pts.length - 1], { radius: 5, color: "#ff7b72", fillOpacity: 1 }).bindTooltip("Фініш"),
+        L.circleMarker(pts[0], { radius: 5, color: "#5fd3a3", fillOpacity: 1 }).bindTooltip(t("Старт")),
+        L.circleMarker(pts[pts.length - 1], { radius: 5, color: "#ff7b72", fillOpacity: 1 }).bindTooltip(t("Фініш")),
       ]).addTo(map);
     } catch (e) {}
   }
@@ -4888,7 +4920,7 @@
   // Modes that don't allow arming on ArduCopter — switch to GUIDED first.
   const NON_ARMABLE = ["AUTO", "RTL", "LAND", "SMART_RTL", "AUTO_RTL", "BRAKE", "CIRCLE"];
   $("mav-arm").addEventListener("click", async () => {
-    if (!confirm("Увімкнути мотори (ARM)? Тримай апарат під контролем.")) return;
+    if (!confirm(t("Увімкнути мотори (ARM)? Тримай апарат під контролем."))) return;
     const m = (lastStatus && lastStatus.mode) || "";
     if (NON_ARMABLE.includes(m)) {
       setMsg(tf("Режим {0} не дозволяє ARM — перемикаю на GUIDED…", m), null);
@@ -5027,7 +5059,7 @@
       } catch (e) {}
     }
     const _aq = IS_ANDROID && !sent;   // Android queues offline logs and auto-resends
-    setMsg("Лог (" + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : _aq ? "збережено — надішлеться автоматично, коли зʼявиться інтернет (скопійовано в буфер)" : "на сервер не пішло — скопійовано в буфер") + ".", sent ? "ok" : _aq ? "ok" : "error");
+    setMsg(t("Лог (") + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : _aq ? "збережено — надішлеться автоматично, коли зʼявиться інтернет (скопійовано в буфер)" : "на сервер не пішло — скопійовано в буфер") + ".", sent ? "ok" : _aq ? "ok" : "error");
   }
   $("mav-log").addEventListener("click", exportLog);
 
@@ -5286,7 +5318,7 @@
       return true;
     } catch (e) {
       appLog("sync: push error " + e);
-      if (manual) setMsg("Не вдалося синхронізувати: " + e, "error");
+      if (manual) setMsg(t("Не вдалося синхронізувати: ") + e, "error");
       return false;
     } finally { _syncPushing = false; }
   }
@@ -5333,7 +5365,7 @@
         setMsg("Відновлено частково — перевір поля/статистику.", "warn");
       }
       setTimeout(() => location.reload(), 300);
-    } catch (e) { setMsg("Помилка відновлення: " + e, "error"); }
+    } catch (e) { setMsg(t("Помилка відновлення: ") + e, "error"); }
   }
   if ($("sync-on")) {
     $("sync-on").checked = syncEnabled();
@@ -5355,7 +5387,7 @@
     setMsg("Зчитую місію з дрона…", null);
     try {
       const r = await a.mav_download_mission();
-      if (!r || !r.ok) { setMsg("Не вдалося зчитати: " + ((r && r.error) || "немає звʼязку"), "error"); return; }
+      if (!r || !r.ok) { setMsg(t("Не вдалося зчитати: ") + ((r && r.error) || "немає звʼязку"), "error"); return; }
       const items = r.items || [];
       // Flight waypoints = NAV_WAYPOINT(16)/TAKEOFF(22) with real coords (skip
       // home seq0 and RTL which carry 0/0).
@@ -5366,7 +5398,7 @@
       if (pts.length) {
         droneMissionLayer = L.layerGroup([
           L.polyline(pts, { color: "#22d3ee", weight: 2.5, opacity: 0.9, dashArray: "2 6" }),
-          L.circleMarker(pts[0], { radius: 5, color: "#22d3ee", fillOpacity: 1 }).bindTooltip("Місія на дроні: старт"),
+          L.circleMarker(pts[0], { radius: 5, color: "#22d3ee", fillOpacity: 1 }).bindTooltip(t("Місія на дроні: старт")),
         ]).addTo(map);
         map.fitBounds(L.polyline(pts).getBounds(), { padding: [40, 40] });
       }
@@ -5375,7 +5407,7 @@
       let m = `На дроні: ${r.count} пунктів (${pts.length} точок маршруту) — показано блакитним.`;
       if (plan && plan === flown) m = "" + m + " Збігається з планом.";
       setMsg(m, "ok");
-    } catch (e) { setMsg("Помилка зчитування: " + e, "error"); }
+    } catch (e) { setMsg(t("Помилка зчитування: ") + e, "error"); }
   });
 
   $("mav-start").addEventListener("click", () => {
@@ -5385,7 +5417,7 @@
     }
     // Don't fly a stale mission: warn hard if the plan differs from what we uploaded.
     if (routeSig(lastRoute) !== routeSig(flownRoute)) {
-      if (!confirm("У дроні НЕ поточний план (або місію не залито). Спершу натисни " +
+      if (!confirm(t("У дроні НЕ поточний план (або місію не залито). Спершу натисни ") +
                    "«Залити місію». Все одно запустити те, що ЗАРАЗ у дроні?")) return;
     }
     // For a clean "climb straight up, then fly", the drone must start from the
@@ -5403,7 +5435,7 @@
       const where = airborne
         ? "Дрон у повітрі: він підніметься ВЕРТИКАЛЬНО на задану висоту, а тоді полетить далі."
         : "Дрон злетить на задану висоту і продовжить обробіток.";
-      if (confirm("Продовжити з місця зупинки?\n\nПройдено " + rem.idx + " з " + rem.total +
+      if (confirm(t("Продовжити з місця зупинки?\n\nПройдено ") + rem.idx + " з " + rem.total +
                   " точок. Заллю залишок (" + rem.rest.length + " точок).\n" + where +
                   "\n\n«Скасувати» = почати поле спочатку.")) {
         resumeUploadRemainder(rem);

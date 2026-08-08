@@ -38,3 +38,4 @@ jobs:
           node test_geocover.mjs
           node test_jsfence.mjs
           node test_boot.mjs
+          node test_i18n.mjs
