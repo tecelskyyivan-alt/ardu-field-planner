@@ -531,3 +531,103 @@ Object.assign(window.FMP_TR, {
 Object.assign(window.FMP_TR, {
   "Політика конфіденційності": "Privacy policy",
 });
+
+// ---- the strings JS builds at runtime: status messages, map tooltips, confirms ----
+// These stayed Ukrainian in EN mode because nothing ever looked them up. NOTE the
+// TRAILING SPACES on the prefixes: t() matches the key EXACTLY (no whitespace
+// collapsing, unlike the DOM walker), and these are concatenated with a value.
+Object.assign(window.FMP_TR, {
+  // terrain / elevation
+  "Спочатку задай поле — рельєф перевіряється в його межах.":
+    "Set the field first — the terrain is checked inside its boundary.",
+  "Немає інтернету — карта висот недоступна офлайн.":
+    "No internet — the elevation map is not available offline.",
+  "Карта висот недоступна: ": "The elevation map is unavailable: ",
+  "Карта висот недоступна (сервіс відповів не повністю).":
+    "The elevation map is unavailable (the service replied incompletely).",
+
+  // power lines (ЛЕП) → cut-outs
+  "Спочатку задай поле — пошук ЛЕП іде в його межах.":
+    "Set the field first — the power-line search runs inside its boundary.",
+  "Немає інтернету — авто-пошук ЛЕП недоступний офлайн.":
+    "No internet — the automatic power-line search does not work offline.",
+  "Задай ширину вирізу, м.": "Set the cut-out width, m.",
+  "Overpass недоступний — спробуй пізніше або накресли виріз вручну (планування не заблоковано).":
+    "Overpass is unavailable — try later or draw the cut-out by hand (planning is not blocked).",
+  "ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима або накресли вручну!":
+    "No power lines found in OSM for this field — that is NOT proof there are none. Check with your own eyes, or draw them by hand!",
+  "Веди лінію вздовж ЛЕП (подвійний клік = кінець) — стане вирізом заданої ширини.":
+    "Draw a line along the power line (double-click to finish) — it becomes a cut-out of the width you set.",
+  "Замало точок для лінії.": "Not enough points for a line.",
+
+  // drawing toolbar + destructive clear
+  "Скасувати": "Cancel",
+  "Зберегти": "Save",
+  "Очистити поле? Контур, вирізи та маршрут буде видалено. Скасувати це неможливо.":
+    "Clear the field? The boundary, the cut-outs and the route will be deleted. This cannot be undone.",
+
+  // offline map download
+  "Офлайн-карта недоступна в цьому середовищі.": "The offline map is not available in this environment.",
+  "Немає активного шару карти.": "No active map layer.",
+  "Немає тайлів для завантаження.": "No tiles to download.",
+
+  // fields: pick / merge / import
+  "Поле «": "Field «",
+  "Обрано «": "Selected «",
+  "Натисни, щоб працювати з «": "Tap to work with «",
+  "Невірний вибір.": "Invalid selection.",
+  "Модуль об'єднання недоступний.": "The merge module is unavailable.",
+  "Вибрані контури не суміжні — в одне суцільне поле не зливаються (":
+    "The selected boundaries are not adjacent — they do not merge into one continuous field (",
+  "Об'єднано ": "Merged ",
+  "Імпортовано контур із .kml": "Boundary imported from .kml",
+  "Не вдалося прочитати файл. Спробуй «Відкрити через FMP» з файлового менеджера.":
+    "Could not read the file. Try «Open with FMP» from the file manager.",
+
+  // map tooltips (drawn per build, so they follow the language of the last build)
+  "Виріз — клікни, щоб видалити (або «Редагувати вирізи» для вузлів)":
+    "Cut-out — click to delete (or «Edit cut-outs» for its vertices)",
+  "Межа проходів (півширини внесення від краю)": "Pass boundary (half a swath in from the edge)",
+  "Площа внесення (ширина смуги = крок)": "Applied area (band width = spacing)",
+  "Накладання — подвійне внесення": "Overlap — double application",
+  "Прогалини — пропущено (не оброблено)": "Gaps — missed, not treated",
+  "Сектор ": "Sector ",
+  "Старт": "Start",
+  "Фініш": "Finish",
+  "Я тут": "I am here",
+  "Дрон": "Drone",
+  "Наступна точка": "Next waypoint",
+  "Місія на дроні: старт": "Mission on the drone: start",
+  "Безпечний шлях на старт / додому": "Safe path to the start / home",
+  "HOME дрона (точка arm)": "Drone HOME (the arm point)",
+
+  // Bluetooth / BLE
+  "BLE-скан недоступний: ": "BLE scan unavailable: ",
+  "Автоматично перепідключаюсь по Bluetooth…": "Reconnecting over Bluetooth automatically…",
+  "Плата не зʼявилась по Bluetooth за 25 с — натисни «Сканувати» і підключись вручну.":
+    "The board did not appear over Bluetooth within 25 s — tap «Scan» and connect manually.",
+  "Bluetooth уже налаштований (": "Bluetooth is already configured (",
+  "Bluetooth налаштовано (": "Bluetooth configured (",
+  "Не знайшов UART для Bluetooth (усі зайняті) — надішли лог кнопкою «Лог».":
+    "No free UART for Bluetooth — they are all taken. Send the log with the «Log» button.",
+  "Bluetooth активовано — плата перезавантажується (~10 с). Далі: тип «Bluetooth (BLE)» → Сканувати → Підключити.":
+    "Bluetooth enabled — the board is rebooting (~10 s). Then: type «Bluetooth (BLE)» → Scan → Connect.",
+
+  // flight / mission
+  "INAV: телеметрія й заливка/читання місій працюють; arm/режим/старт/RTL — лише з пульта (INAV не приймає їх по MAVLink).":
+    "INAV: telemetry and mission upload/read work; arm/mode/start/RTL are transmitter-only — INAV does not accept them over MAVLink.",
+  "Увімкнути мотори (ARM)? Тримай апарат під контролем.":
+    "Arm the motors (ARM)? Keep the aircraft under control.",
+  "Немає звʼязку з дроном.": "No link to the drone.",
+  "Заливаю залишок місії…": "Uploading the rest of the mission…",
+  "Залишок залито (": "Remainder uploaded (",
+  "Продовжити місію": "Resume the mission",
+  "У дроні НЕ поточний план (або місію не залито). Спершу натисни ":
+    "The drone does NOT hold the current plan (or no mission was uploaded). First press ",
+  "Продовжити з місця зупинки?\n\nПройдено ": "Resume from where it stopped?\n\nCompleted ",
+
+  // log / sync
+  "Лог (": "Log (",
+  "Не вдалося синхронізувати: ": "Could not sync: ",
+  "Помилка відновлення: ": "Restore error: ",
+});
