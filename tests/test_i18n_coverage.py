@@ -59,9 +59,14 @@ def scan():
                 continue
             if len(text.strip()) < 4:
                 continue
-            norm = re.sub(r"\s+", " ", text).strip()
-            (unwrapped_have if norm in keys
-             else unwrapped_missing).append((i, norm))
+            # ⚠ ТОЧНИЙ збіг, БЕЗ нормалізації. 17.08 .strip() призвів до
+            # того, що "Поле " (із пробілом у кінці) вважався наявним у
+            # словнику за ключем "Поле", був обгорнутий у t() — і CI впав:
+            # t() шукає ключ ДОСЛІВНО, пробіл робить його іншим ключем.
+            if text in keys:
+                unwrapped_have.append((i, text))
+            else:
+                unwrapped_missing.append((i, text))
 
     return keys, wrapped, unwrapped_have, unwrapped_missing
 

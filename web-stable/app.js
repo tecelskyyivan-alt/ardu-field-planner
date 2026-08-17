@@ -2446,8 +2446,8 @@
     let name = currentFieldName;
     if (!name) {
       const names = new Set((recs || []).map((r) => r.name));
-      let n = 1; while (names.has(t("Поле ") + n)) n++;
-      name = t("Поле ") + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
+      let n = 1; while (names.has("Поле " + n)) n++;
+      name = "Поле " + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
     }
     // Propagate the (possibly just-minted) name into the work context so a flight armed after
     // this upload — without a rebuild — credits THIS field (#8), not the stale generic "поле".
@@ -2465,8 +2465,8 @@
       appLog("promoteFieldOnUpload: currentFieldName «" + name + "» geometry doesn't match its saved record " +
              "(stale fmp_current_field after a kill/restore?) — minting a new name instead of UPSERT-clobbering it");
       const names = new Set((recs || []).map((r) => r.name));
-      let n = 1; while (names.has(t("Поле ") + n)) n++;
-      name = t("Поле ") + n; currentFieldName = name;
+      let n = 1; while (names.has("Поле " + n)) n++;
+      name = "Поле " + n; currentFieldName = name;
       if (lastWorkContext) lastWorkContext.field = name;
       prev = null;
     }
@@ -2489,8 +2489,8 @@
     let recs = await fldAll();
     if (recs === null) { const o = lpAll(); recs = Object.keys(o).map((n) => ({ name: n })); }
     const names = new Set((recs || []).map((r) => r.name));
-    let n = 1; while (names.has(t("Поле ") + n)) n++;
-    const name = t("Поле ") + n;
+    let n = 1; while (names.has("Поле " + n)) n++;
+    const name = "Поле " + n;
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(), hazards: collectHazards(),
       created: now, updated: now, area_ha: lastFieldAreaHa || 0,
