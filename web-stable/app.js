@@ -186,7 +186,7 @@
       _av.textContent = "v" + APP_VERSION + (IS_ANDROID ? " APK" : IS_IOS ? " iOS" : IS_QT ? " ПК" : " web");
       // Tap the version (visible on every platform, incl. the APK where the «Додаток»
       // tab is hidden) to check the server for an update.
-      _av.title = "Перевірити оновлення";
+      _av.title = t("Перевірити оновлення");
       _av.style.cursor = "pointer";
       _av.addEventListener("click", () => checkUpdate());
     } }
@@ -306,7 +306,7 @@
       _followBtn = mk("follow-btn", "Стежити за дроном",
         '<svg class="ic" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2"/></svg>',
         function () { toggleFollow(); });
-      _overlayBtn = mk("overlay-btn", "Телеметрія на карті",
+      _overlayBtn = mk("overlay-btn", t("Телеметрія на карті"),
         '<svg class="ic" viewBox="0 0 24 24"><path d="M3 5h18M3 12h13M3 19h9"/></svg>',
         function () { toggleOverlay(); });
       L.DomEvent.disableClickPropagation(div);
@@ -387,11 +387,11 @@
     clearElevExtremes();
     const boundary = boundaryFromPolygon();
     if (!boundary || boundary.length < 3) {
-      setMsg("Намалюй контур поля — тоді на «Карті висот» з'являться найвища й найнижча точки.", null);
+      setMsg(t("Намалюй контур поля — тоді на «Карті висот» з'являться найвища й найнижча точки."), null);
       return;
     }
     const pts = sampleContour(boundary, 80);
-    setMsg("Рахую висоти точок контуру…", null);
+    setMsg(t("Рахую висоти точок контуру…"), null);
     // Also fetch MY ground elevation (Ivan) — live position if «Моє місце» is on,
     // else a one-shot fix — so the badge can show my height + Δ to the field's max.
     let me = myPosition;
@@ -407,11 +407,11 @@
       const res = await fetch("https://api.open-meteo.com/v1/elevation?latitude=" + lat + "&longitude=" + lon);
       const j = await res.json();
       const all = j && j.elevation;
-      if (!all || !all.length) { setMsg("Не вдалося отримати висоти (потрібен інтернет).", "error"); return; }
+      if (!all || !all.length) { setMsg(t("Не вдалося отримати висоти (потрібен інтернет)."), "error"); return; }
       if (!elevActive) return;     // user switched layers while the request was in flight
       const myElev = me ? all[0] : null;
       const e = me ? all.slice(1) : all;
-      if (!e.length) { setMsg("Не вдалося отримати висоти.", "error"); return; }
+      if (!e.length) { setMsg(t("Не вдалося отримати висоти."), "error"); return; }
       let hi = 0, lo = 0;
       for (let i = 1; i < e.length; i++) { if (e[i] > e[hi]) hi = i; if (e[i] < e[lo]) lo = i; }
       const mk = (p, v, kind, tip) => L.marker([p.lat, p.lng], {
@@ -443,7 +443,7 @@
       setElevBadge(badge);
       setMsg(msg + ".", "ok");
     } catch (err) {
-      setMsg("Не вдалося отримати висоти (потрібен інтернет).", "error");
+      setMsg(t("Не вдалося отримати висоти (потрібен інтернет)."), "error");
     }
   }
   map.on("overlayadd", (ev) => { if (ev.layer === elevOverlay) { elevActive = true; showElevExtremes(); } });
@@ -579,7 +579,7 @@
     if (e.layerType === "marker" || e.layerType === "polyline") {
       const kind = e.layerType === "marker" ? "pole" : "line";
       addHazardFromLayer(e.layer, kind); hazardMode = null; _hazHandler = null;
-      setMsg(kind === "pole" ? "Стовп додано." : "ЛЕП додано.", "ok");
+      setMsg(kind === "pole" ? "Стовп додано." : t("ЛЕП додано."), "ok");
       return;
     }
     // Only treat a polygon as an exclusion when a field already exists — so an
@@ -589,13 +589,13 @@
       drawingExclusion = false;
       addExclusionLayer(e.layer);
       clearRoute();
-      setMsg("Виріз додано.", "ok");
+      setMsg(t("Виріз додано."), "ok");
       return;
     }
     adoptField(e.layer);
     currentFieldName = "";        // a freshly-drawn contour is a NEW unnamed field → mint a name on
                                   // upload, never UPSERT over the previously-loaded field's record
-    setMsg("Контур поля задано.", "ok");
+    setMsg(t("Контур поля задано."), "ok");
   });
   // Reset the "next polygon is an exclusion" flag whenever a draw ends (finish or
   // cancel), so a cancelled "Додати виріз" can't turn the next field into a cutout.
@@ -626,7 +626,7 @@
         L.DomEvent.stop(e);
         drawingExclusion = (k === "excl");
         syncDrawChooser();
-        setMsg(drawingExclusion ? "Малюєш ВИРІЗ-перешкоду." : "Малюєш КОНТУР поля.", null);
+        setMsg(drawingExclusion ? "Малюєш ВИРІЗ-перешкоду." : t("Малюєш КОНТУР поля."), null);
       });
       // Contain EVERY pointer/touch event so tapping the chooser never falls through to
       // the map and drops a polygon vertex behind the button (mobile bug, Ivan).
@@ -657,7 +657,7 @@
       exclusionItems.removeLayer(layer);
       clearRoute();
       scheduleSaveField();
-      setMsg("Виріз видалено.", null);
+      setMsg(t("Виріз видалено."), null);
     });
     exclusionItems.addLayer(layer);
     if (exclusionEditMode && layer.editing) layer.editing.enable();   // stay editable
@@ -718,7 +718,7 @@
   function startExclusionDraw() {
     drawingExclusion = true;
     enableToolbarDraw("polygon");
-    setMsg("Намалюй полігон-перешкоду на карті (вирізається з покриття).", null);
+    setMsg(t("Намалюй полігон-перешкоду на карті (вирізається з покриття)."), null);
   }
 
   // Toggle vertex-editing of exclusion polygons — same drag-the-nodes editing as
@@ -736,11 +736,11 @@
       if (on) { layer.editing.enable(); n++; } else { layer.editing.disable(); }
     });
     if (on) {
-      setMsg(n ? "Тягни вузли вирізів. Натисни «ГОТОВО» коли завершиш."
-               : "Спершу додай виріз (), потім редагуй вузли.", null);
+      setMsg(n ? t("Тягни вузли вирізів. Натисни «ГОТОВО» коли завершиш.")
+               : t("Спершу додай виріз (), потім редагуй вузли."), null);
     } else {
       clearRoute();                       // geometry changed -> mission stale
-      setMsg("Вирізи оновлено.", "ok");
+      setMsg(t("Вирізи оновлено."), "ok");
     }
   }
 
@@ -854,7 +854,7 @@
     _hazHandler = kind === "pole" ? new L.Draw.Marker(map, {})
       : new L.Draw.Polyline(map, { shapeOptions: hazardStyle({ source: "manual" }) });
     _hazHandler.enable();
-    setMsg(kind === "pole" ? "Постав стовп на карті." : "Малюй лінію ЛЕП (подвійний клік = кінець).", null);
+    setMsg(kind === "pole" ? "Постав стовп на карті." : t("Малюй лінію ЛЕП (подвійний клік = кінець)."), null);
   }
   function renderHazardList() {
     const host = $("hazard-list"); if (!host) return;
@@ -995,7 +995,7 @@
       hazardItems.clearLayers();
       (s.hazards || []).forEach((m) => { if (m && m.geom && m.geom.length) addHazardLayer(m); });
       renderHazardList();
-      setMsg("Відновлено останнє поле.", null);
+      setMsg(t("Відновлено останнє поле."), null);
     } catch (e) { /* malformed save — ignore */ }
   }
 
@@ -1075,8 +1075,8 @@
       fieldPolygon.on("edit", scheduleLiveBuild);
       fieldPolygon.on("edit", scheduleSaveField);
       editingContour = true;
-      if (btn) { btn.textContent = "Готово (редагування)"; btn.classList.add("active"); }
-      setMsg("Тягни вершини контуру — маршрут оновлюється наживо.", null);
+      if (btn) { btn.textContent = t("Готово (редагування)"); btn.classList.add("active"); }
+      setMsg(t("Тягни вершини контуру — маршрут оновлюється наживо."), null);
     } else {
       if (fieldPolygon) {
         fieldPolygon.off("edit", scheduleLiveBuild);
@@ -1084,7 +1084,7 @@
         try { fieldPolygon.editing.disable(); } catch (e) {}
       }
       editingContour = false;
-      if (btn) { btn.textContent = "Редагувати вершини контуру"; btn.classList.remove("active"); }
+      if (btn) { btn.textContent = t("Редагувати вершини контуру"); btn.classList.remove("active"); }
     }
   }
 
@@ -1119,13 +1119,13 @@
   // це прямо). Зони — лише показ (avoid=false, як OSM): рішення завжди за очима оператора.
   async function importReliefLimits() {
     const boundary = boundaryFromPolygon();
-    if (!boundary || boundary.length < 3) { setMsg("Спочатку задай поле — рельєф перевіряється в його межах.", "error"); return; }
-    if (!navigator.onLine) { setMsg("Немає інтернету — карта висот недоступна офлайн.", "error"); return; }
+    if (!boundary || boundary.length < 3) { setMsg(t("Спочатку задай поле — рельєф перевіряється в його межах."), "error"); return; }
+    if (!navigator.onLine) { setMsg(t("Немає інтернету — карта висот недоступна офлайн."), "error"); return; }
     const alt = parseFloat($("alt").value) || 0;
     const clr = hazardClearanceM();
     const limit = alt - clr;
     if (!(alt > 0) || limit <= 0) {
-      setMsg(tf("Висота {0} м мінус запас {1} м → ліміт ≤ 0: на цій висоті лімітує будь-який рельєф. Збільш висоту або зменш запас.", alt, clr), "warn");
+      setMsg(tf(t("Висота {0} м мінус запас {1} м → ліміт ≤ 0: на цій висоті лімітує будь-який рельєф. Збільш висоту або зменш запас."), alt, clr), "warn");
       return;
     }
     const bb = fieldPolygon.getBounds().pad(0.08);
@@ -1142,7 +1142,7 @@
     // Точка відліку = місце зльоту: дім останньої збірки, або центроїд контуру.
     let rp = lastHome;
     if (!rp) { let la = 0, lo = 0; boundary.forEach((p) => { la += p.lat; lo += p.lng; }); rp = { lat: la / boundary.length, lng: lo / boundary.length }; }
-    setMsg(tf("Рахую карту висот ({0} точок)…", nx * ny), null);
+    setMsg(tf(t("Рахую карту висот ({0} точок)…"), nx * ny), null);
     const all = [rp].concat(pts);
     let elevs = [];
     try {
@@ -1154,7 +1154,7 @@
         elevs = elevs.concat((j && j.elevation) || []);
       }
     } catch (e) { setMsg(t("Карта висот недоступна: ") + e, "error"); return; }
-    if (elevs.length !== all.length) { setMsg("Карта висот недоступна (сервіс відповів не повністю).", "error"); return; }
+    if (elevs.length !== all.length) { setMsg(t("Карта висот недоступна (сервіс відповів не повністю)."), "error"); return; }
     const ref = elevs[0];
     pts.forEach((p, i) => { p.elev = elevs[i + 1]; });
     // Повторний запуск замінює попередні рельєф-зони (не дублює).
@@ -1164,9 +1164,9 @@
     scheduleSaveField(); renderHazardList();
     const mx = rz.maxDz != null ? Math.round(rz.maxDz) : 0;
     if (rz.zones.length) {
-      setMsg(tf("Рельєф: {0} зон(и), де поверхня ближче ніж {1} м до площини польоту (макс +{2} м від зльоту). Дані ~90 м — стовпи/дроти НЕ видно, перевір очима! Зони лише показуються (клік — видалити).", rz.zones.length, clr, mx), "warn");
+      setMsg(tf(t("Рельєф: {0} зон(и), де поверхня ближче ніж {1} м до площини польоту (макс +{2} м від зльоту). Дані ~90 м — стовпи/дроти НЕ видно, перевір очима! Зони лише показуються (клік — видалити)."), rz.zones.length, clr, mx), "warn");
     } else {
-      setMsg(tf("Рельєф ок: макс перепад +{0} м від точки зльоту, запас до площини польоту ≥ {1} м. (Дані ~90 м — стовпи не видно.)", mx, clr), "ok");
+      setMsg(tf(t("Рельєф ок: макс перепад +{0} м від точки зльоту, запас до площини польоту ≥ {1} м. (Дані ~90 м — стовпи не видно.)"), mx, clr), "ok");
     }
   }
 
@@ -1208,14 +1208,14 @@
   }
   // АВТО: знайти ЛЕП в OSM у межах поля і одразу вирізати (замінюючи попередні авто-вирізи).
   async function cutAutoFromOsm() {
-    if (!fieldPolygon) { setMsg("Спочатку задай поле — пошук ЛЕП іде в його межах.", "error"); return; }
-    if (!navigator.onLine) { setMsg("Немає інтернету — авто-пошук ЛЕП недоступний офлайн.", "error"); return; }
+    if (!fieldPolygon) { setMsg(t("Спочатку задай поле — пошук ЛЕП іде в його межах."), "error"); return; }
+    if (!navigator.onLine) { setMsg(t("Немає інтернету — авто-пошук ЛЕП недоступний офлайн."), "error"); return; }
     const w = cutWidthM();
-    if (!(w > 0)) { setMsg("Задай ширину вирізу, м.", "error"); return; }
+    if (!(w > 0)) { setMsg(t("Задай ширину вирізу, м."), "error"); return; }
     const b = fieldPolygon.getBounds().pad(0.15);
     const bbox = b.getSouth() + "," + b.getWest() + "," + b.getNorth() + "," + b.getEast();
     const q = "[out:json][timeout:25];(way[\"power\"~\"^(line|minor_line)$\"](" + bbox + ");node[\"power\"~\"^(tower|pole)$\"](" + bbox + "););out geom;";
-    setMsg("Шукаю ЛЕП в OSM…", null);
+    setMsg(t("Шукаю ЛЕП в OSM…"), null);
     const mirrors = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
     let data = null;
     for (const url of mirrors) {
@@ -1228,7 +1228,7 @@
         data = await r.json(); break;
       } catch (e) { clearTimeout(to); }
     }
-    if (!data || !data.elements) { setMsg("Overpass недоступний — спробуй пізніше або накресли виріз вручну (планування не заблоковано).", "error"); return; }
+    if (!data || !data.elements) { setMsg(t("Overpass недоступний — спробуй пізніше або накресли виріз вручну (планування не заблоковано)."), "error"); return; }
     const lines = [], points = [];
     let taken = 0;
     for (const el of data.elements) {
@@ -1239,34 +1239,34 @@
         points.push([{ lat: el.lat, lng: el.lon }]); taken++;
       }
     }
-    if (!taken) { setMsg("ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима або накресли вручну!", "warn"); return; }
+    if (!taken) { setMsg(t("ЛЕП не знайдено в OSM для цього поля — це НЕ доказ, що їх нема. Перевір очима або накресли вручну!"), "warn"); return; }
     clearAutoCuts();                                   // replace previous auto cuts (no stacking)
     const rings = _offsetToRings(lines, "line", w).concat(_offsetToRings(points, "point", w));
     rings.forEach((r) => addCutLayer(r, "auto"));
     clearRoute(); scheduleSaveField(); renderHazardList();
     const warn = $("hazard-osm-warn"); if (warn) warn.style.display = "";
-    setMsg(tf("Вирізано {0} ділянок ЛЕП з OSM (ширина {1} м). OSM неповний — ПЕРЕВІР ОЧИМА! Зміни ширину й тисни ще раз — старі авто-вирізи заміняться. Перебудуй маршрут.", rings.length, w), "warn");
+    setMsg(tf(t("Вирізано {0} ділянок ЛЕП з OSM (ширина {1} м). OSM неповний — ПЕРЕВІР ОЧИМА! Зміни ширину й тисни ще раз — старі авто-вирізи заміняться. Перебудуй маршрут."), rings.length, w), "warn");
   }
   // ВРУЧНУ: увімкнути креслення лінії; на завершенні — виріз-капсула поточної ширини.
   let cutDrawing = false;
   function startCutDraw() {
-    if (!fieldPolygon) { setMsg("Спочатку задай поле.", "error"); return; }
-    if (!(cutWidthM() > 0)) { setMsg("Задай ширину вирізу, м.", "error"); return; }
+    if (!fieldPolygon) { setMsg(t("Спочатку задай поле."), "error"); return; }
+    if (!(cutWidthM() > 0)) { setMsg(t("Задай ширину вирізу, м."), "error"); return; }
     cancelToolbarDraw();
     if (_hazHandler) { try { _hazHandler.disable(); } catch (e) {} _hazHandler = null; }
     cutDrawing = true; hazardMode = "cut";
     _hazHandler = new L.Draw.Polyline(map, { shapeOptions: { color: "#ff4d4d", weight: 3, dashArray: "4 4" } });
     _hazHandler.enable();
-    setMsg("Веди лінію вздовж ЛЕП (подвійний клік = кінець) — стане вирізом заданої ширини.", null);
+    setMsg(t("Веди лінію вздовж ЛЕП (подвійний клік = кінець) — стане вирізом заданої ширини."), null);
   }
   function makeManualCut(layer) {
     const geom = _hzGeom(layer, "line");
     cutDrawing = false; hazardMode = null; _hazHandler = null;
-    if (geom.length < 2) { setMsg("Замало точок для лінії.", "error"); return; }
+    if (geom.length < 2) { setMsg(t("Замало точок для лінії."), "error"); return; }
     const rings = _offsetToRings([geom], "line", cutWidthM());
     rings.forEach((r) => addCutLayer(r, "manual"));
     clearRoute(); scheduleSaveField(); renderHazardList();
-    setMsg(tf("Виріз завширшки {0} м створено. Перебудуй маршрут — він його обійде.", cutWidthM()), "ok");
+    setMsg(tf(t("Виріз завширшки {0} м створено. Перебудуй маршрут — він його обійде."), cutWidthM()), "ok");
   }
 
   // Hazard-subsystem buttons (#13): wired HERE, not next to their functions above —
@@ -1357,7 +1357,7 @@
   }
   if ($("cancel-build")) $("cancel-build").addEventListener("click", () => {
     clearRoute();
-    setMsg("Побудову маршруту скасовано.", null);
+    setMsg(t("Побудову маршруту скасовано."), null);
   });
 
   function boundaryFromPolygon() {
@@ -1443,7 +1443,7 @@
     if (!live) commitActiveDraw();        // auto-finish a forgotten in-progress drawing first
     const boundary = boundaryFromPolygon();
     if (!boundary || boundary.length < 3) {
-      if (!live) setMsg("Спочатку задайте контур поля на карті.", "error");
+      if (!live) setMsg(t("Спочатку задайте контур поля на карті."), "error");
       return;
     }
     const params = {
@@ -1480,7 +1480,7 @@
     // engine isn't available (e.g. it failed to load).
     const eng = window.FMP_ENGINE;
     if (!IS_QT && eng && eng.available()) {
-      if (!live) setMsg(eng.isReady() ? "Будую…" : "Готую офлайн-рушій…", null);
+      if (!live) setMsg(eng.isReady() ? "Будую…" : t("Готую офлайн-рушій…"), null);
       try {
         res = await eng.buildRoute(params);   // Pyodide (worker, or main thread on the APK)
       } catch (err) {
@@ -1492,12 +1492,12 @@
       // The native APK has NO local server — the in-browser engine is the ONLY option,
       // so a /api fetch would just throw "Failed to fetch" in the field. Say it plainly.
       if (IS_ANDROID) {
-        if (!live) setMsg("Офлайн-рушій не зміг побудувати маршрут. Онови застосунок у вкладці «Додаток» (або перевстанови APK).", "error");
+        if (!live) setMsg(t("Офлайн-рушій не зміг побудувати маршрут. Онови застосунок у вкладці «Додаток» (або перевстанови APK)."), "error");
         return;
       }
       const a = api();
-      if (!a) { if (!live) setMsg("Рушій недоступний (немає ні офлайн-рушія, ні сервера).", "error"); return; }
-      if (!live) setMsg("Будую…", null);
+      if (!a) { if (!live) setMsg(t("Рушій недоступний (немає ні офлайн-рушія, ні сервера)."), "error"); return; }
+      if (!live) setMsg(t("Будую…"), null);
       try {
         res = await a.build_route(params);
       } catch (err) {
@@ -1601,8 +1601,8 @@
               { color: "#2f80ed", weight: 3, opacity: 0.9, dashArray: "6 6", interactive: false }));
             if (legs.length) transitLayer = L.featureGroup(legs).addTo(map)
               .bindTooltip(t("Безпечний шлях на старт / додому"));
-            if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — політ напряму. Перевір межу поля та вирізи.", "warn");
-            if (!t.egress_ok) setMsg("Безпечний шлях додому не побудовано — політ напряму. Перевір межу поля та вирізи.", "warn");
+            if (!t.ingress_ok) setMsg(t("Безпечний шлях до старту не побудовано — політ напряму. Перевір межу поля та вирізи."), "warn");
+            if (!t.egress_ok) setMsg(t("Безпечний шлях додому не побудовано — політ напряму. Перевір межу поля та вирізи."), "warn");
           }
           // !t.ok (or an engine that lacks safe_transit) → no detour drawn, no warning —
           // this is cosmetic-only; the upload path makes its own independent decision.
@@ -1635,20 +1635,20 @@
     }
 
     $("stats").innerHTML =
-      row("Точок маршруту", res.count) +
-      row("Площа", res.area_ha + " га") +
-      (res.excluded_ha > 0 ? row("Вирізано (перешкоди)", res.excluded_ha + " га") : "") +
-      (res.excluded_ha > 0 ? row("Покрита площа", res.sprayed_ha + " га") : "") +
-      (res.liquid_l > 0 ? row("Робочий розчин", res.liquid_l + " л") : "") +
-      (res.refills > 0 ? row("Заправок бака", res.refills) : "") +
-      row("Довжина", (res.length_m / 1000).toFixed(2) + " км") +
-      row("Орієнт. час", fmtDuration(res.duration_s)) +
-      (res.coverage_pct != null ? row("Покриття поля", res.coverage_pct + "%") : "") +
-      (res.gap_ha > 0.001 ? row("Прогалини", res.gap_ha.toFixed(3) + " га") : "") +
-      (res.overlap_pct != null ? row("Перекриття", res.overlap_pct + "%") : "") +
-      row("Кут проходів", res.angle_used + "°" + ($("auto_angle").checked ? " (авто)" : "")) +
-      row("Відступ", res.margin + " м") +
-      (res.flights > 1 ? row("Секцій (рівні за площею)", res.flights) : "") +
+      row(t("Точок маршруту"), res.count) +
+      row(t("Площа"), res.area_ha + " га") +
+      (res.excluded_ha > 0 ? row(t("Вирізано (перешкоди)"), res.excluded_ha + " га") : "") +
+      (res.excluded_ha > 0 ? row(t("Покрита площа"), res.sprayed_ha + " га") : "") +
+      (res.liquid_l > 0 ? row(t("Робочий розчин"), res.liquid_l + " л") : "") +
+      (res.refills > 0 ? row(t("Заправок бака"), res.refills) : "") +
+      row(t("Довжина"), (res.length_m / 1000).toFixed(2) + " км") +
+      row(t("Орієнт. час"), fmtDuration(res.duration_s)) +
+      (res.coverage_pct != null ? row(t("Покриття поля"), res.coverage_pct + "%") : "") +
+      (res.gap_ha > 0.001 ? row(t("Прогалини"), res.gap_ha.toFixed(3) + " га") : "") +
+      (res.overlap_pct != null ? row(t("Перекриття"), res.overlap_pct + "%") : "") +
+      row(t("Кут проходів"), res.angle_used + "°" + ($("auto_angle").checked ? " (авто)" : "")) +
+      row(t("Відступ"), res.margin + " м") +
+      (res.flights > 1 ? row(t("Секцій (рівні за площею)"), res.flights) : "") +
       ((res.sections && res.sections.length) ? res.sections.map((s, i) =>
         row("• Секція " + (i + 1), s.area_ha + " га · " + fmtDuration(s.duration_s))).join("") : "");
     $("stats").classList.remove("hidden");
@@ -1662,7 +1662,7 @@
     // Overlay was requested but the engine returned no geometry → an OLD cached engine
     // (e.g. a half-finished update). Tell the user to reopen the app to finish updating.
     if (!live && params.viz && pts.length >= 2 && !(res.coverage_geo && res.coverage_geo.length)) {
-      setMsg("Площа внесення недоступна — застаріла версія рушія. Повністю закрий і знову відкрий додаток, щоб завершити оновлення.", "error");
+      setMsg(t("Площа внесення недоступна — застаріла версія рушія. Повністю закрий і знову відкрий додаток, щоб завершити оновлення."), "error");
     } else {
       setMsg(live
         ? `Кут ${res.angle_used}° — маршрут оновлено наживо.`
@@ -1711,11 +1711,11 @@
 
   async function doExport(fmt) {
     const a = api();
-    if (!a) { setMsg("pywebview API недоступний.", "error"); return; }
+    if (!a) { setMsg(t("pywebview API недоступний."), "error"); return; }
     const res = await a.export(fmt);
     if (res && res.ok) setMsg(t("Збережено: ") + res.path, "ok");
-    else if (res && res.cancelled) setMsg("Скасовано.", null);
-    else setMsg((res && res.error) || "Не вдалося зберегти.", "error");
+    else if (res && res.cancelled) setMsg(t("Скасовано."), null);
+    else setMsg((res && res.error) || t("Не вдалося зберегти."), "error");
   }
 
   // ---- tabs (План / Політ) ------------------------------------------------
@@ -1994,12 +1994,12 @@
     // Qt desktop caches tiles server-side (serve.py /tiles/ → disk); the PWA caches
     // them in the service worker. Only block a plain browser that has neither.
     if (!IS_QT && !("serviceWorker" in navigator)) {
-      setMsg("Офлайн-карта недоступна в цьому середовищі.", null);
+      setMsg(t("Офлайн-карта недоступна в цьому середовищі."), null);
       return;
     }
     const layers = [];
     map.eachLayer((l) => { if (l instanceof L.TileLayer) layers.push(l); });
-    if (!layers.length) { setMsg("Немає активного шару карти.", "error"); return; }
+    if (!layers.length) { setMsg(t("Немає активного шару карти."), "error"); return; }
     const b = drawnItems.getLayers().length ? drawnItems.getBounds().pad(0.25) : map.getBounds();
     const zmin = Math.max(11, Math.min(13, Math.floor(map.getZoom())));
     const urls = [];
@@ -2013,7 +2013,7 @@
             urls.push(tileUrlFor(layer, x, y, z));
       }
     }
-    if (!urls.length) { setMsg("Немає тайлів для завантаження.", "error"); return; }
+    if (!urls.length) { setMsg(t("Немає тайлів для завантаження."), "error"); return; }
     if (urls.length > 4000 && !confirm(`Це ~${urls.length} тайлів — багато. Намалюй поле або зменши масштаб. Все одно качати?`)) return;
     $("dl-map").disabled = true;
     let done = 0, fail = 0, i = 0;
@@ -2034,7 +2034,7 @@
     // Report what actually landed: with no network EVERY tile fails, and the old text
     // still said «збережено … Район працює без мережі», which is the opposite of true.
     const okTiles = urls.length - fail;
-    if (!okTiles) setMsg("Карту НЕ збережено: жоден тайл не завантажився. Перевір мережу й спробуй ще раз.", "error");
+    if (!okTiles) setMsg(t("Карту НЕ збережено: жоден тайл не завантажився. Перевір мережу й спробуй ще раз."), "error");
     else if (fail) setMsg(`Карту збережено частково: ${okTiles} з ${urls.length} тайлів (${fail} не вдалося). Місцями буде порожньо — повтори при кращій мережі.`, "warn");
     else setMsg(`Карту збережено офлайн: ${urls.length} тайлів. Район працює без мережі.`, "ok");
   }
@@ -2069,7 +2069,7 @@
     if (exclusionEditMode) setExclusionEdit(false);
     exclusionItems.clearLayers();
     clearRoute();
-    setMsg("Вирізи очищено.", null);
+    setMsg(t("Вирізи очищено."), null);
   });
   // Explicit "save cutouts" — mirrors the field contour's "Готово": commit any
   // in-progress draw or vertex-edit so the cutout is finalized and applied to the
@@ -2094,7 +2094,7 @@
     if (!el) return;
     const pt = (home && home.lat != null) ? home : null;
     if (!pt) {
-      el.textContent = "Точка зльоту: центр поля (з'явиться після побудови маршруту).";
+      el.textContent = t("Точка зльоту: центр поля (з'явиться після побудови маршруту).");
       return;
     }
     const ll = pt.lat.toFixed(5) + ", " + pt.lng.toFixed(5);
@@ -2138,21 +2138,21 @@
     if (!myCentered) { myCentered = true; map.setView([ll.lat, ll.lng], Math.max(map.getZoom(), 15)); }
   }
   function startMyLocation() {
-    if (!navigator.geolocation) { setMsg("Геолокація недоступна на цьому пристрої.", "error"); return; }
+    if (!navigator.geolocation) { setMsg(t("Геолокація недоступна на цьому пристрої."), "error"); return; }
     myLocOn = true; myCentered = false; updateMyLocBtn();
-    setMsg("Шукаю ваше розташування…", null);
+    setMsg(t("Шукаю ваше розташування…"), null);
     // fast first dot via network, then continuous precise tracking
     navigator.geolocation.getCurrentPosition(
-      (pos) => { onMyPos(pos); setMsg("Показую ваше розташування наживо.", "ok");
+      (pos) => { onMyPos(pos); setMsg(t("Показую ваше розташування наживо."), "ok");
         appLog("GPS «мій»: live ON ±" + Math.round(pos.coords.accuracy || 0) + "м"); },
       () => {}, { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
     if (myWatchId == null) {
       myWatchId = navigator.geolocation.watchPosition(onMyPos, (err) => {
         appLog("GPS «мій» watch FAIL code=" + ((err && err.code) || "?") + " " + ((err && err.message) || ""));
         if (err && err.code === 1)
-          setMsg("Локація заборонена. Дозволь: Налаштування → Додатки → Field Mission Planner → Дозволи → Локація.", "error");
+          setMsg(t("Локація заборонена. Дозволь: Налаштування → Додатки → Field Mission Planner → Дозволи → Локація."), "error");
         else if (!myLocMarker)
-          setMsg("Не вдалося отримати GPS. Вийди на відкрите небо й спробуй ще раз.", "error");
+          setMsg(t("Не вдалося отримати GPS. Вийди на відкрите небо й спробуй ще раз."), "error");
       }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 1500 });
     }
   }
@@ -2164,7 +2164,7 @@
   }
   // Toggle live my-location — called by the map «» toolbar control.
   function toggleMyLocation() {
-    if (myWatchId != null) { stopMyLocation(); setMsg("Показ розташування вимкнено.", null); }
+    if (myWatchId != null) { stopMyLocation(); setMsg(t("Показ розташування вимкнено."), null); }
     else startMyLocation();
   }
   // Kept for the «Очистити» button: stop my-location + reset the takeoff line.
@@ -2381,7 +2381,7 @@
     let recs = await fldAll();
     if (recs === null) { const o = lpAll(); recs = Object.keys(o).map((n) => Object.assign({ name: n }, o[n])); }
     recs = (recs || []).filter((r) => r.field && r.field.length >= 3);
-    if (!recs.length) { setMsg("Немає збережених полів. Намалюй контур на карті — поле збережеться саме.", null); return; }
+    if (!recs.length) { setMsg(t("Немає збережених полів. Намалюй контур на карті — поле збережеться саме."), null); return; }
     clearSavedOverview();
     overviewLayer = L.layerGroup().addTo(map);
     let bounds = null;
@@ -2398,19 +2398,19 @@
       const leftHa = Math.max(0, areaHa - doneHa);            // done_ha NOT capped (cumulative partials)
       L.marker(poly.getBounds().getCenter(), { interactive: false, keyboard: false, zIndexOffset: 500,
         icon: L.divIcon({ className: "area-label field",
-          html: "<span><b>" + esc(r.name || "Поле") + "</b><br>" + ha.toFixed(2) + " га<br>"
-            + tf("зроблено {0} · лишилось {1} га", doneHa.toFixed(1), leftHa.toFixed(1)) + "<br>"
-            + tf("виконано {0} {1}", cc, plurCount(cc)) + "</span>",
+          html: "<span><b>" + esc(r.name || t("Поле")) + "</b><br>" + ha.toFixed(2) + " га<br>"
+            + tf(t("зроблено {0} · лишилось {1} га"), doneHa.toFixed(1), leftHa.toFixed(1)) + "<br>"
+            + tf(t("виконано {0} {1}"), cc, plurCount(cc)) + "</span>",
           iconSize: [178, 62], iconAnchor: [89, 31] }) }).addTo(overviewLayer);
-      poly.bindTooltip(t("Натисни, щоб працювати з «") + esc(r.name || "Поле") + "»");
+      poly.bindTooltip(t("Натисни, щоб працювати з «") + esc(r.name || t("Поле")) + "»");
       poly.on("click", (e) => {
         L.DomEvent.stop(e); clearSavedOverview();
         applyProject(r); currentFieldName = r.name || "";
-        setMsg(t("Поле «") + (r.name || "Поле") + "» обрано для роботи. Натисни «Побудувати маршрут».", "ok");
+        setMsg(t("Поле «") + (r.name || t("Поле")) + "» обрано для роботи. Натисни «Побудувати маршрут».", "ok");
       });
     });
     if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
-    setMsg(tf("{0} збережених полів на карті — натисни на поле, щоб обрати для роботи.", recs.length), "ok");
+    setMsg(tf(t("{0} збережених полів на карті — натисни на поле, щоб обрати для роботи."), recs.length), "ok");
   }
   if ($("show-saved")) $("show-saved").addEventListener("click", showSavedFields);
 
@@ -2446,8 +2446,8 @@
     let name = currentFieldName;
     if (!name) {
       const names = new Set((recs || []).map((r) => r.name));
-      let n = 1; while (names.has("Поле " + n)) n++;
-      name = "Поле " + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
+      let n = 1; while (names.has(t("Поле ") + n)) n++;
+      name = t("Поле ") + n; currentFieldName = name;          // adopt so re-uploads UPSERT this record
     }
     // Propagate the (possibly just-minted) name into the work context so a flight armed after
     // this upload — without a rebuild — credits THIS field (#8), not the stale generic "поле".
@@ -2465,8 +2465,8 @@
       appLog("promoteFieldOnUpload: currentFieldName «" + name + "» geometry doesn't match its saved record " +
              "(stale fmp_current_field after a kill/restore?) — minting a new name instead of UPSERT-clobbering it");
       const names = new Set((recs || []).map((r) => r.name));
-      let n = 1; while (names.has("Поле " + n)) n++;
-      name = "Поле " + n; currentFieldName = name;
+      let n = 1; while (names.has(t("Поле ") + n)) n++;
+      name = t("Поле ") + n; currentFieldName = name;
       if (lastWorkContext) lastWorkContext.field = name;
       prev = null;
     }
@@ -2483,14 +2483,14 @@
   }
   $("save-project").addEventListener("click", async () => {
     const field = boundaryFromPolygon();
-    if (!field || field.length < 3) { setMsg("Спочатку задай поле.", "error"); return; }
+    if (!field || field.length < 3) { setMsg(t("Спочатку задай поле."), "error"); return; }
     // AUTOMATIC unique name — no prompt, never overwrites an existing field (Ivan).
     // «Поле N» with the smallest free N among the already-saved fields.
     let recs = await fldAll();
     if (recs === null) { const o = lpAll(); recs = Object.keys(o).map((n) => ({ name: n })); }
     const names = new Set((recs || []).map((r) => r.name));
-    let n = 1; while (names.has("Поле " + n)) n++;
-    const name = "Поле " + n;
+    let n = 1; while (names.has(t("Поле ") + n)) n++;
+    const name = t("Поле ") + n;
     const now = Date.now();
     const rec = { name, field, params: collectParams(), exclusions: collectExclusions(), hazards: collectHazards(),
       created: now, updated: now, area_ha: lastFieldAreaHa || 0,
@@ -2506,7 +2506,7 @@
     if (recs === null) {                       // IDB unavailable -> localStorage fallback
       const o = lpAll(); recs = Object.keys(o).map((n) => Object.assign({ name: n }, o[n]));
     }
-    if (!recs.length) { setMsg("Збережених полів немає — імпортую з файлу…", null); $("load-file").click(); return; }
+    if (!recs.length) { setMsg(t("Збережених полів немає — імпортую з файлу…"), null); $("load-file").click(); return; }
     recs.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     const list = recs.map((r, i) => {
       const ha = r.area_ha ? ` · ${r.area_ha} га` : "";
@@ -2528,7 +2528,7 @@
     if (idx >= 0 && idx < recs.length) {
       applyProject(recs[idx]); currentFieldName = recs[idx].name;
       setMsg(`Поле «${recs[idx].name}» завантажено.`, "ok");
-    } else setMsg("Невірний вибір.", "error");
+    } else setMsg(t("Невірний вибір."), "error");
   });
 
   // File import (for projects shared as a .fmproj.json file) stays available.
@@ -2537,7 +2537,7 @@
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try { applyProject(JSON.parse(reader.result)); setMsg("Проєкт завантажено з файлу.", "ok"); }
+      try { applyProject(JSON.parse(reader.result)); setMsg(t("Проєкт завантажено з файлу."), "ok"); }
       catch (e) { setMsg(t("Помилка читання проєкту: ") + e, "error"); }
     };
     reader.readAsText(file);
@@ -2563,9 +2563,9 @@
   }
   async function exportKml() {
     const field = boundaryFromPolygon();
-    if (!field || field.length < 3) { setMsg("Спочатку задай поле на карті.", "error"); return; }
+    if (!field || field.length < 3) { setMsg(t("Спочатку задай поле на карті."), "error"); return; }
     await downloadBlob("field.kml", "application/vnd.google-earth.kml+xml", buildKml(field, collectExclusions()));
-    setMsg("Контур експортовано в .kml.", "ok");
+    setMsg(t("Контур експортовано в .kml."), "ok");
   }
   // Real-world KMLs vary a lot — namespace prefixes (<kml:Polygon>), LineString-
   // traced fields, "lon, lat" with spaces, a UTF-8 BOM. Parse defensively into a
@@ -2631,7 +2631,7 @@
   // so the gap distance is real. -> { ok, outers:[[{lat,lng}]], holes:[[{lat,lng}]] }
   function unionContours(list) {
     const C = window.ClipperLib;
-    if (!C) return { ok: false, error: "Модуль об'єднання недоступний." };
+    if (!C) return { ok: false, error: t("Модуль об'єднання недоступний.") };
     let la = 0, lo = 0, n = 0;
     list.forEach((c) => c.ring.forEach((p) => { la += p.lat; lo += p.lng; n++; }));
     if (!n) return { ok: false, error: "Порожньо." };
@@ -2737,7 +2737,7 @@
         const c = contours[idxs[0]]; clearImportPick(); adoptContour(c); currentFieldName = c.name;
         setMsg(t("Обрано «") + c.name + "». Автозбереження — при заливці в дрон.", "ok"); return;
       }
-      if (!window.ClipperLib) { setMsg("Модуль об'єднання недоступний.", "error"); return; }
+      if (!window.ClipperLib) { setMsg(t("Модуль об'єднання недоступний."), "error"); return; }
       const u = unionContours(idxs.map((n) => contours[n]));
       if (!u.ok) { setMsg(u.error, "error"); return; }
       if (u.outers.length !== 1) { setMsg(t("Вибрані контури не суміжні — в одне суцільне поле не зливаються (") + u.outers.length + " окремих частин). Обери контури, що торкаються.", "error"); return; }
@@ -2804,7 +2804,7 @@
     const f = ev.target.files && ev.target.files[0];
     if (!f) return;
     const r = new FileReader();
-    r.onerror = () => setMsg("Не вдалося прочитати файл. Спробуй «Відкрити через FMP» з файлового менеджера.", "error");
+    r.onerror = () => setMsg(t("Не вдалося прочитати файл. Спробуй «Відкрити через FMP» з файлового менеджера."), "error");
     r.onload = () => importKmlText(String(r.result), f.name);
     r.readAsText(f);
     ev.target.value = "";
@@ -2986,7 +2986,7 @@
       el.textContent = t("Остання відома місія (з пам'яті) — підключись і перевір, чи вона ще в дроні.");
       el.className = "mission-status warn";
     } else if (plan === flown) {
-      el.textContent = tf("У дроні поточна місія: {0} точок.", lastRoute.length);
+      el.textContent = tf(t("У дроні поточна місія: {0} точок."), lastRoute.length);
       el.className = "mission-status ok";
     } else {
       el.textContent = t("План ЗМІНЕНО після заливки — у дроні СТАРА місія. Залий заново!");
@@ -3059,7 +3059,7 @@
       return { ok: true, ports: [], note: "Прямий USB недоступний у цьому браузері. На Android встанови APK (кнопка «Android» нижче) або під'єднайся через мережу (UDP/TCP)." };
     },
     async mav_connect(p) {
-      if (!window.MAVLINK || !window.MAV_LINK) return { ok: false, error: "MAVLink-модуль не завантажено." };
+      if (!window.MAVLINK || !window.MAV_LINK) return { ok: false, error: t("MAVLink-модуль не завантажено.") };
       const conn = (p && p.conn) || "";
       let transport;
       // Open the port FIRST — the WebSerial/WebUSB device picker MUST be opened
@@ -3183,8 +3183,8 @@
             flown = [...pre, ..._wps, ...post];
             splicePre = pre.length;
             splicePost = post.length;
-            if (!t.ingress_ok) setMsg("Безпечний шлях до старту не побудовано — зліт напряму до першої точки.", "warn");
-            if (!t.egress_ok)  setMsg("Безпечний шлях додому не побудовано — RTL напряму.", "warn");
+            if (!t.ingress_ok) setMsg(t("Безпечний шлях до старту не побудовано — зліт напряму до першої точки."), "warn");
+            if (!t.egress_ok)  setMsg(t("Безпечний шлях додому не побудовано — RTL напряму."), "warn");
           }
           // on !t.ok or engine unavailable → flown stays = _wps (NEVER block the upload; just no detour)
         } catch (e) {
@@ -3402,9 +3402,9 @@
         await mavRefreshPorts();
         const sel = $("mav-port");
         if (sel.options.length) sel.selectedIndex = sel.options.length - 1;
-        setMsg("Пристрій додано.", null);
+        setMsg(t("Пристрій додано."), null);
       } catch (e) {
-        setMsg("Вибір скасовано (або Web Serial недоступний).", "error");
+        setMsg(t("Вибір скасовано (або Web Serial недоступний)."), "error");
       }
     });
   }
@@ -3458,7 +3458,7 @@
     };
     function setScanning(on) {
       scanning = on;
-      scanBtn.textContent = on ? "Стоп" : "Сканувати";
+      scanBtn.textContent = on ? "Стоп" : t("Сканувати");
       if (!on) render();
     }
     // Native fires window.__androidBleEvent for BOTH scan and open events, and
@@ -3526,7 +3526,7 @@
       setTimeout(() => {
         try { $("mav-conn-type").value = "ble"; mavSyncRows(); } catch (e) {}
         appLog("[auto-ble] чекаю плату після ребуту, сканую " + mac + "…");
-        setMsg("Автоматично перепідключаюсь по Bluetooth…", null);
+        setMsg(t("Автоматично перепідключаюсь по Bluetooth…"), null);
         for (const k of Object.keys(found)) delete found[k];
         let done = false;
         const prevCb = window.__androidBleScan;
@@ -3551,7 +3551,7 @@
           if (done) return;
           window.__androidBleScan = prevCb;
           appLog("[auto-ble] " + mac + " не зʼявився за 25 с");
-          setMsg("Плата не зʼявилась по Bluetooth за 25 с — натисни «Сканувати» і підключись вручну.", "error");
+          setMsg(t("Плата не зʼявилась по Bluetooth за 25 с — натисни «Сканувати» і підключись вручну."), "error");
         }, 25000);
       }, waitMs || 13000);
     };
@@ -3599,7 +3599,7 @@
           }
         } else {
           appLog("[auto-ble] вільного/MSP UART не знайдено — нічого не чіпаю");
-          if (p.mac) { blePendingClear(); setMsg("Не знайшов UART для Bluetooth (усі зайняті) — надішли лог кнопкою «Лог».", "error"); }
+          if (p.mac) { blePendingClear(); setMsg(t("Не знайшов UART для Bluetooth (усі зайняті) — надішли лог кнопкою «Лог»."), "error"); }
         }
         return;
       }
@@ -3613,12 +3613,12 @@
       appLog("[auto-ble] " + target + " → MAVLink@115200, перезавантажую плату");
       setMsg(t("Bluetooth налаштовано (") + target + "). Перезавантажую плату і перепідключусь сам…", "ok");
       const rr = await a.mav_reboot();
-      if (!rr.ok) appLog("[auto-ble] reboot без ACK (" + (rr.error || "таймаут") + ") — чекаю довше");
+      if (!rr.ok) appLog("[auto-ble] reboot без ACK (" + (rr.error || t("таймаут")) + ") — чекаю довше");
       try { mavDisconnect(); } catch (e) {}
       let mac = p.mac;
       try { mac = mac || localStorage.getItem(LAST_KEY) || ""; } catch (e) {}
       if (mac) window.__fmpBleAutoReconnect(mac, rr.ok ? 13000 : 17000);
-      else setMsg("Bluetooth активовано — плата перезавантажується (~10 с). Далі: тип «Bluetooth (BLE)» → Сканувати → Підключити.", "ok");
+      else setMsg(t("Bluetooth активовано — плата перезавантажується (~10 с). Далі: тип «Bluetooth (BLE)» → Сканувати → Підключити."), "ok");
     };
   })();
 
@@ -3640,12 +3640,12 @@
   async function mavConnect() {
     if (mavConnected || mavConnecting) return;   // re-entrancy: block the boot-timer↔manual double-connect race
     const a = mavApi();
-    if (!a || !a.mav_connect) { setMsg("API недоступний.", "error"); return; }
+    if (!a || !a.mav_connect) { setMsg(t("API недоступний."), "error"); return; }
     const conn = mavConnString();
-    if (!conn) { setMsg("Обери COM-порт або введи адресу.", "error"); return; }
+    if (!conn) { setMsg(t("Обери COM-порт або введи адресу."), "error"); return; }
     mavConnecting = true;
     if (_autoReconnectTimer) { clearTimeout(_autoReconnectTimer); _autoReconnectTimer = null; }
-    setMsg("Підключаюсь до дрона…", null);
+    setMsg(t("Підключаюсь до дрона…"), null);
     appLog("connect → " + conn + " baud=" + $("mav-baud").value);
     $("mav-connect").disabled = true;
     try {
@@ -3745,7 +3745,7 @@
     // Keep flownRoute (what we uploaded) so the mission-status survives a
     // reconnect — the drone still holds that mission.
     updateMissionStatus();
-    setMsg("Відключено від дрона.", null);
+    setMsg(t("Відключено від дрона."), null);
   }
 
   $("mav-connect").addEventListener("click", mavConnect);
@@ -3864,7 +3864,7 @@
     let raw = "ok", reason = "Сигнал у нормі";
     // ---- JAMMING (signal lost / starved) — only meaningful once we HAD a fix ----
     if (gpsGuard.hadFix && (fix == null || fix < 3)) {
-      raw = "jam"; reason = "GPS втрачено (немає 3D-фіксу) — ймовірне глушіння";
+      raw = "jam"; reason = t("GPS втрачено (немає 3D-фіксу) — ймовірне глушіння");
     } else if (gpsGuard.hadFix && fix != null && fix >= 3 && sats != null && sats <= 4) {
       raw = "jam"; reason = "Критично мало супутників (" + sats + ") — ймовірне глушіння";
     } else if (hdop != null && hdop > 5) {
@@ -3956,10 +3956,10 @@
     off:    ["#6b7280", "Захист вимкнено"],
     nolink: ["#6b7280", "Немає звʼязку з дроном"],
     init:   ["#6b7280", "Очікую фікс GPS…"],
-    ok:     ["#3fb27f", "GPS у нормі"],
+    ok:     ["#3fb27f", t("GPS у нормі")],
     warn:   ["#ffd166", "Слабкий сигнал GPS"],
-    jam:    ["#ff3b30", "ГЛУШІННЯ GPS"],
-    spoof:  ["#ff3b30", "СПУФІНГ GPS"],
+    jam:    ["#ff3b30", t("ГЛУШІННЯ GPS")],
+    spoof:  ["#ff3b30", t("СПУФІНГ GPS")],
   };
   let _gpsGuardSig = null;
   function gpsGuardRender() {
@@ -3983,7 +3983,7 @@
     if (txt) { txt.textContent = label; txt.style.color = color; }
     if (det) det.textContent = detText;
     if (banner) banner.style.display = showBanner ? "" : "none";
-    if (showBanner && btitle) btitle.textContent = (lvl === "spoof") ? "СПУФІНГ GPS" : "ГЛУШІННЯ GPS";
+    if (showBanner && btitle) btitle.textContent = (lvl === "spoof") ? "СПУФІНГ GPS" : t("ГЛУШІННЯ GPS");
     if (showBanner && breason) breason.textContent = gpsGuard.reason;
   }
   if ($("gps-guard-on")) $("gps-guard-on").addEventListener("change", (e) => {
@@ -4306,7 +4306,7 @@
   }
   $("export-flights").addEventListener("click", async () => {
     const all = await flogAll();
-    if (!all.length) { setMsg("Журнал польотів порожній — ще не було записаних вильотів.", null); return; }
+    if (!all.length) { setMsg(t("Журнал польотів порожній — ще не було записаних вильотів."), null); return; }
     await downloadBlob(`flightlog_${all.length}.json`, "application/json", JSON.stringify(all, null, 2));
     setMsg(`Журнал експортовано (${all.length} вильотів).`, "ok");
   });
@@ -4327,7 +4327,7 @@
   }
   $("export-flights-csv").addEventListener("click", async () => {
     const all = await flogAll();
-    if (!all.length) { setMsg("Журнал польотів порожній.", null); return; }
+    if (!all.length) { setMsg(t("Журнал польотів порожній."), null); return; }
     await downloadBlob(`worklog_${all.length}.csv`, "text/csv;charset=utf-8", flightsToCsv(all));
     setMsg(`Записи робіт експортовано (${all.length}) у CSV.`, "ok");
   });
@@ -4339,7 +4339,7 @@
   const HUD_ROWS = [
     ["link", "Лінк"], ["mode", "Режим"], ["armed", "Стан"], ["gps", "GPS"],
     ["diag", "Телеметрія"],
-    ["battery", "Батарея"], ["alt", "Висота"], ["speed", "Швидкість"], ["wp", "Точка"],
+    ["battery", t("Батарея")], ["alt", "Висота"], ["speed", "Швидкість"], ["wp", "Точка"],
     ["progress", "Прогрес"], ["tonext", "До точки"], ["remaining", "Лишилось"],
     ["eta", "ETA"], ["finish", "До завершення"], ["land", "До посадки"], ["message", "Повідомл."],
   ];
@@ -4418,7 +4418,7 @@
   }
   function mavRenderHud(s, p) {
     const { rows } = mavHudEnsure();
-    hudSet(rows, "link", s.connected ? "● онлайн" : "○ немає heartbeat",
+    hudSet(rows, "link", s.connected ? "● онлайн" : t("○ немає heartbeat"),
       s.connected ? "#5fd3a3" : "#ff7b72", true);
     hudSet(rows, "mode", s.mode || "—", null, true);
     hudSet(rows, "armed", s.armed === null ? "?" : (s.armed ? "ARMED" : "disarmed"),
@@ -4485,7 +4485,7 @@
     _inavGated = inav;
     ["mav-arm", "mav-disarm", "mav-mode", "mav-set-mode", "mav-start", "mav-rtl", "mav-pause"]
       .forEach((id) => { if ($(id)) $(id).disabled = inav; });
-    if (inav) setMsg("INAV: телеметрія й заливка/читання місій працюють; arm/режим/старт/RTL — лише з пульта (INAV не приймає їх по MAVLink).", null);
+    if (inav) setMsg(t("INAV: телеметрія й заливка/читання місій працюють; arm/режим/старт/RTL — лише з пульта (INAV не приймає їх по MAVLink)."), null);
   }
   function mavDetectPhase(s) {
     mavStackGate(s);
@@ -4497,12 +4497,12 @@
     if (!_missionDoneShown && s.armed && s.wp_total && s.wp_current != null
         && s.wp_current >= s.wp_total - 1) {
       _missionDoneShown = true;
-      setMsg("Місію завершено — остання точка досягнута.", "ok");
+      setMsg(t("Місію завершено — остання точка досягнута."), "ok");
     }
     if (!_landedShown && _wasArmed && s.armed === false
         && (s.alt_rel == null || s.alt_rel < 0.8)) {
       _landedShown = true; _wasArmed = false;
-      setMsg("Посадка — апарат на землі (DISARM).", "ok");
+      setMsg(t("Посадка — апарат на землі (DISARM)."), "ok");
     }
   }
   function mavResetPhase() {
@@ -4656,7 +4656,7 @@
 
   async function mavUpload() {
     const a = mavApi();
-    if (!a || !a.mav_upload_mission) { setMsg("API недоступний.", "error"); return; }
+    if (!a || !a.mav_upload_mission) { setMsg(t("API недоступний."), "error"); return; }
     // Fixed-wing: the arc geometry is baked at BUILD time, but we only know for sure this
     // is a plane once connected (here). Rebuild now — with the vehicle known — so the
     // uploaded route carries the arcs even if the plan was made before connecting.
@@ -4664,7 +4664,7 @@
       appLog("plane-turn: перебудовую маршрут із дугами перед заливкою");
       await buildRoute();
     }
-    setMsg("Заливаю місію в дрон…", null);
+    setMsg(t("Заливаю місію в дрон…"), null);
     appLog("upload start: " + (lastRoute ? lastRoute.length : 0) + " route pts");
     $("mav-upload").disabled = true;
     let _prevFlownRaw = null;                 // restore the previous flown snapshot if the upload fails
@@ -4696,7 +4696,7 @@
       try { _prevFlownRaw = localStorage.getItem(FLOWN_KEY); } catch (e) {}
       try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: lastRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
-        onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
+        onProgress: (s, tot) => setMsg(tf(t("Заливаю місію в дрон… {0}/{1} точок"), s, tot), null),
         turn_radius_m: turnRadiusM,
         plane_params: planeParams,
         // Default FULL geometry read-back; the opt-out checkbox falls back to count-only for
@@ -4737,17 +4737,17 @@
         if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
         resumeClear();          // AFTER flownSave: FLOWN_KEY must describe the new mission before RESUME is cleared
         updateMissionStatus();        // now "uploaded, matches plan"
-        let m = tf("Місію залито в дрон ({0} пунктів).", r.count);
+        let m = tf(t("Місію залито в дрон ({0} пунктів)."), r.count);
         let kind = "ok";
         const v = r.verify;
         if (v && v.ok && v.verified) {
           m += " " + t("Перевірено зчитуванням — збігається.");
         } else if (v && v.ok && !v.verified) {
-          m += " " + tf("Зчитана місія НЕ збігається ({0}).", (v.mismatches || []).join("; ") || t("розбіжності"));
+          m += " " + tf(t("Зчитана місія НЕ збігається ({0})."), (v.mismatches || []).join("; ") || t("розбіжності"));
           kind = "error";
         } else if (v && !v.ok) {
           // AMBER: mission stored (ACK'd) but read-back could not complete on this link.
-          m += " " + tf("Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB.",
+          m += " " + tf(t("Місію залито, але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({0}) — link заслабкий. Підійди ближче / під'єднай USB."),
             (v.error || t("таймаут")));
           kind = "warn";
         } else {
@@ -4769,11 +4769,11 @@
           } else if (r.fence.ok) {
             const nExcl = r.fence.exclusions || 0;
             m += " " + (nExcl
-              ? tf("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.", nExcl)
+              ? tf(t("Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий."), nExcl)
               : t("Геозона залита: межа поля. Увімкни FENCE_ENABLE=1, коли будеш готовий."));
             if (r.fence.homeOutside) m += " " + t("Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.");
           } else {
-            m += " " + tf("Геозону НЕ залито: {0}. Місія залита нормально.", r.fence.error || t("невідома помилка"));
+            m += " " + tf(t("Геозону НЕ залито: {0}. Місія залита нормально."), r.fence.error || t("невідома помилка"));
             if (kind === "ok") kind = "warn";   // fence failure alone must not read as a clean success
           }
         }
@@ -4796,16 +4796,16 @@
   // стартує як завжди (мотори → «Старт місії»).
   async function resumeUploadRemainder(rem) {
     const a = mavApi();
-    if (!a || !a.mav_upload_mission) { setMsg("Немає звʼязку з дроном.", "error"); return; }
+    if (!a || !a.mav_upload_mission) { setMsg(t("Немає звʼязку з дроном."), "error"); return; }
     appLog("[resume] заливаю залишок: " + rem.rest.length + " точок (пройдено " + rem.idx + "/" + rem.total + ")");
-    setMsg("Заливаю залишок місії…", null);
+    setMsg(t("Заливаю залишок місії…"), null);
     $("mav-start").disabled = true;
     try {
       const _rt = $("round-turn") && $("round-turn").checked;
       const _sp = parseFloat($("spacing").value) || 20;
       const r = await a.mav_upload_mission({
         route: rem.rest,
-        onProgress: (s, tot) => setMsg(tf("Заливаю місію в дрон… {0}/{1} точок", s, tot), null),
+        onProgress: (s, tot) => setMsg(tf(t("Заливаю місію в дрон… {0}/{1} точок"), s, tot), null),
         turn_radius_m: _rt ? Math.max(1, Math.min(10, _sp / 2)) : 0,
         verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full",
       });
@@ -4840,10 +4840,10 @@
       // match a concatenated string, so these mismatch/unverified warnings could never be
       // translated even with i18n.js keys added (verified finding).
       if (rv && rv.ok && !rv.verified) {
-        setMsg(tf("Залишок залито ({0} пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ({1}) — перевір перед стартом.",
+        setMsg(tf(t("Залишок залито ({0} пунктів), але ЗЧИТАНА НЕ ЗБІГАЄТЬСЯ ({1}) — перевір перед стартом."),
           r.count, (rv.mismatches || []).join("; ") || t("розбіжності")), "error");
       } else if (rv && !rv.ok) {
-        setMsg(tf("Залишок залито ({0} пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({1}) — link заслабкий.",
+        setMsg(tf(t("Залишок залито ({0} пунктів), але ПЕРЕВІРКА ЧИТАННЯМ НЕ ВДАЛАСЯ ({1}) — link заслабкий."),
           r.count, rv.error || t("таймаут")) + " " + tail, "warn");
       } else {
         setMsg(t("Залишок залито (") + r.count + " пунктів). " + tail, "ok");
@@ -4900,7 +4900,7 @@
 
   async function mavCommand(payload, label) {
     const a = mavApi();
-    if (!a || !a.mav_command) { setMsg("API недоступний.", "error"); return null; }
+    if (!a || !a.mav_command) { setMsg(t("API недоступний."), "error"); return null; }
     setMsg(`${label}…`, null);
     appLog("command " + JSON.stringify(payload));
     try {
@@ -4923,7 +4923,7 @@
     if (!confirm(t("Увімкнути мотори (ARM)? Тримай апарат під контролем."))) return;
     const m = (lastStatus && lastStatus.mode) || "";
     if (NON_ARMABLE.includes(m)) {
-      setMsg(tf("Режим {0} не дозволяє ARM — перемикаю на GUIDED…", m), null);
+      setMsg(tf(t("Режим {0} не дозволяє ARM — перемикаю на GUIDED…"), m), null);
       await mavCommand({ action: "mode", mode: "GUIDED" }, "Режим GUIDED");
     }
     mavCommand({ action: "arm" }, "ARM");
@@ -4951,8 +4951,8 @@
         + " доступний=" + (eng.available ? eng.available() : "?")) : "НЕМА (не завантажився)"));
     } catch (e) {}
     try {
-      out.push("стан плану: поле=" + (fieldPolygon ? "так" : "ні")
-        + " | маршрут=" + (lastRoute ? "так" : "ні")
+      out.push("стан плану: поле=" + (fieldPolygon ? "так" : t("ні"))
+        + " | маршрут=" + (lastRoute ? "так" : t("ні"))
         + " | вирізи=" + (typeof collectExclusions === "function" ? collectExclusions().length : "?"));
     } catch (e) {}
     try { out.push("зʼєднання: " + mavConnString() + " | підключено=" + mavConnected); } catch (e) {}
@@ -5059,7 +5059,7 @@
       } catch (e) {}
     }
     const _aq = IS_ANDROID && !sent;   // Android queues offline logs and auto-resends
-    setMsg(t("Лог (") + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : _aq ? "збережено — надішлеться автоматично, коли зʼявиться інтернет (скопійовано в буфер)" : "на сервер не пішло — скопійовано в буфер") + ".", sent ? "ok" : _aq ? "ok" : "error");
+    setMsg(t("Лог (") + LOG.length + " рядків) " + (sent ? "надіслано на сервер для аналізу" : _aq ? "збережено — надішлеться автоматично, коли зʼявиться інтернет (скопійовано в буфер)" : t("на сервер не пішло — скопійовано в буфер")) + ".", sent ? "ok" : _aq ? "ok" : "error");
   }
   $("mav-log").addEventListener("click", exportLog);
 
@@ -5112,10 +5112,10 @@
   const IS_STORE_BUILD = IS_ANDROID && !window.AndroidUpdate;
   async function checkUpdate() {
     if (IS_STORE_BUILD) {
-      setMsg("Оновлення для цієї збірки приходять через Google Play — відкрий Play і онови застосунок там.", null);
+      setMsg(t("Оновлення для цієї збірки приходять через Google Play — відкрий Play і онови застосунок там."), null);
       return;
     }
-    setMsg("Перевіряю оновлення на сервері…", null);
+    setMsg(t("Перевіряю оновлення на сервері…"), null);
     // 1) Get the server's latest version.
     let latest = "";
     if (IS_ANDROID && window.AndroidUpdate && window.AndroidUpdate.check) {
@@ -5131,15 +5131,15 @@
         latest = (await r.json()).version || "";
       } catch (e) { latest = ""; }
     }
-    if (!latest) { setMsg("Не вдалося перевірити оновлення (немає інтернету / сервер недоступний).", "error"); return; }
+    if (!latest) { setMsg(t("Не вдалося перевірити оновлення (немає інтернету / сервер недоступний)."), "error"); return; }
     appLog("update check: server=" + latest + " app=" + APP_VERSION);
     // 2) Up to date?
-    if (!_isNewer(latest, APP_VERSION)) { setMsg(tf("У вас остання версія (v{0}).", APP_VERSION), "ok"); return; }
+    if (!_isNewer(latest, APP_VERSION)) { setMsg(tf(t("У вас остання версія (v{0})."), APP_VERSION), "ok"); return; }
     // 3) Update, per platform.
     if (IS_ANDROID && window.AndroidUpdate && window.AndroidUpdate.download) {
       setMsg(`Доступна v${latest}. Завантажую APK — встановлення почнеться автоматично, лише підтверди.`, "ok");
       try { window.AndroidUpdate.download(); }   // native builds the official URL itself
-      catch (e) { setMsg("Не вдалося завантажити APK. Скачай вручну з вкладки «Додаток».", "error"); }
+      catch (e) { setMsg(t("Не вдалося завантажити APK. Скачай вручну з вкладки «Додаток»."), "error"); }
       return;
     }
     if (IS_QT) { setMsg(`Доступна v${latest}. На ПК відкрий додаток у Chrome/Edge — там завжди свіжа версія (і дрон по кабелю працює).`, "ok"); return; }
@@ -5294,14 +5294,14 @@
     return { ok: failures === 0, total, failures };
   }
   function syncStatusText() {
-    if (!syncEnabled()) return "вимкнено";
+    if (!syncEnabled()) return t("вимкнено");
     let ts = 0; try { ts = +localStorage.getItem("fmp_sync_last") || 0; } catch (e) {}
-    return ts ? tf("остання синхронізація: {0}", new Date(ts).toLocaleString()) : "синхронізацій ще не було";
+    return ts ? tf(t("остання синхронізація: {0}"), new Date(ts).toLocaleString()) : t("синхронізацій ще не було");
   }
   function renderSyncStatus() { const el = $("sync-status"); if (el) el.textContent = t(syncStatusText()); }
   let _syncPushing = false, _syncAutoLastAttempt = 0;
   async function syncPush(manual) {
-    if (!syncConfigured()) { if (manual) setMsg("Сервер не налаштовано.", "error"); return false; }
+    if (!syncConfigured()) { if (manual) setMsg(t("Сервер не налаштовано."), "error"); return false; }
     if (_syncPushing) return false;                 // one push in flight at a time
     _syncPushing = true;
     try {
@@ -5309,12 +5309,12 @@
       const j = await syncCall("/api/sync", payload);
       if (!j || !j.ok) {
         appLog("sync: push failed " + (j ? JSON.stringify(j).slice(0, 120) : "(no response)"));
-        if (manual) setMsg("Не вдалося синхронізувати із сервером.", "error");
+        if (manual) setMsg(t("Не вдалося синхронізувати із сервером."), "error");
         return false;
       }
       try { localStorage.setItem("fmp_sync_last", String(j.ts || Date.now())); } catch (e) {}
       renderSyncStatus();
-      if (manual) setMsg("Синхронізовано із сервером.", "ok");
+      if (manual) setMsg(t("Синхронізовано із сервером."), "ok");
       return true;
     } catch (e) {
       appLog("sync: push error " + e);
@@ -5336,11 +5336,11 @@
   }
   window.addEventListener("online", () => scheduleAutoSync("online"));
   async function syncRestore() {
-    if (!syncConfigured()) { setMsg("Сервер не налаштовано.", "error"); return; }
-    setMsg("Отримую копію з сервера…", null);
+    if (!syncConfigured()) { setMsg(t("Сервер не налаштовано."), "error"); return; }
+    setMsg(t("Отримую копію з сервера…"), null);
     try {
       const j = await syncCall("/api/sync_get", { device: deviceId() });
-      if (!j || !j.ok) { setMsg((j && j.error) || "Немає копії на сервері.", "error"); return; }
+      if (!j || !j.ok) { setMsg((j && j.error) || t("Немає копії на сервері."), "error"); return; }
       const snap = j.snapshot || {};
       let localFields = 0;
       try { const recs = await fldAll(); localFields = recs ? recs.length : Object.keys(lpAll()).length; } catch (e) {}
@@ -5352,17 +5352,17 @@
       } catch (e) {}
       const when = snap.ts ? new Date(snap.ts).toLocaleString() : "?";
       const ok = confirm(
-        tf("Копія на сервері від {0}, полів: {1}.", when, serverFields) + "\n" +
-        tf("Локально зараз полів: {0}.", localFields) + "\n\n" +
-        "Перезаписати локальні дані копією з сервера? Застосунок перезавантажиться."
+        tf(t("Копія на сервері від {0}, полів: {1}."), when, serverFields) + "\n" +
+        tf(t("Локально зараз полів: {0}."), localFields) + "\n\n" +
+        t("Перезаписати локальні дані копією з сервера? Застосунок перезавантажиться.")
       );
       if (!ok) return;
       const result = await applySyncSnapshot(snap);
       if (result.ok) {
-        setMsg("Відновлено з сервера. Перезавантаження…", "ok");
+        setMsg(t("Відновлено з сервера. Перезавантаження…"), "ok");
       } else {
         appLog("sync: restore partial — " + result.failures + " of " + result.total + " writes failed");
-        setMsg("Відновлено частково — перевір поля/статистику.", "warn");
+        setMsg(t("Відновлено частково — перевір поля/статистику."), "warn");
       }
       setTimeout(() => location.reload(), 300);
     } catch (e) { setMsg(t("Помилка відновлення: ") + e, "error"); }
@@ -5383,8 +5383,8 @@
   // (cyan), so the operator sees exactly what the drone will fly.
   $("mav-check").addEventListener("click", async () => {
     const a = mavApi();
-    if (!a || !a.mav_download_mission) { setMsg("API недоступний.", "error"); return; }
-    setMsg("Зчитую місію з дрона…", null);
+    if (!a || !a.mav_download_mission) { setMsg(t("API недоступний."), "error"); return; }
+    setMsg(t("Зчитую місію з дрона…"), null);
     try {
       const r = await a.mav_download_mission();
       if (!r || !r.ok) { setMsg(t("Не вдалося зчитати: ") + ((r && r.error) || "немає звʼязку"), "error"); return; }
@@ -5412,7 +5412,7 @@
 
   $("mav-start").addEventListener("click", () => {
     if (!lastStatus || !lastStatus.armed) {
-      setMsg("Спершу увімкни мотори: ARM (за потреби постав режим GUIDED).", "error");
+      setMsg(t("Спершу увімкни мотори: ARM (за потреби постав режим GUIDED)."), "error");
       return;
     }
     // Don't fly a stale mission: warn hard if the plan differs from what we uploaded.
