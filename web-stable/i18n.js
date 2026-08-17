@@ -23,6 +23,10 @@ window.FMP_TR = {
   "Відступ від країв, м": "Edge margin, m",
   "Висота польоту (над точкою зльоту), м": "Flight altitude (above take-off), m",
   "Швидкість, м/с": "Speed, m/s",
+  // Spray planning fields (issue #5) — added 2026-08-17.
+  "Норма внесення, л/га": "Application rate, l/ha",
+  "Об'єм бака, л": "Tank volume, l",
+  "Ємність батареї, хв": "Battery endurance, min",
   "Повернення (RTL) в кінці місії": "Return (RTL) at mission end",
   "Круглий розворот (діаметр = крок гонів)": "Rounded turn (diameter = pass spacing)",
   "Дрон робить круглий розворот вкінці кожного гону радіусом «крок / 2» — виставляється автопілоту при заливці по кабелю (WP_RADIUS_M). Точки маршруту не додаються; на більшому радіусі дрон трохи зрізає торці гонів.":
