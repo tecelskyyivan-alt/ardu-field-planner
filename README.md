@@ -14,19 +14,34 @@ I'm an aviation design engineer building this for real spraying
 operations. **If you cloned this repo, I'd genuinely like to hear from
 you** — it's the only way I learn whether it works outside my own field.
 
-- **Flew a mission with it?** Open a
-  [Discussion](https://github.com/tecelskyyivan-alt/ardu-field-planner/discussions)
-  — drone model, field size, what broke.
-- **Something doesn't work?**
-  [Open an issue](https://github.com/tecelskyyivan-alt/ardu-field-planner/issues/new)
-  — even a one-liner helps.
-- **Need a feature for your operation, or want it adapted to your
-  sprayer?** Write to **teselskyy@gmail.com**.
+**Four questions I'd rather ask than "do you like it?"** — answer any
+one and it changes what I build next:
+
+1. **Which task in preparing a spraying mission takes the longest?**
+2. **What do you still do by hand** — in a spreadsheet, on paper, in
+   your head?
+3. **What breaks or goes wrong most often** in the field?
+4. **What have you already tried to change**, and why did it not stick?
+
+Answer in a
+[Discussion](https://github.com/tecelskyyivan-alt/ardu-field-planner/discussions),
+an [issue](https://github.com/tecelskyyivan-alt/ardu-field-planner/issues/new),
+or by mail to **teselskyy@gmail.com** — whichever is least effort for
+you. Drone model and field size help, but a one-line answer is already
+useful.
 
 Я авіаційний інженер-конструктор, роблю це для реальних обприскувань.
-**Якщо ти клонував репозиторій — озвися.** Це єдиний спосіб дізнатися,
-чи працює воно поза моїм полем: модель дрона, площа, що зламалось.
-Потрібна доробка під твій обприскувач — пиши на **teselskyy@gmail.com**.
+**Якщо ти клонував репозиторій — озвися.**
+
+Чотири питання, які цікавлять більше за «чи подобається»:
+
+1. **Яка задача в підготовці обприскування забирає найбільше часу?**
+2. **Що доводиться робити вручну** — в таблиці, на папері, в голові?
+3. **Що найчастіше ламається** або йде не так у полі?
+4. **Що ти вже намагався змінити** — і чому не прижилось?
+
+Відповідь у Discussions, в issue або на **teselskyy@gmail.com**.
+Модель дрона й площа поля допоможуть, але й один рядок уже цінний.
 
 ---
 
