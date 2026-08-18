@@ -1,69 +1,58 @@
-# Secrets — MUST never be committed/pushed (security audit S1/S2).
-# The Android signing keystore + its password, and any local machine paths.
-android/keystore.properties
-android/local.properties
-android/**/keystore.properties
-*.keystore
-*.jks
-release.keystore
 
-# Build output / caches
-android/.gradle/
-android/build/
 android/app/build/
 android/app/src/*/_beta_web_bak/
-__pycache__/
-*.pyc
-.venv/
-tiles_cache/
-logs/
-sync/
-
-# Large runtime assets (pulled/synced, not source)
-android/app/src/main/assets/web/pyodide/
-ios/App/web/
-web/pyodide/
-
-# OS cruft
-.DS_Store
-Thumbs.db
-
-# --- додано автоматично ---
-node_modules/
-*.apk
-.DS_Store
-sitl/ArduCopter.exe
-*.exe
-
-# --- open-source prep ---
-# Build/run logs and generated outputs (not source)
-*.log
-exports/
-# SITL third-party runtime (Cygwin DLLs) + local server config — download/build separately
-sitl/*.dll
-sitl/_vps_Caddyfile
-# iOS build artifacts + Xcode user state
-ios/build/
-ios/**/xcuserdata/
-*.xcuserstate
-# Android: keep native source only — the web bundle + Pyodide are synced from web-stable/
-# at build time (not source), and the gradle build output is generated.
-android/app/src/main/assets/web/
 android/app/src/main/assets/engine/
-android/app/build/
+android/app/src/main/assets/web/
+android/app/src/main/assets/web/pyodide/
 android/build/
 android/.gradle/
+# Android: keep native source only — the web bundle + Pyodide are synced from web-stable/
+android/**/keystore.properties
+android/keystore.properties
 android/local.properties
-# Local, gitignored runtime config (real server URL etc.) — see *.example
-config.local.js
-
-# Local test fixtures (personal screenshots) + photo-import local artifacts — not for the public repo
-tests/fixtures/
-.venv-photo/
-data/gazetteer.sqlite
-
-# SITL binary — regenerable from ArduPilot source, not history material
-sitl/arducopter
-
-# local server credentials for the log / sync / photo bridges (never commit)
 android/server.properties
+*.apk
+# at build time (not source), and the gradle build output is generated.
+# Build output / caches
+# Build/run logs and generated outputs (not source)
+config.local.js
+data/gazetteer.sqlite
+.DS_Store
+evolve/
+*.exe
+exports/
+ios/App/web/
+ios/build/
+# iOS build artifacts + Xcode user state
+ios/**/xcuserdata/
+*.jks
+*.keystore
+# Large runtime assets (pulled/synced, not source)
+# Local, gitignored runtime config (real server URL etc.) — see *.example
+# local server credentials for the log / sync / photo bridges (never commit)
+# Local test fixtures (personal screenshots) + photo-import local artifacts — not for the public repo
+*.log
+logs/
+node_modules/
+# --- open-source prep ---
+# OS cruft
+*.pyc
+__pycache__/
+release.keystore
+# Secrets — MUST never be committed/pushed (security audit S1/S2).
+sitl/arducopter
+sitl/ArduCopter.exe
+# SITL binary — regenerable from ArduPilot source, not history material
+sitl/*.dll
+# SITL third-party runtime (Cygwin DLLs) + local server config — download/build separately
+sitl/_vps_Caddyfile
+sync/
+tests/fixtures/
+# The Android signing keystore + its password, and any local machine paths.
+Thumbs.db
+tiles_cache/
+.venv/
+.venv-photo/
+web/pyodide/
+*.xcuserstate
+# --- додано автоматично ---
