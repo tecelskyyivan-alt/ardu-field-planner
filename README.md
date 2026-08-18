@@ -6,6 +6,30 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Download APK](https://img.shields.io/github/v/release/tecelskyyivan-alt/ardu-field-planner?label=download)](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/latest)
 
+---
+
+### 👋 Using this? Tell me / Користуєшся? Напиши
+
+I'm an aviation design engineer building this for real spraying
+operations. **If you cloned this repo, I'd genuinely like to hear from
+you** — it's the only way I learn whether it works outside my own field.
+
+- **Flew a mission with it?** Open a
+  [Discussion](https://github.com/tecelskyyivan-alt/ardu-field-planner/discussions)
+  — drone model, field size, what broke.
+- **Something doesn't work?**
+  [Open an issue](https://github.com/tecelskyyivan-alt/ardu-field-planner/issues/new)
+  — even a one-liner helps.
+- **Need a feature for your operation, or want it adapted to your
+  sprayer?** Write to **teselskyy@gmail.com**.
+
+Я авіаційний інженер-конструктор, роблю це для реальних обприскувань.
+**Якщо ти клонував репозиторій — озвися.** Це єдиний спосіб дізнатися,
+чи працює воно поза моїм полем: модель дрона, площа, що зламалось.
+Потрібна доробка під твій обприскувач — пиши на **teselskyy@gmail.com**.
+
+---
+
 <!-- Tip: drop a real app screenshot at docs/screenshot.png and uncomment:
 ![Screenshot](docs/screenshot.png) -->
 
