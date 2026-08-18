@@ -64,23 +64,6 @@ class Api:
         if sfa:
             ang, wps = return_corridor_route(cover, spacing, home, field_boundary=boundary,
                                              exclusions=exclusions, anchor=anchor_ll, return_route=True)
-        elif optimize == "cost":
-            # ⚠ Критерій «оверлеп + час» (route_optimizer). Свідомо
-            # НЕ типовий: чинний типовий — "overlap", який після
-            # рішення Івана рахує лише час.
-            #
-            # Заміряно 18.08.2026 на bench_harness (10 полів, 20 м):
-            #   тільки час: оверлеп 12.63 %, 517 s, покриття 89.3 %
-            #   оверлеп+час: оверлеп  7.66 %, 528 s, покриття 92.5 %
-            # тобто −39 % перекриття за +2 % часу, покриття зросло
-            # на КОЖНОМУ полі.
-            #
-            # Ціна: 36 побудов маршруту замість однієї (~0.4 с проти
-            # ~0.01 с на 500×300), тому не для живих перетягувань
-            # межі на карті — лише для фінального планування.
-            from .route_optimizer import best_angle_route
-            wps, ang = best_angle_route(boundary, spacing, home,
-                                        exclusions=exclusions, speed=speed)
         elif optimize == "overlap":
             ang, wps = overlap_optimal_angle(cover, spacing, home, field_boundary=boundary,
                                              exclusions=exclusions, anchor=anchor_ll, return_route=True,
