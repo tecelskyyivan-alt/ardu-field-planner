@@ -236,6 +236,7 @@ def edge_vehicle(stop, port, opts):
                                      source_component=1)
     store = []
     last_hb = 0.0
+    origin = opts.get("held_origin")       # (lat_e7, lon_e7): an origin the FC already holds
     while not stop.is_set():
         now = time.time()
         if now - last_hb >= 0.2:
@@ -295,6 +296,13 @@ def edge_vehicle(stop, port, opts):
                         it["current"], it["autocontinue"],
                         it["p1"], it["p2"], it["p3"], it["p4"],
                         it["x"], it["y"], it["z"], 0)
+        elif mt == "SET_GPS_GLOBAL_ORIGIN":
+            if origin is None:                 # EKF3: the first origin wins
+                origin = (m.latitude, m.longitude)
+                veh.mav.gps_global_origin_send(origin[0], origin[1], m.altitude)
+        elif mt == "COMMAND_LONG" and m.command == 512 and int(m.param1) == 49:
+            if origin is not None:
+                veh.mav.gps_global_origin_send(origin[0], origin[1], 0)
         elif mt == "COMMAND_LONG":
             veh.mav.command_ack_send(m.command, opts.get("cmd_result", 0))
     try:
@@ -365,6 +373,20 @@ if lk:
     rc = lk.arm(True)
     check("rejected command -> ok False", rc.get("ok") is False)
     check("rejection surfaces the result code", "відхилив" in (rc.get("error") or ""))
+    lk.disconnect(); st.set(); th.join(timeout=2.0)
+
+print("\n== GPS-denied: home written as the EKF origin, read back ==")
+lk, _, st, th = run_edge("origin", 14583, {})
+if lk:
+    r = lk.set_origin(49.5275, 24.004, 365.0)
+    check("FC without an origin takes the home -> ok", r.get("ok") is True)
+    check("telemetry now carries the origin", abs((lk.status().get("origin_lat") or 0) - 49.5275) < 1e-6)
+    lk.disconnect(); st.set(); th.join(timeout=2.0)
+lk, _, st, th = run_edge("origin-held", 14584, {"held_origin": (495300000, 240100000)})
+if lk:
+    r = lk.set_origin(49.5275, 24.004, 365.0)
+    check("FC holding ANOTHER origin -> ok False + where it is",
+          r.get("ok") is False and r.get("held") == (49.53, 24.01))
     lk.disconnect(); st.set(); th.join(timeout=2.0)
 
 print()

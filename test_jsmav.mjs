@@ -227,5 +227,57 @@ console.log("\n== verify cap bounds the WHOLE call (list retries + items), not e
   link.disconnect(); t._stopHb();
 }
 
+console.log("\n== GPS-denied: EKF origin read only when asked (origin_watch), via REQUEST_MESSAGE 49 ==");
+for (const watch of [false, true]) {
+  const veh = MAVLINK.createParser();
+  let asked = 0;
+  const t = { ondata: null, close() {} };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  t.write = (bytes) => {
+    for (const m of veh.push(bytes)) {
+      if (m.name === "COMMAND_LONG" && m.fields.command === 512 && m.fields.param1 === 49) {
+        asked++;
+        send("GPS_GLOBAL_ORIGIN", { latitude: 495275000, longitude: 240040000, altitude: 365000 });
+      }
+    }
+  };
+  const hb = setInterval(() => send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 4, system_status: 3, mavlink_version: 3 }), 100);
+  const link = new MAV_LINK.MavLink();
+  link.origin_watch = watch;
+  await link.connect(t);
+  await sleep(600);
+  const st = link.status();
+  if (watch) {
+    check("[origin] asked once, not every heartbeat (8 s throttle)", asked === 1);
+    check("[origin] GPS_GLOBAL_ORIGIN parsed to degrees", st.origin_lat === 49.5275 && st.origin_lon === 24.004);
+  } else {
+    check("[origin] not asked without origin_watch (narrow ELRS link)", asked === 0 && st.origin_lat == null);
+  }
+  link.disconnect(); clearInterval(hb);
+}
+
+console.log("\n== GPS-denied: setOrigin writes home, read-back is the verdict ==");
+for (const held of [null, [495300000, 240100000]]) {
+  const veh = MAVLINK.createParser();
+  let origin = held;
+  const t = { ondata: null, close() {} };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  t.write = (bytes) => {
+    for (const m of veh.push(bytes)) {
+      if (m.name === "SET_GPS_GLOBAL_ORIGIN" && origin === null) origin = [m.fields.latitude, m.fields.longitude];
+      if (m.name === "COMMAND_LONG" && m.fields.command === 512 && m.fields.param1 === 49 && origin)
+        send("GPS_GLOBAL_ORIGIN", { latitude: origin[0], longitude: origin[1], altitude: 0 });
+    }
+  };
+  const hb = setInterval(() => send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 4, system_status: 3, mavlink_version: 3 }), 100);
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  await sleep(300);
+  const r = await link.setOrigin(49.5275, 24.004, 365);
+  if (!held) check("[setOrigin] FC without an origin takes home -> ok", r.ok === true && link.status().origin_lat === 49.5275);
+  else check("[setOrigin] FC holding another origin -> ok false + where", r.ok === false && r.held[0] === 49.53 && r.held[1] === 24.01);
+  link.disconnect(); clearInterval(hb);
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

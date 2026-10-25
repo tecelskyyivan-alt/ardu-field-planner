@@ -159,6 +159,7 @@ class MavLink:
         self._download = None      # {"event":Event, "result":dict}
         self._command = None       # {"cmd":int, "params":[7], "event":Event, "result":dict}
         self._param = None         # {"name":str, "value":float, "event":Event, "result":dict}
+        self._origin = None        # {"lat_e7","lon_e7","alt_mm", "event":Event, "result":dict}
         self._streams_ok = False          # set once position/GPS telemetry arrives
         self._last_stream_req = 0.0       # throttle the telemetry re-request
         self._stream_req_count = 0        # how many asks (fast at first, then slow)
@@ -177,6 +178,7 @@ class MavLink:
             "heading": None, "battery_v": None, "battery_pct": None,
             "wp_current": None, "wp_total": None, "last_text": None,
             "home_lat": None, "home_lon": None,   # ArduPilot's actual home (arm point)
+            "origin_lat": None, "origin_lon": None,   # EKF origin (GPS-denied frame)
             # GPS quality + velocity — for the anti-jamming / anti-spoofing guard.
             "hdop": None, "h_acc": None, "gps_vel": None, "vx": None, "vy": None, "vz": None,
         }
@@ -273,7 +275,8 @@ class MavLink:
             dl, self._download = self._download, None
             cmd, self._command = self._command, None
             par, self._param = self._param, None
-        for pend in (up, dl, cmd, par):
+            org, self._origin = self._origin, None
+        for pend in (up, dl, cmd, par, org):
             if pend is not None:
                 self._complete(pend, {"ok": False, "error": "Звʼязок розірвано."})
         with self._lock:
@@ -470,6 +473,28 @@ class MavLink:
             return {"ok": False, "error": "Параметр не підтверджено (таймаут)."}
         return req["result"] or {"ok": False, "error": "Невідома помилка параметра."}
 
+    def set_origin(self, lat, lon, alt_m=0.0, timeout=6.0):
+        """GPS-denied mode: write the operator's home as the EKF origin, then read the
+        FC's origin back. ArduPilot takes SET_GPS_GLOBAL_ORIGIN only while it holds no
+        origin (EKF3 "first one wins"), so the read-back is the verdict: {"ok": True}
+        when the FC holds this point, else {"ok": False, "held": (lat, lon)} — an FC that
+        took an origin earlier (a GPS fix, a previous upload) keeps it until it reboots."""
+        if not self._conn or not (self._thread and self._thread.is_alive()):
+            return {"ok": False, "error": "Немає звʼязку. Спочатку підключись до дрона."}
+        ev = threading.Event()
+        req = {"lat_e7": int(round(lat * 1e7)), "lon_e7": int(round(lon * 1e7)),
+               "alt_mm": int(round((alt_m or 0.0) * 1000)), "event": ev, "result": None}
+        with self._lock:
+            if self._upload or self._download or self._command or self._param or self._origin:
+                return {"ok": False, "error": "Триває інший обмін з дроном — зачекай."}
+            self._origin = req
+        if not ev.wait(timeout=timeout):
+            with self._lock:
+                if self._origin is req:
+                    self._origin = None
+            return {"ok": False, "error": "Origin не підтверджено (таймаут)."}
+        return req["result"] or {"ok": False, "error": "Невідома помилка origin."}
+
     def set_mission_current(self, seq, reset=0):
         # MAV_CMD_DO_SET_MISSION_CURRENT (224): jump the mission pointer to `seq`.
         # param2 (reset)=1 also resets DO_JUMP repeat counters AND moves a
@@ -504,7 +529,8 @@ class MavLink:
                     par, self._param = self._param, None
                 else:
                     par = None
-            if up or dl or cmd or par:
+                org, self._origin = self._origin, None
+            if up or dl or cmd or par or org:
                 # Mark the link busy so background telemetry housekeeping (e.g. the
                 # periodic HOME re-request) never injects a stray command into the
                 # middle of a mission/command handshake.
@@ -518,6 +544,8 @@ class MavLink:
                         self._do_command(conn, cmd)
                     if par is not None:
                         self._do_param(conn, par)
+                    if org is not None:
+                        self._do_origin(conn, org)
                 finally:
                     self._busy = False
             # Keep a steady GCS heartbeat going (skip while a transfer owns the
@@ -720,6 +748,13 @@ class MavLink:
             elif t == "SYS_STATUS":
                 tl["battery_v"] = round(msg.voltage_battery / 1000.0, 2) if msg.voltage_battery != 65535 else None
                 tl["battery_pct"] = msg.battery_remaining if msg.battery_remaining != -1 else None
+                # Compass health (MAV_SYS_STATUS_SENSOR_3D_MAG = 4) for the GPS-denied panel.
+                mag = 4
+                tl["mag_ok"] = (bool(msg.onboard_control_sensors_health & mag)
+                                if msg.onboard_control_sensors_present & mag else None)
+            elif t == "GPS_GLOBAL_ORIGIN":
+                tl["origin_lat"] = msg.latitude / 1e7
+                tl["origin_lon"] = msg.longitude / 1e7
             elif t == "HOME_POSITION":
                 # The home ArduPilot actually uses (set at arm / first fix).
                 tl["home_lat"] = msg.latitude / 1e7
@@ -954,6 +989,31 @@ class MavLink:
                     result = {"ok": True}
                 else:
                     result = {"ok": False, "error": self._command_reject(ack.result)}
+                return
+        except Exception as exc:
+            result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            self._complete(req, result)
+
+
+    def _do_origin(self, conn, req):
+        """SET_GPS_GLOBAL_ORIGIN (no ACK exists for it), then REQUEST_MESSAGE 49 and the
+        FC's GPS_GLOBAL_ORIGIN as the answer."""
+        ts, tc = self._targets()
+        result = {"ok": False, "error": "FC не повідомив origin."}
+        try:
+            conn.mav.set_gps_global_origin_send(ts, req["lat_e7"], req["lon_e7"], req["alt_mm"])
+            for _ in range(3):
+                conn.mav.command_long_send(ts, tc, 512, 0, 49, 0, 0, 0, 0, 0, 0)
+                m = self._recv_mission(conn, ("GPS_GLOBAL_ORIGIN",), 1.5)
+                if m is None:
+                    continue
+                self._ingest(conn, m)
+                if (abs(m.latitude - req["lat_e7"]) <= 2 and abs(m.longitude - req["lon_e7"]) <= 2):
+                    result = {"ok": True}
+                else:
+                    result = {"ok": False, "held": (m.latitude / 1e7, m.longitude / 1e7),
+                              "error": "FC уже тримає інший origin."}
                 return
         except Exception as exc:
             result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

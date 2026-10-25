@@ -404,7 +404,7 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    def _mission_items(self):
+    def _mission_items(self, home_override=None):
         """Build MAVLink mission items from the last-built route (or None).
 
         HOME = where the drone will arm: when connected, use ArduPilot's own home
@@ -416,6 +416,12 @@ class Api:
         from .mavlink_link import build_mission_items, LINK
         s = self._state
         home = s["home"]
+        if home_override:
+            # GPS-denied: the operator's take-off point is home (no fix to take it from).
+            return build_mission_items(
+                (float(home_override["lat"]), float(home_override["lng"]), 0.0),
+                s["takeoff_alt"], s["waypoints"], s["wp_alt"], s.get("rtl", True),
+                speed=s.get("speed", 0))
         try:
             st = LINK.status()
             if st.get("home_lat") is not None and st.get("home_lon") is not None:
@@ -432,7 +438,7 @@ class Api:
     def mav_upload_mission(self, params=None):
         """Upload the last-built mission, then read it back to CONFIRM it landed
         on the vehicle (so the user knows the upload truly succeeded)."""
-        items = self._mission_items()
+        items = self._mission_items((params or {}).get("vio_home"))
         if items is None:
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
         try:
@@ -471,6 +477,12 @@ class Api:
             # RTL; дефолт 2 тримає останній курс — оператор не бачить перешкод).
             py = LINK.set_param("WP_YAW_BEHAVIOR", 1)
             res["yaw_forward_set"] = py.get("ok")
+            # GPS-denied mode: the operator's home becomes the EKF origin on the FC, so the
+            # companion takes it from there (vio_onboard --origin fc) — nothing to type.
+            vh = (params or {}).get("vio_home")
+            if vh:
+                res["origin"] = LINK.set_origin(float(vh["lat"]), float(vh["lng"]),
+                                                float(vh.get("alt") or 0.0))
             # Auto read-back verify unless the caller opts out.
             if (params or {}).get("verify", True):
                 v = LINK.verify_mission(items)

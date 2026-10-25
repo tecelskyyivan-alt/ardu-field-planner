@@ -115,6 +115,26 @@
         проходу радіусом «крок / 2» — радіус виставляється автопілоту при заливці місії (будь-яким
         зʼєднанням; на INAV не діє). Точок маршруту не додається; на більшому радіусі дрон трохи зрізає
         торці проходів.</p>
+      <label class="row">
+        <input id="vio-mode" type="checkbox" />
+        Без GPS (VIO): дім — точка на мапі
+      </label>
+      <div id="vio-panel" style="display:none">
+        <p class="hint">Постав дім точно там, де дрон стоятиме на старті. При заливці місії FMP
+          запише його у FC як точку відліку (origin) — далі Pi і FC беруть її самі; курс дає компас.</p>
+        <div class="row">
+          <button id="vio-set-home" type="button">Поставити дім на мапі</button>
+          <input id="vio-home" type="text" placeholder="49.5275000, 24.0040000" />
+        </div>
+        <label>Допуск дрейфу, м
+          <input id="vio-tol" type="number" value="40" min="5" step="5" />
+        </label>
+        <label class="row">
+          <input id="vio-calibrated" type="checkbox" />
+          mount_yaw виміряно (rig.json)
+        </label>
+        <div id="vio-info" class="hint"></div>
+      </div>
 
       <div class="step">
         <span class="badge">2</span> Побудова та експорт
@@ -386,6 +406,7 @@
   <script src="vendor/clipper.min.js"></script>
   <script src="i18n.js"></script>
   <script src="geo-cover.js"></script>
+  <script src="vio-mode.js"></script>
   <script src="app.js"></script>
   <script src="sw-register.js"></script>
 </body>
