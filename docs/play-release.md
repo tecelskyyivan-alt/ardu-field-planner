@@ -165,16 +165,22 @@ planning tool — flight safety and regulatory compliance remain the operator's 
 
 ## 3. Data safety (форма в Console)
 
-Основа — що реально робить код, не що хотілося б. Опційні пункти = «Data collection is optional»
-(користувач сам вмикає).
+Основа — що реально робить код, не що хотілося б. Звірено з кодом 2026-10-29 (v2.5.88): у
+Play-збірці `FMP_SERVER_BASE` порожній, тож «Резервна копія» нікуди не йде, а імпорт фото з
+застосунку прибрано (`PhotoBridge.available() = false`). З пристрою йде лише діагностичний лог.
 
 | Категорія | Збирається | Передається третім | Опційно | Призначення | Примітка |
 |---|---|---|---|---|---|
-| Location → Precise location | **так** | ні | **так** | App functionality | Тільки якщо ввімкнена «Резервна копія»: на сервер ідуть межі полів із координатами. Без неї позиція не залишає пристрій |
-| App activity → Other actions | так | ні | так | App functionality | Журнал польотів (час, площа, наліт) у складі резервної копії |
-| Photos and videos → Photos | так | ні | так | App functionality | Лише фото, яке користувач сам вибрав для імпорту контурів |
-| App info and performance → Crash logs, Diagnostics | так | ні | так | Diagnostics | Кнопка «Лог для аналізу» — вручну |
-| Device or other IDs | так | ні | так | Diagnostics | Знеособлений ідентифікатор пристрою в логу |
+| App info and performance → Crash logs, Diagnostics | так | ні | **ні** (required) | Analytics | Після помилки лог іде **автоматично** (`app.js` `_lastAutoUpload`), вимикача немає; плюс кнопка «Лог для аналізу». Приймач — Google Apps Script → Drive розробника (#12); Google тут обробник, не «shared» |
+| Device or other IDs | так | ні | ні (required) | Analytics | Випадковий ID встановлення `fmp_device`; у мережу йде як є, у Drive — лише sha256(сіль+id) |
+
+Не декларувати, поки так у коді: Location (позиція не залишає пристрій, координат у лозі немає),
+App activity, Photos. Якщо в Play-збірку повернеться сервер (резервна копія) чи імпорт фото —
+повернути рядки Location → Precise location, App activity → Other actions, Photos (усі опційні,
+App functionality).
+
+Форма в Console (Policy and programs → App content → Data safety): collects data — Yes; encrypted
+in transit — Yes; акаунтів немає; delete-data URL — політика конфіденційності (п.5).
 
 Практики безпеки: **дані шифруються при передачі** (HTTPS) ✅ · **користувач може попросити видалити
 дані** ✅ (email, до 30 днів) · дані не продаються · рекламних/аналітичних SDK немає.
