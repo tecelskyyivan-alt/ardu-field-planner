@@ -8,3 +8,10 @@ collect_ignore = [
     "test_upload_turn_radius.py", "test_v24.py", "test_vio_home_upload.py",
     "test_i18n_coverage.py",
 ]
+
+# The photo-import suites need requirements-photo.txt (OpenCV, rapidfuzz, …); without it, skip them.
+try:
+    import cv2, rapidfuzz  # noqa: F401,E401
+except ImportError:
+    collect_ignore += ["test_photo_import.py", "test_photo_reg.py", "test_photo_colorseg.py",
+                       "test_photo_ocr.py", "test_photo_geo.py"]

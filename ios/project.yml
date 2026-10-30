@@ -35,8 +35,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fmp.planner
-        MARKETING_VERSION: "2.5.97"
-        CURRENT_PROJECT_VERSION: "113"
+        MARKETING_VERSION: "2.5.99"
+        CURRENT_PROJECT_VERSION: "114"
         INFOPLIST_FILE: App/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"          # iPhone + iPad
         IPHONEOS_DEPLOYMENT_TARGET: "15.0"

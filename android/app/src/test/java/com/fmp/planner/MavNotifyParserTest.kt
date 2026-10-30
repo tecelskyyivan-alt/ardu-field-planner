@@ -61,6 +61,17 @@ class MavNotifyParserTest {
         assertEquals(50, s.progressPct)   // 5 / 10
     }
 
+    @Test fun pushed_card_progress_wins_while_fresh_then_falls_back_to_wp_count() {
+        var t = 0L
+        val p = MavNotifyParser { t }
+        p.setMission(10)
+        p.push(MISSION_CURRENT)            // WP 5 of 10 -> 50 % by count
+        p.setProgress(37)                  // the card's distance-based % (#29)
+        assertEquals(37, p.snapshot().progressPct)
+        t = MavNotifyParser.PCT_FRESH_MS + 1   // page frozen (screen off): pushes stopped
+        assertEquals(50, p.snapshot().progressPct)
+    }
+
     @Test fun flight_seconds_accumulate_while_armed() {
         var t = 1000L
         val p = MavNotifyParser { t }

@@ -23,6 +23,7 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
     )
 
     companion object {
+        const val PCT_FRESH_MS = 5000L   // #29: pushed % older than this is ignored
         private const val NEED = -1
         private const val BAD = -2
         // crc_extra for the 5 modelled messages (verified exact, spec §6 / specs.json).
@@ -61,6 +62,12 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
 
     /** wp_total is trusted ONLY from JS (it uploaded the mission); MISSION_CURRENT.total is optional. */
     fun setMission(total: Int) { wpTotalPushed = if (total > 0) total else 0 }
+
+    // #29: the in-app card's progress is distance-based; JS pushes it while the page runs so both
+    // show the same %. A frozen page (screen off) stops pushing — after PCT_FRESH_MS fall back to WP count.
+    private var pctPushed: Int? = null
+    private var pctPushedAtMs = 0L
+    fun setProgress(pct: Int) { pctPushed = pct.coerceIn(0, 100); pctPushedAtMs = nowMs() }
     fun resetFlight() {
         flightAccumMs = 0; distM = 0.0; lastLat = null; lastLon = null
         flightStartMs = if (lastArmed) nowMs() else 0
@@ -75,8 +82,9 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
         val live = if (lastArmed && flightStartMs > 0) nowMs() - flightStartMs else 0
         val fSec = (flightAccumMs + live) / 1000
         val wt = if (wpTotalPushed > 0) wpTotalPushed else null
-        val pct = if (wt != null && wt > 1 && wpSeq != null)
+        val wpPct = if (wt != null && wt > 1 && wpSeq != null)
             (wpSeq!!.coerceIn(0, wt) * 100) / wt else null
+        val pct = pctPushed?.takeIf { nowMs() - pctPushedAtMs < PCT_FRESH_MS } ?: wpPct
         // distM (unlike flightSec) is NOT wall-clock-derived: it only grows inside the msgId==33
         // handler below, on a freshly arrived GLOBAL_POSITION_INT frame. While the stream is dead no
         // frames arrive, so distM is naturally frozen during a gap — nothing here needs to special-case

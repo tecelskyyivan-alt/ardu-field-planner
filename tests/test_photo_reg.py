@@ -37,7 +37,8 @@ WORLD_X0, WORLD_Y0 = reg.lonlat_to_merc(31.15, 50.36)
 @pytest.fixture(scope="module")
 def shot():
     img = cv2.imread(FIXTURE)
-    assert img is not None, "нема фікстури %s" % FIXTURE
+    if img is None:   # the agro-GIS screenshots are personal and gitignored: skip, don't error
+        pytest.skip("нема фікстури %s (gitignored)" % FIXTURE)
     return img
 
 

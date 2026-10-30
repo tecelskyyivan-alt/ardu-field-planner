@@ -14,6 +14,7 @@ import math
 
 from shapely.geometry import Polygon, LineString, MultiPolygon, Point
 from shapely.affinity import rotate
+from shapely import union_all
 from shapely.ops import unary_union, split
 
 try:                # shapely 2.x: prepared-геометрія робить contains у ~10-20 разів швидшим
@@ -32,6 +33,22 @@ except ImportError:                                   # шлях, як рані�
 
 from .geo import latlon_to_local, local_to_latlon, centroid, path_length, haversine
 
+
+# Fixed precision (m) for overlays on route swaths (coverage metrics, coverage/overlap overlay).
+# The browser/APK engine (Pyodide, GEOS 3.12) throws TopologyException ("side location conflict",
+# "assigned depths do not match") on long self-overlapping swaths over fields with cut-outs, and
+# in Pyodide a C++ exception is fatal. 1 cm snap-rounding (OverlayNG) is robust and invisible here.
+OVERLAY_GRID = 0.01
+
+
+def _swath(pts, half):
+    """The area of LineString(pts).buffer(half, cap_style=2) — flat ends, round joins — built from
+    straight pieces: flat-capped segment buffers + discs at the inner vertices, fixed-precision union.
+    GEOS 3.12 (the browser/APK engine) throws "assigned depths do not match" buffering a whole long,
+    self-overlapping route in one go, and in Pyodide that C++ exception is fatal."""
+    pieces = [LineString([a, b]).buffer(half, cap_style=2) for a, b in zip(pts, pts[1:]) if a != b]
+    pieces += [Point(p).buffer(half) for p in pts[1:-1]]
+    return union_all(pieces, grid_size=OVERLAY_GRID) if pieces else Polygon()
 
 def _extract_segments(geom):
     """Flatten a shapely intersection result into a list of (p0, p1) segments."""
@@ -1020,8 +1037,8 @@ def coverage_metrics(waypoints, boundary, exclusions=None, spacing=20.0):
         return {"coverage_pct": 0.0, "overlap_pct": 0.0}
     local = [latlon_to_local(la, lo, lat0, lon0) for la, lo in waypoints]
     swath = max(float(spacing), 0.5)
-    band = LineString(local).buffer(swath / 2.0, cap_style=2)    # flat-capped swath
-    covered = band.intersection(free).area
+    band = _swath(local, swath / 2.0)                              # flat-capped swath
+    covered = band.intersection(free, grid_size=OVERLAY_GRID).area   # fixed precision: see OVERLAY_GRID
     sum_swaths = 0.0
     for a, b in zip(local, local[1:]):
         sum_swaths += math.hypot(b[0] - a[0], b[1] - a[1]) * swath
@@ -1102,7 +1119,7 @@ def mission_overlap(home, waypoints, spacing, boundary=None, rtl=True):
     path = [(lat0, lon0)] + wps + ([(lat0, lon0)] if rtl else [])
     local = [latlon_to_local(la, lo, lat0, lon0) for la, lo in path]
     swath = max(float(spacing), 0.5)
-    band = LineString(local).buffer(swath / 2.0, cap_style=2)     # flat-capped swath
+    band = _swath(local, swath / 2.0)                              # flat-capped swath
     union_area = band.area
     sum_swaths = 0.0
     for a, b in zip(local, local[1:]):
@@ -1154,24 +1171,27 @@ def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900,
     # Physical spray half-width: `boom` (real footprint) if given, else `spacing` (stitched passes,
     # no gaps possible). boom < spacing → visible gaps between passes; boom > spacing → overlap.
     r = max(float(boom if boom else spacing), 0.5) / 2.0
-    band = LineString(local).buffer(r, cap_style=2)            # the whole swept swath
+    band = _swath(local, r)                                    # the whole swept swath
 
     overlap_geom = None
     segs = [LineString([a, b]).buffer(r, cap_style=2) for a, b in zip(local, local[1:])]
     if 0 < len(segs) <= max_segments:
         laid = None                       # union of swaths laid down so far
         parts = []
+        # Fixed-precision overlay (1 cm snap-rounding): the running union of hundreds of buffered
+        # segments made the browser/APK's GEOS 3.12 throw "side location conflict" on real fields
+        # with cut-outs (287 ha, angle 30°) — in Pyodide a C++ exception is fatal, not catchable.
         for s in segs:
             if laid is not None:
-                x = s.intersection(laid)
+                x = s.intersection(laid, grid_size=OVERLAY_GRID)
                 if (not x.is_empty) and x.area > 0.25:          # drop sub-0.25 m² slivers
                     parts.append(x)
-                laid = laid.union(s)
+                laid = laid.union(s, grid_size=OVERLAY_GRID)
             else:
                 laid = s
         if parts:
             try:
-                overlap_geom = unary_union(parts)
+                overlap_geom = union_all(parts, grid_size=OVERLAY_GRID)
             except Exception:
                 overlap_geom = None
 
@@ -1212,7 +1232,7 @@ def coverage_overlap_geo(home, waypoints, spacing, rtl=True, max_segments=900,
                     excl_polys.append(_Poly([latlon_to_local(la, lo, lat0, lon0) for la, lo in ex]).buffer(0))
             excl_union = unary_union(excl_polys) if excl_polys else None
             local_wps = [latlon_to_local(la, lo, lat0, lon0) for la, lo in wps]
-            gap_band = LineString(local_wps).buffer(r, cap_style=2)
+            gap_band = _swath(local_wps, r)
             feather = gap_feather if gap_feather is not None else min(0.3 * r, 2.0)
             clip_e = cover_local.buffer(-feather)               # erode BEFORE subtracting exclusions
             if excl_union is not None:

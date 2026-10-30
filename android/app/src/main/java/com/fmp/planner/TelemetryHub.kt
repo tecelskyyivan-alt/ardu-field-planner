@@ -56,6 +56,10 @@ object TelemetryHub {
         synchronized(parser) { parser.setMission(total) }
     }
 
+    fun setProgress(pct: Int) {
+        synchronized(parser) { parser.setProgress(pct) }
+    }
+
     fun resetFlight() {
         synchronized(parser) { parser.resetFlight() }
     }

@@ -64,6 +64,7 @@ window.FMP_TR = {
   "UDP (мережа / SITL)": "UDP (network / SITL)",
   "Адреса (host:port) — авто": "Address (host:port) — auto",
   "авто: 0.0.0.0:14550": "auto: 0.0.0.0:14550",
+  "Будую маршрут…": "Building the route…",
   "Закрити пораду": "Close the tip",
   "Бекпак не відповів. Онови його прошивкою FMP — кнопка й кроки під «Підключити». Якщо вже прошито — впиши IP бекпака в «Адреса».": "The backpack didn't answer. Flash it with the FMP firmware — button and steps under «Connect». Already flashed? Type the backpack's IP into «Address».",
   "Онови прошивку бекпака": "Update the backpack firmware",

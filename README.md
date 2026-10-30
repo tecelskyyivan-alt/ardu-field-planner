@@ -84,6 +84,8 @@ without internet; the satellite map, terrain zones and automatic power-line sear
 | satellite map (`server.arcgisonline.com`) | pre-cache the area — then it works offline |
 | terrain zones (`api.open-meteo.com`) | no terrain zones; the route still builds |
 | **automatic power-line search** (OpenStreetMap: `overpass-api.de`, `overpass.kumi.systems`) | **no lines found — draw them by hand** |
+| bug report: «Create issue» and the backpack-firmware download (`github.com`) | button only; nothing in the field depends on it |
+| sending the app log to the developer (`script.google.com`) | button only; the Android app queues the log and sends it later |
 
 ## Platforms
 
