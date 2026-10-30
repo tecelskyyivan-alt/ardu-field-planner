@@ -47,6 +47,36 @@ def test_export_files_work_without_a_server():
     assert not api.export_files("nope")["ok"]
 
 
+# 287 ha, concave, 4 cut-outs: in the browser/APK engine (Pyodide, GEOS 3.12) angle 30° (spacing 20)
+# and 5° (spacing 12) threw TopologyException from the swath overlays — fatal there. Native GEOS
+# doesn't throw, so this guards the geometry path, and _swath must keep the old buffer's area.
+BIG_FIELD = [{"lat": 50.4, "lng": 30.3}, {"lat": 50.3986525, "lng": 30.329595}, {"lat": 50.4053899, "lng": 30.3324135}, {"lat": 50.411678, "lng": 30.3267764}, {"lat": 50.4103306, "lng": 30.3155021}, {"lat": 50.4125764, "lng": 30.3056371}, {"lat": 50.4071865, "lng": 30.2985907}]
+BIG_EXCL = [[{"lat": 50.4035932, "lng": 30.3070464}, {"lat": 50.4035932, "lng": 30.3087376}, {"lat": 50.4046712, "lng": 30.3087376}, {"lat": 50.4046712, "lng": 30.3070464}], [{"lat": 50.4026949, "lng": 30.3169114}, {"lat": 50.4029644, "lng": 30.3187435}, {"lat": 50.4041322, "lng": 30.3184616}, {"lat": 50.4039526, "lng": 30.3167705}], [{"lat": 50.4062882, "lng": 30.3239578}, {"lat": 50.4064678, "lng": 30.3253671}, {"lat": 50.407456, "lng": 30.3250852}, {"lat": 50.4072763, "lng": 30.3238169}], [{"lat": 50.4080848, "lng": 30.3112743}, {"lat": 50.4080848, "lng": 30.3126836}, {"lat": 50.4089831, "lng": 30.3126836}, {"lat": 50.4089831, "lng": 30.3112743}]]
+
+
+def test_big_field_with_cutouts_builds_at_every_angle():
+    for spacing, angles in ((20, range(0, 180, 15)), (12, (5, 30, 95))):
+        for a in angles:
+            res = Api().build_route({"boundary": BIG_FIELD, "exclusions": BIG_EXCL, "spacing": spacing,
+                                      "angle": a, "auto_angle": False, "viz": True})
+            assert res["ok"], (spacing, a, res.get("error"))
+            assert res["coverage_pct"] > 95, (spacing, a, res["coverage_pct"])
+
+
+def test_swath_matches_line_buffer_area():
+    import random
+    from shapely.geometry import LineString
+    from backend.coverage import _swath
+    rnd = random.Random(1)
+    for _ in range(30):
+        pts = [(0.0, 0.0)]
+        for _i in range(rnd.randint(2, 40)):
+            pts.append((pts[-1][0] + rnd.uniform(-200, 200), pts[-1][1] + rnd.uniform(-200, 200)))
+        h = rnd.uniform(3, 15)
+        ref = LineString(pts).buffer(h, cap_style=2).area
+        assert abs(_swath(pts, h).area - ref) / ref < 1e-3
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_") and callable(_f):

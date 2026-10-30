@@ -3,7 +3,7 @@
 # `python tests/<name>.py` / `node tests/<name>.mjs`, as CI does.
 collect_ignore = [
     "test_api.py", "test_api_safe_transit.py", "test_bridge.py", "test_core.py", "test_features.py",
-    "test_gaps.py", "test_i18n_coverage.py", "test_mavlink.py", "test_plane_turns.py", "test_safe_transit.py", "test_serve.py",
+    "test_gaps.py", "test_mavlink.py", "test_plane_turns.py", "test_safe_transit.py", "test_serve.py",
     "test_sitl.py", "test_sitl_elrs.py", "test_sitl_wind.py", "test_split.py", "test_ui.py",
     "test_upload_turn_radius.py", "test_v24.py", "test_vio_home_upload.py",
     "test_i18n_coverage.py",

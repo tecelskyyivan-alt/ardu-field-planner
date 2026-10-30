@@ -63,6 +63,12 @@ class NotifyBridge(private val act: MainActivity, @Suppress("unused") private va
         TelemetryHub.setMission(total)
     }
 
+    /** #29: the card's distance-based progress %, so the notification shows the same number. */
+    @JavascriptInterface
+    fun setProgress(pct: Int) {
+        TelemetryHub.setProgress(pct)
+    }
+
     @JavascriptInterface
     fun resetFlight() {
         TelemetryHub.resetFlight()

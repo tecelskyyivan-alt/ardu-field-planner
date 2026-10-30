@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.98";
+  const APP_VERSION = "2.5.99";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -3995,16 +3995,20 @@
     const _p = mavProgressData(s);   // compute ONCE (side-effects: target marker + countdown) → fan out
     mavRenderHud(s, _p);
     mavOverlayRender(s, _p);
-    mavNotifySyncTotal(s);
+    mavNotifySyncTotal(s, _p);
     mavUpdateMarker(s);
   }
   // #29: the notification and the card must show the same «WP x / N». The card prefers the
   // autopilot's own total (MISSION_CURRENT.total — no HOME item); the notification was fed the
   // uploaded item count (with HOME), one more. Push the card's number whenever the autopilot gives it.
   let _notifTotal = 0;
-  function mavNotifySyncTotal(s) {
+  function mavNotifySyncTotal(s, p) {
+    if (!window.AndroidNotify) return;
+    // The card's % (distance-based) too; native falls back to the WP count once the page freezes.
+    const pct = p ? Math.max(0, Math.min(100, Math.round(p.pct))) : null;
+    if (pct != null && window.AndroidNotify.setProgress) { try { window.AndroidNotify.setProgress(pct); } catch (e) {} }
     const n = s && s.wp_total;
-    if (!n || n === _notifTotal || !window.AndroidNotify || !window.AndroidNotify.setMission) return;
+    if (!n || n === _notifTotal || !window.AndroidNotify.setMission) return;
     _notifTotal = n;
     try { window.AndroidNotify.setMission(n); } catch (e) {}
   }
@@ -4292,13 +4296,13 @@
     });
     const avgHaMin = covDurMin > 0 ? covTot / covDurMin : null;
     const num = (n, d) => (n == null ? "—" : (LANG === "en" ? n.toFixed(d) : String(Math.round(n * 10 ** d) / 10 ** d)));
-    const tile = (label, val, cls) => `<div class="stat-tile${cls ? " " + cls : ""}"><div class="sv">${val}</div><div class="sl">${t(label)}</div></div>`;
+    const tile = (label, val, cls) => `<div class="stat-tile${cls ? " " + cls : ""}"><div class="sv">${val}</div><div class="sl">${label}</div></div>`;
     html += `<div class="stats-totals">
-      ${tile("Польотів", rows.length)}
-      ${tile("Годин", num(secTot / 3600, 1))}
-      ${tile("Кілометрів", num(distTot / 1000, 1))}
-      ${tile("Покрито", num(covTot, 1), "headline")}
-      ${tile("Сер. Га/хв", num(avgHaMin, 2))}
+      ${tile(t("Польотів"), rows.length)}
+      ${tile(t("Годин"), num(secTot / 3600, 1))}
+      ${tile(t("Кілометрів"), num(distTot / 1000, 1))}
+      ${tile(t("Покрито"), num(covTot, 1), "headline")}
+      ${tile(t("Сер. Га/хв"), num(avgHaMin, 2))}
     </div>`;
     const cell = (r) => {
       const ac = r.actual || {};
@@ -4314,10 +4318,9 @@
         <td>${_haPerMin(r) != null ? num(_haPerMin(r), 2) : "—"}</td>
       </tr>`;
     };
-    const H = (s) => t(s);
     html += `<div class="stats-table-wrap"><table class="stats-table"><thead><tr>
-      <th>${H("Дата")}</th><th>${H("Поле")}</th><th>${H("Покрито")}</th><th>${H("Відстань")}</th>
-      <th>${H("Час")}</th><th>${H("Батарея")}</th><th>${H("Сер. швидкість")}</th><th>${H("Га/хв")}</th>
+      <th>${t("Дата")}</th><th>${t("Поле")}</th><th>${t("Покрито")}</th><th>${t("Відстань")}</th>
+      <th>${t("Час")}</th><th>${t("Батарея")}</th><th>${t("Сер. швидкість")}</th><th>${t("Га/хв")}</th>
       </tr></thead><tbody>${rows.map(cell).join("")}</tbody></table></div>`;
     host.innerHTML = html;
     _bindStatsChips();
@@ -4567,7 +4570,7 @@
     _moSet(o, "batt", o.batt, battTxt, battCol);
     _moSet(o, "alt", o.alt, s.alt_rel != null ? `${s.alt_rel} м` : "—", null);
     _moSet(o, "gs", o.gs, s.groundspeed != null ? `${s.groundspeed} м/с` : "—", null);
-    const pct = p ? Math.max(0, Math.min(100, Math.round(p.pct))) : null;   // distance-based (same as notification)
+    const pct = p ? Math.max(0, Math.min(100, Math.round(p.pct))) : null;   // distance-based; pushed to the notification (#29)
     _moSet(o, "pct", o.pct, pct != null ? pct + "%" : "—", null);
     _moSet(o, "wp", o.wp, "WP " + (s.wp_current != null ? `${s.wp_current} / ${s.wp_total || flownWpTotal || "—"}` : "—"), null);
     const w = pct != null ? pct : 0;
