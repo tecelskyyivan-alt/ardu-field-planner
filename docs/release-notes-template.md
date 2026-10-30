@@ -28,4 +28,4 @@ https://tecelskyyivan-alt.github.io/ardu-field-planner/
 APK — нижче · веб-версія оновлюється сама.
 ```
 
-After publishing: one post in Discussions → Announcements and in the Telegram group, same text.
+After publishing: one post in Discussions → Announcements, same text.
