@@ -383,6 +383,9 @@
          then AUTO-HIDES; dismiss early by tap or swipe. The persistent status line
          stays at the bottom of the panel (#msg above). -->
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <!-- #35 APK: the route engine runs on the UI thread there, so a big field freezes the screen for
+         seconds; this card is painted first and its spinner turns on the compositor meanwhile. -->
+    <div id="build-busy" class="build-busy" hidden><div class="bb-card"><span class="bb-spin"></span><span>Будую маршрут…</span></div></div>
 
     <!-- Mobile: a floating button toggles the panel over a full-screen map. -->
     <div id="panel-scrim" aria-hidden="true"></div>

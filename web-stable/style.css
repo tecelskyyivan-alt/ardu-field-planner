@@ -685,3 +685,10 @@ button.active { background: var(--accent-fill); color: #fff; border-color: var(-
 .bp-help-btn { display: block; margin: 8px 0; padding: 9px 12px; border-radius: 8px; text-align: center; font-weight: 700; text-decoration: none; background: var(--warn); color: #10151b; }
 .bp-help-x { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-dim); font-size: 16px; line-height: 32px; }
 .bp-help > b { display: block; padding-right: 30px; }
+
+/* #35: APK route build (engine on the UI thread) — a dim screen with a spinner that keeps turning. */
+.build-busy { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(8, 12, 16, 0.45); }
+.build-busy[hidden] { display: none; }
+.build-busy .bb-card { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 12px; background: var(--panel); color: var(--text); font-weight: 700; }
+.build-busy .bb-spin { width: 22px; height: 22px; border: 3px solid var(--text-faint); border-top-color: var(--warn); border-radius: 50%; animation: bb-spin 0.8s linear infinite; will-change: transform; }
+@keyframes bb-spin { to { transform: rotate(360deg); } }

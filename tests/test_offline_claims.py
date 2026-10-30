@@ -28,6 +28,8 @@ ALLOWED_HOSTS = {
     "api.open-meteo.com": "elevation grid for the terrain altitude-limit zones",
     "overpass-api.de": "OSM power-line search (SAFETY: no ЛЕП found offline)",
     "overpass.kumi.systems": "OSM power-line search, second mirror",
+    "github.com": "«Create issue» button and the backpack-firmware link (user-triggered)",
+    "script.google.com": "sending the app log to the developer (user-triggered; queued offline in the APK)",
 }
 
 #: Not fetched — an XML namespace identifier written into exported KML.

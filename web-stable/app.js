@@ -1466,14 +1466,19 @@
     // mavUpload() awaits this to get the fixed-wing arcs baked in before it uploads.
     if (buildInFlight) return buildInFlight;
     const btn = $("build");
+    // #35: on the APK the engine blocks the UI thread (measured 1.5 s of a frozen screen on a
+    // 287 ha field with 4 cut-outs, emulator — slower on a phone). Show a busy card first; its
+    // CSS spinner runs on the compositor, so the screen visibly stays alive through the freeze.
+    const busy = _engineMainThread ? $("build-busy") : null;
     buildInFlight = (async () => {
       if (btn) btn.disabled = true;
+      if (busy) busy.hidden = false;
       // Yield a frame so the disabled button actually PAINTS before the main-thread
       // engine blocks it; without this the freeze is indistinguishable from a dead
       // tap. rAF alone never fires when the app is backgrounded, hence the timeout.
       await new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
       try { return await buildRouteInner(opts); }
-      finally { if (btn) btn.disabled = false; }
+      finally { if (btn) btn.disabled = false; if (busy) busy.hidden = true; }
     })();
     try { return await buildInFlight; } finally { buildInFlight = null; }
   }
@@ -3173,7 +3178,7 @@
               // either way the fix is the FMP backpack firmware — show how, with the download.
               const help = $("bp-fw-help"); if (help) { help.hidden = false; try { help.scrollIntoView({ block: "nearest" }); } catch (e2) {} }
               appLog("backpack relay: " + ((e && e.message) || e) + " → показано підказку про прошивку бекпака");
-              return { ok: false, error: "Бекпак не відповів. Онови його прошивкою FMP — кнопка й кроки під «Підключити». Якщо вже прошито — впиши IP бекпака в «Адреса»." };
+              return { ok: false, error: t("Бекпак не відповів. Онови його прошивкою FMP — кнопка й кроки під «Підключити». Якщо вже прошито — впиши IP бекпака в «Адреса».") };
             }
           } else {
           const addr = conn.slice(4).replace(/^0\.0\.0\.0(?=:|$)/, BRIDGE_PAGE ? location.hostname : "127.0.0.1");
@@ -3780,7 +3785,7 @@
         try {
           if (window.AndroidNotify && window.AndroidNotify.start) {
             window.AndroidNotify.start();
-            if (flownWpTotal > 0) window.AndroidNotify.setMission(flownWpTotal);
+            if (flownWpTotal > 0) { window.AndroidNotify.setMission(flownWpTotal); _notifTotal = 0; }
           }
         } catch (e) { appLog("AndroidNotify.start failed: " + e); }
         wakeLockOn();
@@ -3990,7 +3995,18 @@
     const _p = mavProgressData(s);   // compute ONCE (side-effects: target marker + countdown) → fan out
     mavRenderHud(s, _p);
     mavOverlayRender(s, _p);
+    mavNotifySyncTotal(s);
     mavUpdateMarker(s);
+  }
+  // #29: the notification and the card must show the same «WP x / N». The card prefers the
+  // autopilot's own total (MISSION_CURRENT.total — no HOME item); the notification was fed the
+  // uploaded item count (with HOME), one more. Push the card's number whenever the autopilot gives it.
+  let _notifTotal = 0;
+  function mavNotifySyncTotal(s) {
+    const n = s && s.wp_total;
+    if (!n || n === _notifTotal || !window.AndroidNotify || !window.AndroidNotify.setMission) return;
+    _notifTotal = n;
+    try { window.AndroidNotify.setMission(n); } catch (e) {}
   }
 
   // ==== GPS protection: anti-JAMMING + anti-SPOOFING (warn-only, fully offline) ====
@@ -4902,7 +4918,7 @@
         flownHasRtl = lastRtl;
         flownWpTotal = r.count || 0;
         // #3: keep the notification's "WP x/y" denominator in sync with the real upload
-        try { if (window.AndroidNotify && window.AndroidNotify.setMission) window.AndroidNotify.setMission(flownWpTotal); } catch (e) {}
+        try { if (window.AndroidNotify && window.AndroidNotify.setMission) { window.AndroidNotify.setMission(flownWpTotal); _notifTotal = 0; } } catch (e) {}
         flownRestored = false;                   // fresh read-back-verified upload → trusted
         flownSplicePost = r.splice_post || 0;
         if (flownRoute) flownSave(flownRoute, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
