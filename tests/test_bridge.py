@@ -51,7 +51,7 @@ try:
     check("FMP served by the bridge (same origin) -> 101", handshake(f"http://127.0.0.1:{PORT}") == "101")
     check("FMP on GitHub Pages -> 101", handshake("https://tecelskyyivan-alt.github.io") == "101")
     check("phone over LAN (Origin = its Host IP) -> 101",
-          handshake(f"http://192.168.0.5:{PORT}", f"192.168.0.5:{PORT}") == "101")
+          handshake(f"http://192.0.2.5:{PORT}", f"192.0.2.5:{PORT}") == "101")
     check("non-browser client (no Origin) -> 101", handshake(None) == "101")
     check("foreign web page -> 403", handshake("https://evil.example") == "403")
     check("other github.io site -> 403", handshake("https://evil.github.io") == "403")

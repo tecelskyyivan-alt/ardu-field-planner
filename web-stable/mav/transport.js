@@ -55,18 +55,19 @@
     });
   }
   // pageUrls: one relay page, or candidates tried in order in the SAME window (one popup per
-  // click; the opener may navigate it on). msPerTry: how long each candidate gets.
+  // click; the opener may navigate it on). msPerTry: how long each candidate gets (one number,
+  // or one per candidate).
   // The transport's `url` is the candidate that answered.
   async function openRelay(pageUrls, msPerTry) {
     const urls = [].concat(pageUrls), origins = urls.map((u) => new URL(u).origin);
-    const ms = msPerTry || 8000;
+    const msAt = (i) => [].concat(msPerTry || 8000)[i] || [].concat(msPerTry || 8000)[0];
     let w = null, url = null;
     if (!relayWin || relayWin.closed || !origins.includes(relayOrigin)) {
       const f = await findRelay(origins, 1200);
       if (f) { relayWin = f.win; relayOrigin = f.origin; }
     }
     if (relayWin && !relayWin.closed && origins.includes(relayOrigin)) {
-      try { await relayHandshake(relayWin, relayOrigin, ms, relayOrigin); w = relayWin; url = urls[origins.indexOf(relayOrigin)]; }
+      try { await relayHandshake(relayWin, relayOrigin, msAt(origins.indexOf(relayOrigin)), relayOrigin); w = relayWin; url = urls[origins.indexOf(relayOrigin)]; }
       catch (e) {}
     }
     let err = null;
@@ -78,7 +79,7 @@
         if (!relayWin) throw new Error("Браузер заблокував вікно моста — дозволь спливні вікна для цього сайту.");
       } else relayWin.location.href = urls[i];
       relayOrigin = origins[i];
-      try { await relayHandshake(relayWin, origins[i], ms, urls[i]); w = relayWin; url = urls[i]; }
+      try { await relayHandshake(relayWin, origins[i], msAt(i), urls[i]); w = relayWin; url = urls[i]; }
       catch (e) { err = e; }
     }
     if (!w) throw (urls.length > 1 ? new Error("Міст не відповів (вікно " + urls.join(", ") + ").") : err);
