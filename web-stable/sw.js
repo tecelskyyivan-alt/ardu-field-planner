@@ -16,7 +16,7 @@
  *     round-trip, and a shell bump no longer wipes the offline map.
  *   • /api/* , /downloads/* and non-GET requests are never cached.
  */
-const SHELL_CACHE = "fmp-shell-v126";         // bump this on every app deploy
+const SHELL_CACHE = "fmp-shell-v127";         // bump this on every app deploy
 const PYO_VERSION = "0.26.4";                // == pyodide-lock.json info.version
 const PYO_CACHE = "fmp-pyodide-" + PYO_VERSION;
 const TILE_CACHE = "fmp-tiles-v1";

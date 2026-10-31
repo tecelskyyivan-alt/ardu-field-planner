@@ -3163,11 +3163,12 @@
           // Without a computer, the backpack itself must speak WebSocket (backpack firmware with
           // fmp-relay.html, docs/elrs-backpack-browser.md): its relay window, like the bridge's.
           // Empty address = find it: the last backpack that answered, its mDNS name (Home WiFi),
-          // then its own access point. The one that answers is remembered.
+          // then its own access point, then the first clients of an iPhone hotspot (172.20.10.0/28,
+          // the phone itself is .1; iOS may not resolve .local there). The one that answers is remembered.
           if (!BRIDGE_PAGE && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "")) {
             const typed = conn.slice(4).replace(/:\d+$/, "").replace(/^0\.0\.0\.0$/, "");
             let saved = ""; try { saved = localStorage.getItem("fmp_backpack_host") || ""; } catch (e) {}
-            const hosts = typed ? [typed] : [...new Set([saved, "elrs_txbp.local", "10.0.0.1"].filter(Boolean))];
+            const hosts = typed ? [typed] : [...new Set([saved, "elrs_txbp.local", "10.0.0.1", "172.20.10.2", "172.20.10.3"].filter(Boolean))];
             try {
               transport = await MAV_TRANSPORT.openRelay(hosts.map((h) => "http://" + h + "/fmp-relay.html"), typed ? 8000 : 5000);
               try { localStorage.setItem("fmp_backpack_host", transport.url.split("/")[2]); } catch (e) {}

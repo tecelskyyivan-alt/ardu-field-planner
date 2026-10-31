@@ -176,8 +176,8 @@ sandbox4.window = sandbox4; sandbox4.globalThis = sandbox4; sandbox4.self = sand
 vm.runInNewContext(src, sandbox4, { filename: "app.js", timeout: 30000 });
 await REAL["mav-connect"].listeners.click();
 // A phone browser can't do UDP and has no bridge on 127.0.0.1: the backpack's own relay window.
-const AUTO = ["http://elrs_txbp.local/fmp-relay.html", "http://10.0.0.1/fmp-relay.html"];
-check("phone browser: empty address -> backpack found by mDNS name, then its access point", phoneUrls.length === 1 && String(phoneUrls[0]) === String(AUTO));
+const AUTO = ["http://elrs_txbp.local/fmp-relay.html", "http://10.0.0.1/fmp-relay.html", "http://172.20.10.2/fmp-relay.html", "http://172.20.10.3/fmp-relay.html"];
+check("phone browser: empty address -> mDNS name, its access point, then iPhone hotspot clients", phoneUrls.length === 1 && String(phoneUrls[0]) === String(AUTO));
 check("phone browser: no backpack -> error recommends the FMP backpack firmware", String(REAL["msg"].textContent || "").includes("прошивкою FMP"));
 check("phone browser: no backpack -> firmware help card shown", REAL["bp-fw-help"].hidden === false);
 // A typed backpack IP (with the UDP port) -> that IP on port 80.
@@ -196,7 +196,7 @@ vm.runInNewContext(src, sandbox4b, { filename: "app.js", timeout: 30000 });
 await REAL["mav-connect"].listeners.click();
 check("phone browser: answering backpack is remembered", sandbox4b.localStorage.getItem("fmp_backpack_host") === "10.0.0.1");
 await REAL["mav-connect"].listeners.click();
-check("phone browser: remembered backpack is tried first", String(savedUrls[1]) === "http://10.0.0.1/fmp-relay.html,http://elrs_txbp.local/fmp-relay.html");
+check("phone browser: remembered backpack is tried first", String(savedUrls[1]) === "http://10.0.0.1/fmp-relay.html,http://elrs_txbp.local/fmp-relay.html,http://172.20.10.2/fmp-relay.html,http://172.20.10.3/fmp-relay.html");
 
 // ...but a phone that opened FMP from a computer's bridge (--lan) connects to that bridge.
 const lanUrls = [];

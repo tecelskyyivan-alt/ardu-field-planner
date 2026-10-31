@@ -40,8 +40,14 @@ ESP32-C3 backpacks: `ESP32C3_TX_Backpack_via_WIFI`. Back to stock: flash stock 1
    ([elrs-backpack-home-wifi.md](elrs-backpack-home-wifi.md)), or the backpack's own access point.
 3. FMP → **Flight** → **UDP**, address **empty** → **Connect**. FMP finds the backpack itself:
    the backpack that answered last time, then `elrs_txbp.local` (Home WiFi), then `10.0.0.1`
-   (the backpack's own access point), all in one small "FMP: drone link" tab; the one that
+   (the backpack's own access point), then `172.20.10.2` / `.3` (iPhone hotspot), all in one small "FMP: drone link" tab; the one that
    answers is remembered. Keep that tab, it closes with FMP. Allow pop-ups if the browser blocks it.
+
+**iPhone hotspot as the network:** Settings → Personal Hotspot → **Maximize Compatibility** on (the
+backpack is 2.4 GHz only), and give the iPhone an ASCII name (Settings → General → About → Name):
+its default name has a curly apostrophe (`’`) that a computer keyboard doesn't type. Set that name
+and password as the backpack's Home WiFi on its page (`http://10.0.0.1` on its own access point).
+Keep the Personal Hotspot screen open until the backpack joins: iOS hides the hotspot when nobody uses it.
 
 Only if none of these answers, type the backpack's IP (router's client list) once; it is remembered. Anyone on that WiFi who can open the backpack's page can
 reach the drone — same as with UDP.
@@ -53,4 +59,4 @@ reach the drone — same as with UDP.
 сторінку `/fmp-relay.html`. FMP з GitHub Pages у браузері телефона (iPhone теж) відкриває цю
 сторінку вкладкою й через неї говорить з дроном — без комп'ютера й застосунку. Зібрати —
 `pio run -e ESP_TX_Backpack_via_WIFI`, прошити через веб бекпака (Update). У FMP: **UDP**, адреса
-порожня → **Підключити**: FMP сам пробує останній бекпак, `elrs_txbp.local`, `10.0.0.1` і запам'ятовує, що відповіло; на пульті Backpack → Telemetry → WiFi.
+порожня → **Підключити**: FMP сам пробує останній бекпак, `elrs_txbp.local`, `10.0.0.1`, `172.20.10.2`/`.3` (хотспот iPhone) і запам'ятовує, що відповіло; на пульті Backpack → Telemetry → WiFi.
