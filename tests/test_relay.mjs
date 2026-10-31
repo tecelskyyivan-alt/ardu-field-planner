@@ -8,7 +8,7 @@ function check(name, ok) { console.log((ok ? "  OK  " : " FAIL ") + name); if (!
 
 // A fake browser: window.open/location navigations are recorded; a relay page "loads" only on
 // hosts in `alive` and then answers hello with ready (and announces "here" like the real page).
-function makeWorld(alive) {
+function makeWorld(alive, delay = 5) {
   const listeners = [];
   const opens = [], navs = [];
   const win = {
@@ -17,7 +17,7 @@ function makeWorld(alive) {
     postMessage(msg, origin) {
       const page = this.url && new URL(this.url);
       if (!page || page.origin !== origin || !alive.includes(page.hostname)) return;
-      if (msg.fmp === "hello") setTimeout(() => emit({ origin: page.origin, source: win, data: { fmp: "ready" } }), 5);
+      if (msg.fmp === "hello") setTimeout(() => emit({ origin: page.origin, source: win, data: { fmp: "ready" } }), delay);
     },
   };
   function emit(ev) { for (const l of [...listeners]) l(ev); }
@@ -34,7 +34,7 @@ function makeWorld(alive) {
   return { T: sandbox.MAV_TRANSPORT, opens, navs, win };
 }
 
-const C = ["http://192.168.0.50/fmp-relay.html", "http://elrs_txbp.local/fmp-relay.html", "http://10.0.0.1/fmp-relay.html"];
+const C = ["http://192.0.2.50/fmp-relay.html", "http://elrs_txbp.local/fmp-relay.html", "http://10.0.0.1/fmp-relay.html"];
 
 // 1) Only the access-point address answers: one popup, navigated on twice, link = the third.
 {
@@ -46,7 +46,7 @@ const C = ["http://192.168.0.50/fmp-relay.html", "http://elrs_txbp.local/fmp-rel
 }
 // 2) First candidate answers: no navigation at all.
 {
-  const w = makeWorld(["192.168.0.50"]);
+  const w = makeWorld(["192.0.2.50"]);
   const t = await w.T.openRelay(C, 200);
   check("first answers -> no further navigation", w.navs.length === 0 && t.url === C[0]);
 }
@@ -63,6 +63,14 @@ const C = ["http://192.168.0.50/fmp-relay.html", "http://elrs_txbp.local/fmp-rel
   const w = makeWorld(["127.0.0.1"]);
   const t = await w.T.openRelay("http://127.0.0.1:14550/relay.html", 200);
   check("single string still works", t.url === "http://127.0.0.1:14550/relay.html" && w.opens.length === 1);
+}
+
+// 5) Per-candidate timeouts (short ones for the iPhone hotspot sweep): the slow one still answers.
+{
+  const w = makeWorld(["10.0.0.1"], 120);   // its page answers in 120 ms: more than 50, less than 300
+  const t0 = Date.now();
+  const t = await w.T.openRelay(C, [50, 50, 300]);
+  check("per-candidate timeouts: array accepted, answering one found", t.url === C[2] && Date.now() - t0 < 1450);   // 1200 ms findRelay + 50 + 50 + 120
 }
 
 console.log("\nRESULT: " + (failed ? failed + " FAILURE(S)" : "ALL CHECKS PASSED"));

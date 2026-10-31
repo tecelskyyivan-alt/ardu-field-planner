@@ -3163,13 +3163,16 @@
           // Without a computer, the backpack itself must speak WebSocket (backpack firmware with
           // fmp-relay.html, docs/elrs-backpack-browser.md): its relay window, like the bridge's.
           // Empty address = find it: the last backpack that answered, its mDNS name (Home WiFi),
-          // then its own access point. The one that answers is remembered.
+          // then its own access point, then every client address of an iPhone hotspot (iOS always
+          // uses 172.20.10.0/28 there, the phone is .1). The one that answers is remembered.
           if (!BRIDGE_PAGE && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "")) {
             const typed = conn.slice(4).replace(/:\d+$/, "").replace(/^0\.0\.0\.0$/, "");
             let saved = ""; try { saved = localStorage.getItem("fmp_backpack_host") || ""; } catch (e) {}
-            const hosts = typed ? [typed] : [...new Set([saved, "elrs_txbp.local", "10.0.0.1"].filter(Boolean))];
+            const hotspot = Array.from({ length: 13 }, (_, i) => "172.20.10." + (i + 2));
+            const hosts = typed ? [typed] : [...new Set([saved, "elrs_txbp.local", "10.0.0.1", ...hotspot].filter(Boolean))];
             try {
-              transport = await MAV_TRANSPORT.openRelay(hosts.map((h) => "http://" + h + "/fmp-relay.html"), typed ? 8000 : 5000);
+              transport = await MAV_TRANSPORT.openRelay(hosts.map((h) => "http://" + h + "/fmp-relay.html"),
+              typed ? 8000 : hosts.map((h) => (hotspot.includes(h) && h !== saved ? 3000 : 5000)));
               try { localStorage.setItem("fmp_backpack_host", transport.url.split("/")[2]); } catch (e) {}
               appLog("backpack relay: " + transport.url);
             }

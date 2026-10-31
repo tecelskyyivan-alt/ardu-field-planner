@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PeerLockTest {
-    private val drone = "192.168.0.101:14550"
-    private val intruder = "192.168.0.66:14550"
+    private val drone = "192.0.2.101:14550"
+    private val intruder = "192.0.2.66:14550"
 
     @Test fun another_host_cannot_take_over_while_the_drone_talks() {
         val lock = PeerLock(3000)
