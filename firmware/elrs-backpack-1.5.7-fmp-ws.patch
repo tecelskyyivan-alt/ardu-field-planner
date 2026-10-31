@@ -1,7 +1,7 @@
 From 2e85f59255d5f2c0cd9056840166bdb4bc188d88 Mon Sep 17 00:00:00 2001
 From: tecelskyyivan-alt <279259163+tecelskyyivan-alt@users.noreply.github.com>
 Date: Thu, 29 Oct 2026 20:20:44 +0200
-Subject: [PATCH] TX backpack: MAVLink over WebSocket (/mavlink-ws) +
+Subject: [PATCH 1/2] TX backpack: MAVLink over WebSocket (/mavlink-ws) +
  /fmp-relay.html for browser GCS
 
 A phone browser can't do UDP; FMP on GitHub Pages opens /fmp-relay.html from the
@@ -216,6 +216,60 @@ index c9e505e..d49995c 100644
              build_html("p5.js", "P5_JS", out, env)
              build_html("airplane.obj", "PLANE_OBJ", out, env)
              build_binary("texture.gif", "TEXTURE_GIF", out, env)
+-- 
+2.54.0 (Apple Git-157)
+
+
+From 13cfd052dc94e88d377b5fca3acce24bb08ec056 Mon Sep 17 00:00:00 2001
+From: tecelskyyivan-alt <279259163+tecelskyyivan-alt@users.noreply.github.com>
+Date: Sat, 31 Oct 2026 18:32:09 +0200
+Subject: [PATCH 2/2] WiFi: on the AP, rejoin the home network when it comes
+ back on the air
+
+A phone hotspot as home network is missing exactly when it's needed: the phone
+can't host it while on our AP setting us up, and iOS hides it while idle. One
+miss left the backpack on its AP until reboot. On the AP with a home network
+saved and no client, rescan every 10 s and switch to STA once it is seen.
+---
+ lib/WIFI/devWIFI.cpp | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/lib/WIFI/devWIFI.cpp b/lib/WIFI/devWIFI.cpp
+index 5455d8f..13016a2 100644
+--- a/lib/WIFI/devWIFI.cpp
++++ b/lib/WIFI/devWIFI.cpp
+@@ -88,6 +88,7 @@ static wl_status_t laststatus = WL_IDLE_STATUS;
+ static volatile WiFiMode_t wifiMode = WIFI_OFF;
+ static volatile WiFiMode_t changeMode = WIFI_OFF;
+ static volatile unsigned long changeTime = 0;
++static unsigned long homeScanTime = 0;
+ 
+ static const byte DNS_PORT = 53;
+ static IPAddress apIP(10, 0, 0, 1);
+@@ -873,6 +874,23 @@ static void HandleWebUpdate()
+     changeMode = WIFI_AP;
+     DBGLN("Connection failed %d", status);
+   }
++  // A phone hotspot as the home network is gone exactly when it's needed: the phone can't host it
++  // while it is on our AP setting us up, and iOS hides it while idle. One miss used to leave us on
++  // the AP until a reboot. So, on the AP with a home network saved and nobody on it, keep scanning
++  // and go back to the home network as soon as it is on the air.
++  if (wifiMode == WIFI_AP && station_ssid[0] != 0 && WiFi.softAPgetStationNum() == 0 && (now - homeScanTime) > 10000) {
++    int n = WiFi.scanComplete();
++    for (int i = 0; i < n; i++) {
++      if (WiFi.SSID(i) == station_ssid) {
++        DBGLN("Home network '%s' is back", station_ssid);
++        changeTime = now - 1000;
++        changeMode = WIFI_STA;
++        break;
++      }
++    }
++    if (n != WIFI_SCAN_RUNNING) WiFi.scanNetworks(true);
++    homeScanTime = now;
++  }
+   if (changeMode != wifiMode && changeMode != WIFI_OFF && (now - changeTime) > 500) {
+     switch(changeMode) {
+       case WIFI_AP:
 -- 
 2.54.0 (Apple Git-157)
 

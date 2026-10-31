@@ -17,7 +17,7 @@ What the patch adds:
 
 ## Ready-made firmware
 
-In every FMP release since [v2.5.97](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/tag/v2.5.97) (next to the APK): `ESP_TX_Backpack-1.5.7-fmp-ws.bin` (ESP8285: RadioMaster Ranger / Ranger Micro / Ranger Nano, …) and `ESP32C3_TX_Backpack-1.5.7-fmp-ws.bin`, built from source with no Wi-Fi or personal data inside (source: [`fmp-ws`](https://github.com/tecelskyyivan-alt/Backpack/tree/fmp-ws), same as `firmware/elrs-backpack-1.5.7-fmp-ws.patch`). Flash it through the backpack's web page → Update; your saved Home WiFi stays. Upstream proposal: [ExpressLRS/Backpack#252](https://github.com/ExpressLRS/Backpack/issues/252).
+In every FMP release since [v2.5.97](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/tag/v2.5.97) (next to the APK): `ESP_TX_Backpack-1.5.7-fmp-ws.bin` (ESP8285: RadioMaster Ranger / Ranger Micro / Ranger Nano, …) and `ESP32C3_TX_Backpack-1.5.7-fmp-ws.bin`, built from source with no Wi-Fi or personal data inside (source: [`fmp-ws`](https://github.com/tecelskyyivan-alt/Backpack/tree/fmp-ws), same as `firmware/elrs-backpack-1.5.7-fmp-ws.patch`). Flash it through the backpack's web page → Update; your saved Home WiFi stays. The files in v2.5.99 were replaced on 2026-10-31 with update 2 (rejoins a phone hotspot by itself). Upstream proposal: [ExpressLRS/Backpack#252](https://github.com/ExpressLRS/Backpack/issues/252).
 
 ## Build and flash (once)
 
@@ -48,6 +48,7 @@ backpack is 2.4 GHz only), and give the iPhone an ASCII name (Settings → Gener
 its default name has a curly apostrophe (`’`) that a computer keyboard doesn't type. Set that name
 and password as the backpack's Home WiFi on its page (`http://10.0.0.1` on its own access point).
 Keep the Personal Hotspot screen open until the backpack joins: iOS hides the hotspot when nobody uses it.
+Since firmware update 2 ([1.5.7-fmp-ws.2](https://github.com/tecelskyyivan-alt/Backpack/releases/tag/1.5.7-fmp-ws.2)) the backpack, while on its own access point with nobody connected, looks for its Home WiFi every 10 s and joins it when it appears, so setting it up from the same iPhone works without restarting the radio. Older builds try once: turn the hotspot on first, then the radio.
 
 Only if none of these answers, type the backpack's IP (router's client list) once; it is remembered. Anyone on that WiFi who can open the backpack's page can
 reach the drone — same as with UDP.
@@ -60,3 +61,4 @@ reach the drone — same as with UDP.
 сторінку вкладкою й через неї говорить з дроном — без комп'ютера й застосунку. Зібрати —
 `pio run -e ESP_TX_Backpack_via_WIFI`, прошити через веб бекпака (Update). У FMP: **UDP**, адреса
 порожня → **Підключити**: FMP сам пробує останній бекпак, `elrs_txbp.local`, `10.0.0.1`, адреси клієнтів хотспота iPhone (`172.20.10.2`–`.14`, однакові на кожному iPhone) і запам'ятовує, що відповіло; на пульті Backpack → Telemetry → WiFi.
+Хотспот iPhone: «Максимальна сумісність», ім'я без `’`. Прошивка з оновленням 2 (31.10) сама переходить у хотспот, щойно він з'явиться; старіша пробує один раз — тоді спершу хотспот, потім пульт.
