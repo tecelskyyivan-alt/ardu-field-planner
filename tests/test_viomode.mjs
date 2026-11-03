@@ -70,5 +70,51 @@ check("parseLatLon: '49.5, 24.0' / '49.5 24' / '49.5;24'",
 check("parseLatLon: junk and out of range -> null",
   V.parseLatLon("abc") === null && V.parseLatLon("95, 24") === null && V.parseLatLon("") === null);
 
+// ---- #55 measured reach line ----
+check("measured worst share = 46.5 m / 4.6 km (03.11, 1.01 %)", near(V.measuredShare(), 46.5 / 4600, 1e-12));
+const mr = V.measuredReachM(40);
+check("measured reach at 40 m ~3.96 km, within the flown data", near(mr.reach, 40 / (46.5 / 4600), 1e-6) && !mr.beyond);
+check("measured reach at 100 m is past the longest flight -> beyond", V.measuredReachM(100).beyond === true);
+check("the measured line is far longer than MARS-LVIG's 200 m at 40 m", mr.reach > 10 * V.reachM(40, false).reach);
+
+// ---- #56 time / energy ----
+check("segment penalty 13 m/s = 6.2 s, 22 m/s = 13.65 s, 5 m/s = 3 s",
+  near(V.segPenaltyS(13), 6.2, 1e-9) && near(V.segPenaltyS(22), 13.65, 1e-9) && near(V.segPenaltyS(5), 3, 1e-9));
+// home -> 1 km north -> home at 10 m/s, 40 m: 2000/10 + 2 × 5 + 40/2.5 + 30 + 35 = 291 s
+const far = [[49.5 + 1000 / 111195, 24.0]];
+const mt = V.missionTime(home, far, { speed: 10, takeoffAlt: 40 });
+check("missionTime out-and-back 1 km @10 m/s = 291 s (2 segments)",
+  near(mt.total_s, 291, 0.5) && mt.segments === 2 && near(mt.path_m, 2000, 1));
+const en = V.energy(600, 0.71, 8);
+check("energy: 10 min × 0.71 Ah/min = 7.1 Ah = 88.75 % of 8 Ah", near(en.ah, 7.1, 1e-9) && near(en.pct, 88.75, 1e-9));
+
+// ---- #57 short legs ----
+check("leg need: 22 m/s -> 242 m, 13 m/s -> 84.5 m", near(V.legNeedM(22), 242, 1e-9) && near(V.legNeedM(13), 84.5, 1e-9));
+// two 115 m passes 20 m apart (the 02.11 case), connector 20 m
+const dN = 115 / 111195, dE = 20 / (111195 * Math.cos(49.5 * Math.PI / 180));
+const legs = [[49.5, 24], [49.5 + dN, 24], [49.5 + dN, 24 + dE], [49.5, 24 + dE]];
+const sl22 = V.shortLegs(legs, 22, 20), sl10 = V.shortLegs(legs, 10, 20);
+check("115 m passes: short at 22 m/s (2 of 2), fine at 10 m/s; the 20 m connector is not a pass",
+  sl22.passes === 2 && sl22.short === 2 && sl10.short === 0);
+
+// ---- #60 sorties ----
+// 12 passes of 400 m, 20 m apart; budget 4 min at 10 m/s
+const field = [];
+for (let k = 0; k < 12; k++) {
+  const a = [49.501, 24 + k * dE], b = [49.501 + 400 / 111195, 24 + k * dE];
+  if (k % 2) field.push(b, a); else field.push(a, b);
+}
+const o = { speed: 10, takeoffAlt: 40 };
+const so = V.splitSorties(home, field, 240, o, 20);
+const covered = new Set();
+so.forEach((r) => { for (let i = r.from; i <= r.to; i++) covered.add(i); });
+check("sorties: more than one, every point flown, each within the budget",
+  so.length > 1 && covered.size === field.length &&
+  so.every((r) => V.missionTime(home, field.slice(r.from, r.to + 1), o).total_s <= 240));
+check("sorties cut after a pass end: each sortie has whole passes (even count, starts on a pass start)",
+  so.every((r) => (r.to - r.from + 1) % 2 === 0 && r.from % 2 === 0));
+check("sorties: one fits -> one", V.splitSorties(home, field, 1e6, o, 20).length === 1);
+check("sorties: budget below one point -> null", V.splitSorties(home, field, 10, o, 20) === null);
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.99";
+  const APP_VERSION = "2.5.100";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1761,7 +1761,16 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  async function doExport(fmt) {
+  async function doExport(fmt0) {
+    // GPS-denied: the file carries the VIO home, the VIO profile and the sorties, as the
+    // upload does (#52, #54, #60). GPS mode: just the format name, as before.
+    const vh = vioHomeForUpload();
+    let fmt = fmt0;
+    if (vh) {
+      fmt = { fmt: fmt0, vio_home: vh, terrain: vioTerrain() };
+      const so = vioSorties();
+      if (so && so.length > 1) fmt.flights = so.map((x) => x.route);
+    }
     // Browser / APK: the engine builds the files, the browser downloads them (no server).
     const eng = window.FMP_ENGINE;
     if (!IS_QT && !window.pywebview && eng && eng.available()) {
@@ -2907,6 +2916,7 @@
   let flownHasRtl = true;
   let flownWpTotal = 0;           // total mission items uploaded (progress/completion)
   let flownSplicePost = 0;        // safe-transit EGRESS waypoints appended after coverage (#12) — HUD lead math
+  let flownTail = 1;              // mission items after the route: RTL 1, VIO end (wp home, loiter, land) 3
   let flownRestored = false;      // flown snapshot came from disk (unverified) → not green until re-checked
   let targetMarker = null;        // ring on the active (next) waypoint
   let targetLine = null;          // dashed line drone -> next waypoint
@@ -2940,6 +2950,7 @@
     flownHasRtl = (f.rtl != null ? f.rtl : true);
     flownWpTotal = f.wpTotal || 0;
     flownSplicePost = f.post || 0;
+    flownTail = (f.tail != null) ? f.tail : (flownHasRtl ? 1 : 0);
     flownRestored = true;              // disk-restored → mission-status shows "verify", never green
     // Intent-marker safety (verified finding): mavUpload() overwrites FLOWN_KEY with
     // {route:NEW route, status:"uploading"} the INSTANT an upload starts, before the
@@ -2962,7 +2973,9 @@
   }
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
-  function missionLead() { return 2 + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0); }
+  function missionLead() {
+    return 2 + (vioHomeForUpload() ? 1 : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);   // + VIO loiter 5 s
+  }
   // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
   // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).
   // The real "service points before coverage wp 0" that the FC's wp_current counts against
@@ -2977,6 +2990,7 @@
         rtl: (hasRtl != null ? hasRtl : $("rtl").checked),
         lead: missionLead() + (splicePre || 0), name: currentFieldName || null, wpTotal: flownWpTotal || 0,
         post: splicePost || 0,          // egress splice length (#12) — HUD lead math on restore
+        tail: flownTail,
         status: status || "confirmed", ts: Date.now(),
       }));
     } catch (e) {}
@@ -3043,7 +3057,7 @@
   function updateMissionStatus() {
     const el = $("mission-status");
     if (!el) return;
-    const plan = routeSig(lastRoute), flown = routeSig(flownRoute);
+    const plan = routeSig(planRoute()), flown = routeSig(flownRoute);
     if (!plan) {
       el.textContent = t("Маршрут не побудовано."); el.className = "mission-status";
     } else if (!flown) {
@@ -3055,7 +3069,7 @@
       el.textContent = t("Остання відома місія (з пам'яті) — підключись і перевір, чи вона ще в дроні.");
       el.className = "mission-status warn";
     } else if (plan === flown) {
-      el.textContent = tf(t("У дроні поточна місія: {0} точок."), lastRoute.length);
+      el.textContent = tf(t("У дроні поточна місія: {0} точок."), planRoute().length);
       el.className = "mission-status ok";
     } else {
       el.textContent = t("План ЗМІНЕНО після заливки — у дроні СТАРА місія. Залий заново!");
@@ -3078,6 +3092,7 @@
   // directly via the JS link (WebSerial / WebUSB / WebSocket). Same method names
   // and result shapes as the HTTP backend, so the UI code is unchanged.
   let _mavLink = null;
+  let _jsUploaded = null;          // the items the last jsMav upload put on the FC (#58 re-verify)
   let _specsP = null;
   let mavSerialPorts = [];   // Web Serial ports the user has granted (getPorts)
   function loadMavSpecs() {
@@ -3241,6 +3256,13 @@
     async mav_disconnect() { if (_mavLink) _mavLink.disconnect(); _mavLink = null; return { ok: true }; },
     async mav_status() { return _mavLink ? Object.assign({ ok: true }, _mavLink.status()) : { ok: false }; },
     async mav_download_mission() { return _mavLink ? _mavLink.downloadMission() : { ok: false, error: "Немає звʼязку." }; },
+    // Re-read the FC's mission and compare it to what THIS session uploaded (#58).
+    async mav_verify_mission(p) {
+      if (!_mavLink) return { ok: false, error: "Немає звʼязку." };
+      if (!_jsUploaded) return { ok: false, error: "У цій сесії місію не заливали — нема з чим порівняти." };
+      return (p && p.verify === "count") ? _mavLink.verifyMissionCount(_jsUploaded.length)
+        : _mavLink.verifyMission(_jsUploaded, 60000);
+    },
     async mav_upload_mission(p) {
       if (!_mavLink) return { ok: false, error: "Немає звʼязку." };
       // p.route (необовʼязково) — залити НЕ поточний план, а конкретний маршрут:
@@ -3311,10 +3333,24 @@
           // flown stays = _wps — degrade to the plain mission, never throw out of the upload
         }
       }
+      // GPS-denied: the VIO start/end profile (hover over home, LAND) and, optionally,
+      // terrain-frame altitudes — the same layout the file export writes (#52-#54).
+      const vioOpts = { vio: !isInav && !!(p && p.vio_home), terrain: !isInav && !!(p && p.terrain) };
+      // Terrain frame needs a terrain source on the FC: with no rangefinder ArduCopter 4.7.0
+      // raises "Terrain Unavailable" at the first waypoint and LANDs there (SITL 03.11). A
+      // failed read does not block (flaky link); a clear 0 does. Mirrors api._terrain_blocker.
+      if (vioOpts.terrain) {
+        const rf = await _mavLink.getParam("RNGFND1_TYPE");
+        if (rf && rf.ok && Math.round(rf.value) === 0)
+          return { ok: false, error: t("«Висота над землею» потребує далекоміра на FC (RNGFND1_TYPE = 0): без нього FC на першій точці сяде (Terrain Unavailable). Вимкни опцію або налаштуй далекомір.") };
+      }
       const items = isInav
         ? MAV_LINK.buildMissionItemsInav(_wps, alt, rtl)
-        : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), flown, alt, rtl, speed);
+        : MAV_LINK.buildMissionItems(home, Math.max(alt, 2), flown, alt, rtl, speed, vioOpts);
       const res = await _mavLink.uploadMission(items, undefined, p && p.onProgress);
+      if (res.ok) _jsUploaded = items;            // what a later re-verify compares against (#58)
+      res.vio = vioOpts.vio;
+      res.tail = vioOpts.vio ? 3 : (rtl ? 1 : 0); // items after the route: HUD / resume math
       // CRITICAL: report the splice length back to the caller — see splicePre comment
       // above. 0 for INAV/resume uploads (no splice attempted) and for a plain _wps
       // mission (no safe_transit ingress, or it failed/was unavailable).
@@ -3970,6 +4006,24 @@
     return ({ 0: "немає", 1: "немає", 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-float", 6: "RTK-fix" })[f] || "?";
   }
 
+  let _seenBoots = 0;
+  // Re-read the FC's mission against the last upload. true = the same, false = NOT the
+  // same (said loudly), null = could not check. `why` goes into the message.
+  async function mavReverify(why) {
+    const a = mavApi();
+    if (!a || !a.mav_verify_mission) return null;
+    setMsg(t("Перевіряю місію у FC") + " (" + why + ")…", null);
+    let v;
+    try { v = await a.mav_verify_mission({ verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full" }); }
+    catch (e) { v = { ok: false, error: (e && e.message) || String(e) }; }
+    appLog("re-verify (" + why + "): " + JSON.stringify(v && { ok: v.ok, verified: v.verified, err: v.error, diff: v.mismatches }));
+    if (!v || !v.ok) { setMsg(t("Місію у FC не перевірено: ") + ((v && v.error) || ""), "warn"); return null; }
+    if (v.verified) { setMsg(t("Місія у FC та сама, що залив FMP") + " (" + why + ").", "ok"); return true; }
+    setMsg("⚠️ " + t("Місія у FC НЕ та, що залив FMP") + " (" + why + "): " +
+      ((v.mismatches || [])[0] || "") + ". " + t("Залий місію ще раз."), "error");
+    return false;
+  }
+
   async function mavPoll() {
     const a = mavApi();
     if (!a || !a.mav_status) return;
@@ -3982,6 +4036,15 @@
     lastStatus = s;
     if (s && s.vehicle_type === 1) { try { localStorage.setItem("fmp_is_plane", "1"); } catch (e) {} }
     missionProgressTick(s);      // резюме після заміни батареї: памʼятаємо точку
+    // FC rebooted while connected: its mission may no longer be ours — re-verify (#58).
+    if (s.boot_count != null) {
+      if (s.boot_count < _seenBoots) _seenBoots = s.boot_count;          // a new link
+      else if (s.boot_count > _seenBoots) {
+        _seenBoots = s.boot_count;
+        if (flownRoute) setTimeout(() => mavReverify(t("після перезавантаження FC")), 3000);
+      }
+    }
+    vioSortieTick(s);
     flightRecTick(s);
     mavDetectPhase(s);
     mavUpdateHome(s);
@@ -4533,6 +4596,7 @@
     ["battery", t("Батарея")], ["alt", "Висота"], ["speed", "Швидкість"], ["wp", "Точка"],
     ["progress", "Прогрес"], ["tonext", "До точки"], ["remaining", "Лишилось"],
     ["eta", "ETA"], ["finish", "До завершення"], ["land", "До посадки"], ["message", "Повідомл."],
+    ["vio", "VIO"],
   ];
   let _hud = null;
   // ---- on-map telemetry overlay (#11): same data as the pinned notification, single source
@@ -4639,6 +4703,10 @@
     hudSet(rows, "finish", p ? (p.finishS != null ? fmtDuration(p.finishS) : "—") : "", null, !!p);
     hudSet(rows, "land", p ? (p.landS != null ? fmtDuration(p.landS) : "—") : "", null, !!p);
     hudSet(rows, "message", s.last_text || "", null, !!s.last_text);
+    // The companion's state, the way GPS mode shows satellites (#59).
+    const vm = vioFreshMsgs(s);
+    hudSet(rows, "vio", vm.map((x) => x.text).join(" · "),
+      vm.some((x) => x.alarm) ? "#ff7b72" : null, vm.length > 0);
   }
 
   // Live mission countdowns ("до завершення" / "до посадки") tick smoothly between
@@ -4738,8 +4806,8 @@
     // safe-transit INGRESS splice (#12). Derive from the vehicle's total, but subtract the
     // EGRESS splice too (flownSplicePost) — those items sit AFTER coverage, so counting them
     // into `lead` made the HUD target/ETA lag by `post` waypoints (audit residual, display-only).
-    const total = s.wp_total || (n + 2 + (flownHasRtl ? 1 : 0));
-    const lead = Math.max(2, total - n - (flownHasRtl ? 1 : 0) - (flownSplicePost || 0));
+    const total = s.wp_total || (n + 2 + flownTail);
+    const lead = Math.max(2, total - n - flownTail - (flownSplicePost || 0));
     let phase = "", targetIdx;
     if (c < lead) {                              // pre-AUTO / takeoff
       targetIdx = homeOffset; phase = "зліт";
@@ -4885,9 +4953,14 @@
       // mission but before we snapshot it, boot still sees "probably uploaded — verify" (§4.2). Keep
       // the previous snapshot so a KNOWN failure below undoes the marker (never lose last-good state).
       try { _prevFlownRaw = localStorage.getItem(FLOWN_KEY); } catch (e) {}
-      try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: lastRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
+      // GPS-denied field over one pack: upload the next sortie, not the whole field (#60).
+      const sortie = vioCurrentSortie();
+      const upRoute = sortie ? sortie.route : lastRoute;
+      try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: upRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
         vio_home: vioHomeForUpload(),
+        terrain: vioTerrain(),
+        route: sortie ? sortie.route : undefined,
         onProgress: (s, tot) => setMsg(tf(t("Заливаю місію в дрон… {0}/{1} точок"), s, tot), null),
         turn_radius_m: turnRadiusM,
         plane_params: planeParams,
@@ -4911,7 +4984,7 @@
         promoteFieldOnUpload(); // + промоут контуру в постійний named-record (UPSERT)
         // Snapshot exactly what we uploaded — progress is computed off this, so
         // editing/rebuilding the route afterwards can't corrupt the live HUD.
-        flownRoute = lastRoute ? lastRoute.slice() : null;
+        flownRoute = upRoute ? upRoute.slice() : null;
         // HOME = the drone's actual home (arm point), matching ArduPilot — so the
         // RTL leg in progress/ETA returns to where the drone really is. Set BEFORE flownSave.
         if (lastStatus && lastStatus.home_lat != null) {
@@ -4921,7 +4994,8 @@
         } else {
           flownHome = lastHome;
         }
-        flownHasRtl = lastRtl;
+        flownHasRtl = lastRtl || !!r.vio;        // the VIO end flies home too
+        flownTail = (r.tail != null) ? r.tail : (lastRtl ? 1 : 0);
         flownWpTotal = r.count || 0;
         // #3: keep the notification's "WP x/y" denominator in sync with the real upload
         try { if (window.AndroidNotify && window.AndroidNotify.setMission) { window.AndroidNotify.setMission(flownWpTotal); _notifTotal = 0; } } catch (e) {}
@@ -4998,6 +5072,7 @@
       const _sp = parseFloat($("spacing").value) || 20;
       const r = await a.mav_upload_mission({
         vio_home: vioHomeForUpload(),
+        terrain: vioTerrain(),
         route: rem.rest,
         onProgress: (s, tot) => setMsg(tf(t("Заливаю місію в дрон… {0}/{1} точок"), s, tot), null),
         turn_radius_m: isPlaneVehicle() ? null : (_rt ? Math.max(1, Math.min(10, _sp / 2)) : 0),
@@ -5012,7 +5087,8 @@
       // where without this flownHome=null and _progGeom builds no RTL-leg/countdown (§4.2).
       if (lastStatus && lastStatus.home_lat != null) flownHome = { lat: lastStatus.home_lat, lng: lastStatus.home_lon };
       else if (lastStatus && lastStatus.lat != null) flownHome = { lat: lastStatus.lat, lng: lastStatus.lon };
-      flownHasRtl = $("rtl").checked;
+      flownHasRtl = $("rtl").checked || !!r.vio;
+      flownTail = (r.tail != null) ? r.tail : ($("rtl").checked ? 1 : 0);
       flownWpTotal = r.count || 0;
       flownRestored = false;
       // Resume uploads never splice (mav_upload_mission gates the splice off when p.route is
@@ -5115,6 +5191,10 @@
   const NON_ARMABLE = ["AUTO", "RTL", "LAND", "SMART_RTL", "AUTO_RTL", "BRAKE", "CIRCLE"];
   $("mav-arm").addEventListener("click", async () => {
     if (!confirm(t("Увімкнути мотори (ARM)? Тримай апарат під контролем."))) return;
+    // The FC must still hold what FMP uploaded (02.11: after an FC reboot it flew the day
+    // before's mission). Re-read it; on a mismatch ARM only on an explicit yes (#58).
+    if (flownRoute && (await mavReverify(t("перед ARM"))) === false &&
+        !confirm(t("Місія у FC НЕ та, що залив FMP. Увімкнути мотори все одно?"))) return;
     const m = (lastStatus && lastStatus.mode) || "";
     if (NON_ARMABLE.includes(m)) {
       setMsg(tf(t("Режим {0} не дозволяє ARM — перемикаю на GUIDED…"), m), null);
@@ -5693,7 +5773,7 @@
       return;
     }
     // Don't fly a stale mission: warn hard if the plan differs from what we uploaded.
-    if (routeSig(lastRoute) !== routeSig(flownRoute)) {
+    if (routeSig(planRoute()) !== routeSig(flownRoute)) {
       if (!confirm(t("У дроні НЕ поточний план (або місію не залито). Спершу натисни ") +
                    "«Залити місію». Все одно запустити те, що ЗАРАЗ у дроні?")) return;
     }
@@ -5741,6 +5821,7 @@
   // origin is this point. FMP never SETS the origin: vio_onboard does, and a second
   // writer is how the FC ends up holding another origin (vio_onboard exit 16).
   const VIO = window.VIO_MODE;
+  var vioReady = false, vioSortieCache = null;   // var: read by updateMissionStatus() before this runs
   const VIO_KEY = "fmp_vio_home";
   let vioHome = null, vioHomeMarker = null, vioLine = null;
   let vioOriginResult = null;     // the last upload's origin write: {ok} / {ok:false, held}
@@ -5761,6 +5842,68 @@
     }
   }
   function vioOn() { return !!($("vio-mode") && $("vio-mode").checked); }
+  function vioTerrain() { return vioOn() && !!($("vio-terrain") && $("vio-terrain").checked); }
+  function vioNum(id, dflt) { const v = parseFloat($(id) && $(id).value); return v > 0 ? v : dflt; }
+  // Time / energy model inputs (#56): the flight-time model of ardu-gps-denied, × Ah/min.
+  function vioModel() {
+    return { speed: Math.max(parseFloat($("speed").value) || 0, 0.5),
+      takeoffAlt: Math.max(parseFloat($("alt").value) || 0, 2),
+      packAh: vioNum("vio-pack", 8.0), ahPerMin: vioNum("vio-ahmin", 0.71) };
+  }
+  const VIO_PACK_BUDGET = 0.8;     // a sortie may use up to 80 % of the pack (owner, 02.11)
+  // ---- sorties (#60): a field over 80 % of the pack is split by legs; FMP keeps which are done.
+  const VIO_SORTIES = "fmp_vio_sorties";   // {key, done}
+  function vioSorties() {
+    if (!vioReady || !vioOn() || !vioHome || !lastRoute || lastRoute.length < 2) return null;
+    const m = vioModel(), sp = parseFloat($("spacing").value) || 20;
+    const key = routeSig(lastRoute) + "|" + vioHome.lat.toFixed(6) + "," + vioHome.lng.toFixed(6) + "|" +
+      [m.speed, m.takeoffAlt, m.packAh, m.ahPerMin, sp].join(",");
+    if (vioSortieCache && vioSortieCache.key === key) return vioSortieCache.list;
+    const budgetS = VIO_PACK_BUDGET * m.packAh / m.ahPerMin * 60;
+    const r = VIO.splitSorties(vioHome, lastRoute, budgetS, m, sp);
+    const list = r ? r.map((x) => ({ from: x.from, to: x.to, route: lastRoute.slice(x.from, x.to + 1) })) : null;
+    vioSortieCache = { key, list };
+    return list;
+  }
+  function vioSortieKey() { return vioSortieCache ? vioSortieCache.key : null; }
+  function vioSortieDone() {
+    try { const d = JSON.parse(localStorage.getItem(VIO_SORTIES) || "null");
+      return (d && d.key === vioSortieKey()) ? (d.done | 0) : 0; } catch (e) { return 0; }
+  }
+  function vioSortieSetDone(n) {
+    try { localStorage.setItem(VIO_SORTIES, JSON.stringify({ key: vioSortieKey(), done: n })); } catch (e) {}
+  }
+  // The sortie to upload next: {route, idx, n} when the field is split, else null.
+  function vioCurrentSortie() {
+    const so = vioSorties();
+    if (!so || so.length < 2) return null;
+    const d = Math.min(vioSortieDone(), so.length - 1);
+    return { route: so[d].route, idx: d, n: so.length, from: so[d].from, to: so[d].to };
+  }
+  // The route FMP means to fly next: the current sortie, or the whole plan.
+  function planRoute() { const c = vioCurrentSortie(); return c ? c.route : lastRoute; }
+  // A sortie counts as done once the FC reaches the 25 s hover over home (all its legs flown).
+  function vioSortieTick(s) {
+    const c = vioCurrentSortie();
+    if (!c || !flownRoute || routeSig(flownRoute) !== routeSig(c.route)) return;
+    if (s.wp_current != null && flownWpTotal > 3 && s.wp_current >= flownWpTotal - 2 && vioSortieDone() === c.idx) {
+      vioSortieSetDone(c.idx + 1);
+      appLog("vio: sortie " + (c.idx + 1) + "/" + c.n + " done");
+      setMsg(tf(t("Виліт {0} з {1} пройдено — після заміни АКБ залий наступний."), c.idx + 1, c.n), "ok");
+      updateMissionStatus();
+    }
+  }
+  // The companion's fresh STATUSTEXT (#59), newest family order VIO, VIOSUP, MISSION, VIOFS.
+  function vioFreshMsgs(s) {
+    const out = [], m = (s && s.vio_msgs) || {};
+    for (const k of ["VIO", "VIOSUP", "MISSION", "VIOFS"]) {
+      const x = m[k];
+      if (x && Date.now() - x.ts < 120000)
+        out.push({ fam: k, text: x.text, age: (Date.now() - x.ts) / 1000,
+          alarm: k === "VIOFS" || /LAND|FAIL|LOST|MISMATCH|DIFF|STOP/i.test(x.text) });
+    }
+    return out;
+  }
   // The home the upload uses in VIO mode (null = the normal GPS / FC home chain).
   function vioHomeForUpload() { return (vioOn() && vioHome) ? { lat: vioHome.lat, lng: vioHome.lng, alt: vioHome.alt || 0 } : null; }
   function vioSetHome(ll, why) {
@@ -5860,17 +6003,53 @@
     const tol = parseFloat($("vio-tol") && $("vio-tol").value) || 40;
     const cal = !!($("vio-calibrated") && $("vio-calibrated").checked);
     const r = VIO.reachM(tol, cal);
-    if (lastRoute && lastRoute.length) {
-      const sp = VIO.routeSpan(vioHome, lastRoute);
+    const cur = vioCurrentSortie(), so = vioSorties();
+    const flyRoute = cur ? cur.route : lastRoute;     // a sortie is what one pack flies
+    if (flyRoute && flyRoute.length) {
+      const sp = VIO.routeSpan(vioHome, flyRoute);
       const fly = 2 * sp.farthest + sp.length;    // out, the passes, back: the anchor never resets
-      const ok = r.beyond || (r.reach > 0 && fly <= r.reach);
       lines.push(t("Маршрут: найдальша точка ") + Math.round(sp.farthest) + t(" м від дому, з дорогою туди й назад ~") +
         Math.round(fly) + t(" м."));
-      lines.push((ok ? "✅ " : "⚠️ ") + t("Досяжність VIO при допуску ") + tol + t(" м") +
-        (cal ? "" : t(" (без калібрування)")) + ": " +
-        (r.reach === 0 ? t("недосяжно навіть 100 м") : (r.beyond ? t("понад виміряне") : Math.round(r.reach) + t(" м"))) +
-        (ok ? "" : t(" — маршрут довший, точність не гарантована.")));
+      // #55: the line from this aircraft's flights decides; MARS-LVIG stays for reference.
+      const mr = VIO.measuredReachM(tol);
+      const okM = fly <= mr.reach;
+      lines.push((okM ? "✅ " : "⚠️ ") + t("Досяжність за польотами апарата (найгірше ") +
+        (100 * mr.share).toFixed(1) + t(" % шляху) при допуску ") + tol + t(" м: ~") + (mr.reach / 1000).toFixed(1) + t(" км") +
+        (mr.beyond ? t(" (понад найдовший виміряний політ ") + (VIO.measuredMaxPath() / 1000).toFixed(1) + t(" км)") : "") +
+        (okM ? "" : t(" — маршрут довший, точність не гарантована.")));
+      lines.push(t("Довідково, публічні дані MARS-LVIG") + (cal ? "" : t(" (без калібрування)")) + ": " +
+        (r.reach === 0 ? t("недосяжно навіть 100 м") : (r.beyond ? t("понад виміряне") : Math.round(r.reach) + t(" м"))) + ".");
+      // #56: time and charge, one sortie at a time.
+      const m = vioModel();
+      const mt = VIO.missionTime(vioHome, flyRoute, m), en = VIO.energy(mt.total_s, m.ahPerMin, m.packAh);
+      const over = en.pct > 100 * VIO_PACK_BUDGET;
+      lines.push((over ? "⚠️ " : "✅ ") + (cur ? tf(t("Виліт {0} з {1}: "), cur.idx + 1, cur.n) : t("Політ: ")) +
+        fmtDuration(mt.total_s) + ", ~" + en.ah.toFixed(1) + t(" А·год = ") + Math.round(en.pct) + t(" % АКБ") +
+        (over ? t(" — понад 80 %.") : "."));
+      // #7 / #56: where the route ends — a BATT_CRT LAND there lands in the field.
+      const last = flyRoute[flyRoute.length - 1];
+      const endD = VIO.haversineM(vioHome.lat, vioHome.lng, last[0], last[1]);
+      lines.push((over && endD > 100 ? "⚠️ " : "") + t("Кінець маршруту: ") + Math.round(endD) + t(" м від дому") +
+        (over && endD > 100 ? t(" — якщо спрацює BATT_CRT (LAND), дрон сяде там, у полі.") : "."));
+      // #57: passes too short to reach the set speed.
+      const sl = VIO.shortLegs(flyRoute, m.speed, parseFloat($("spacing").value) || 20);
+      if (sl.passes) lines.push(sl.short
+        ? "⚠️ " + tf(t("{0} з {1} галсів коротші за {2} м — {3} м/с на них не набирається (розгін і гальмування)."),
+            sl.short, sl.passes, Math.round(sl.need), m.speed)
+        : "✅ " + tf(t("Галси довші за {0} м — {1} м/с набирається."), Math.round(sl.need), m.speed));
     }
+    // #60: sorties.
+    if (so === null && lastRoute && lastRoute.length > 1 && vioHome)
+      lines.push("⚠️ " + t("Навіть одна точка маршруту не влазить у 80 % АКБ — перевір АКБ і витрату."));
+    else if (so && so.length > 1) {
+      const d = vioSortieDone();
+      lines.push(d >= so.length ? "✅ " + tf(t("Усі {0} вильоти поля пройдено."), so.length)
+        : tf(t("Поле ділиться на {0} вильоти (кожен ≤ 80 % АКБ). Пройдено: {1}. Залити — виліт {2}: точки {3}–{4} з {5}."),
+            so.length, d, d + 1, so[Math.min(d, so.length - 1)].from + 1, so[Math.min(d, so.length - 1)].to + 1, lastRoute.length));
+    }
+    if ($("vio-sortie-reset")) $("vio-sortie-reset").style.display = (so && so.length > 1 && vioSortieDone() > 0) ? "" : "none";
+    // #59: the companion's messages.
+    for (const x of vioFreshMsgs(s)) lines.push((x.alarm ? "⚠️ " : "") + x.text + " (" + Math.round(x.age) + t(" с тому)"));
     if (vioOriginResult) {
       const o = vioOriginResult;
       if (o.ok) lines.push("✅ " + t("Дім записано у FC як origin — Pi візьме його сам."));
@@ -5908,15 +6087,25 @@
       if ($("vio-mode")) $("vio-mode").checked = !!c.on;
       if ($("vio-tol") && c.tol) $("vio-tol").value = c.tol;
       if ($("vio-calibrated")) $("vio-calibrated").checked = !!c.cal;
+      if ($("vio-terrain")) $("vio-terrain").checked = !!c.terrain;
+      if ($("vio-pack") && c.pack) $("vio-pack").value = c.pack;
+      if ($("vio-ahmin") && c.ahmin) $("vio-ahmin").value = c.ahmin;
     }
   } catch (e) {}
-  ["vio-mode", "vio-tol", "vio-calibrated"].forEach((id) => {
+  ["vio-mode", "vio-tol", "vio-calibrated", "vio-terrain", "vio-pack", "vio-ahmin"].forEach((id) => {
     if ($(id)) $(id).addEventListener("change", () => {
       try { localStorage.setItem(VIO_CFG, JSON.stringify({ on: vioOn(), tol: $("vio-tol").value,
-        cal: $("vio-calibrated").checked })); } catch (e) {}
+        cal: $("vio-calibrated").checked, terrain: !!($("vio-terrain") && $("vio-terrain").checked),
+        pack: $("vio-pack") && $("vio-pack").value, ahmin: $("vio-ahmin") && $("vio-ahmin").value })); } catch (e) {}
       vioRender();
+      updateMissionStatus();
     });
   });
+  if ($("vio-sortie-reset")) $("vio-sortie-reset").addEventListener("click", () => {
+    if (!confirm(t("Почати вильоти поля спочатку (виліт 1)?"))) return;
+    vioSortieSetDone(0); vioRender(); updateMissionStatus();
+  });
+  vioReady = true;
   setInterval(() => { if (vioOn()) vioRender(); }, 1000);
   setTimeout(vioRender, 0);
 })();

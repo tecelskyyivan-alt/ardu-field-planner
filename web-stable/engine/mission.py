@@ -11,8 +11,54 @@ MAVLink reference used here:
   cmd 16   = MAV_CMD_NAV_WAYPOINT
   cmd 20   = MAV_CMD_NAV_RETURN_TO_LAUNCH
   cmd 22   = MAV_CMD_NAV_TAKEOFF
+  cmd 19   = MAV_CMD_NAV_LOITER_TIME
+  cmd 21   = MAV_CMD_NAV_LAND
+  cmd 178  = MAV_CMD_DO_CHANGE_SPEED
+  frame 10 = MAV_FRAME_GLOBAL_TERRAIN_ALT      (alt above the ground under the drone)
+
+`mission_items` is the ONE layout both the file export and the desktop upload use
+(web-stable/mav/link.js buildMissionItems mirrors it for the browser upload), so a
+file and an upload of the same plan carry the same home, speed and end (#52-#54).
 """
 import json
+
+FRAME_GLOBAL, FRAME_REL, FRAME_TERRAIN = 0, 3, 10
+CMD_WAYPOINT, CMD_LOITER_TIME, CMD_RTL, CMD_LAND, CMD_TAKEOFF = 16, 19, 20, 21, 22
+CMD_DO_CHANGE_SPEED = 178
+# GPS-denied (VIO) profile, from ardu-gps-denied's flights: the climb frames over home are
+# the home-fix keys (5 s), the hover back over home is where the image registration
+# corrects the VIO (25 s; corrections of 1.2-8.4 m measured 2026-11-02). FMP issue #54.
+VIO_HOLD_START_S = 5.0
+VIO_HOLD_END_S = 25.0
+
+
+def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
+                  vio=False, terrain=False):
+    """Ordered mission rows (frame, command, p1, p2, p3, p4, lat, lon, alt); row 0 = home.
+
+    GPS:  home · TAKEOFF · [DO_CHANGE_SPEED] · waypoints · [RTL]
+    VIO:  home · TAKEOFF · LOITER_TIME 5 · [DO_CHANGE_SPEED] · waypoints ·
+          WP home · LOITER_TIME 25 · LAND (home)        — `rtl` is ignored: the end is fixed.
+    terrain=True puts the waypoints (and the VIO end over home) in frame 10, so the
+    altitude is above the ground under the drone (the VIO stack holds it on the
+    rangefinder); the takeoff stays relative to home."""
+    la0, lo0 = float(home[0]), float(home[1])
+    wf = FRAME_TERRAIN if terrain else FRAME_REL
+    rows = [(FRAME_GLOBAL, CMD_WAYPOINT, 0, 0, 0, 0, la0, lo0, float(home[2]) if len(home) > 2 else 0.0),
+            (FRAME_REL, CMD_TAKEOFF, 0, 0, 0, 0, la0, lo0, float(takeoff_alt))]
+    if vio:
+        rows.append((FRAME_REL, CMD_LOITER_TIME, VIO_HOLD_START_S, 0, 0, 0, la0, lo0, float(takeoff_alt)))
+    if speed and float(speed) > 0:
+        # type 1 = groundspeed, m/s, throttle -1 = no change
+        rows.append((FRAME_REL, CMD_DO_CHANGE_SPEED, 1.0, float(speed), -1.0, 0, 0.0, 0.0, 0.0))
+    rows += [(wf, CMD_WAYPOINT, 0, 0, 0, 0, float(la), float(lo), float(wp_alt)) for la, lo in waypoints]
+    if vio:
+        rows += [(wf, CMD_WAYPOINT, 0, 0, 0, 0, la0, lo0, float(wp_alt)),
+                 (wf, CMD_LOITER_TIME, VIO_HOLD_END_S, 0, 0, 0, la0, lo0, float(wp_alt)),
+                 (FRAME_REL, CMD_LAND, 0, 0, 0, 0, la0, lo0, 0.0)]
+    elif rtl:
+        rows.append((FRAME_REL, CMD_RTL, 0, 0, 0, 0, 0.0, 0.0, 0.0))
+    return rows
 
 
 # ---------------------------------------------------------------- QGC WPL 110
@@ -31,64 +77,53 @@ def _num(v, places=6):
     return format(float(v), f".{places}f")
 
 
-def to_waypoints(home, takeoff_alt, waypoints, wp_alt, add_rtl=True):
+def to_waypoints(home, takeoff_alt, waypoints, wp_alt, add_rtl=True, speed=0.0,
+                 vio=False, terrain=False):
     """Build QGC WPL 110 (.waypoints) text.
 
-    home: (lat, lon, abs_alt). waypoints: list of (lat, lon).
-    """
+    home: (lat, lon, abs_alt). waypoints: list of (lat, lon). Rows = mission_items().
+    WP0 = home (Mission Planner convention: absolute frame, current=1)."""
     lines = ["QGC WPL 110"]
-    seq = 0
-
-    # WP0 = home (Mission Planner convention: absolute frame, current=1).
-    lines.append(_wpl_line(seq, 1, 0, 16, 0, 0, 0, 0, home[0], home[1], home[2]))
-    seq += 1
-
-    # Takeoff to relative altitude above home.
-    lines.append(_wpl_line(seq, 0, 3, 22, 0, 0, 0, 0, home[0], home[1], takeoff_alt))
-    seq += 1
-
-    for lat, lon in waypoints:
-        lines.append(_wpl_line(seq, 0, 3, 16, 0, 0, 0, 0, lat, lon, wp_alt))
-        seq += 1
-
-    if add_rtl:
-        lines.append(_wpl_line(seq, 0, 3, 20, 0, 0, 0, 0, 0, 0, 0))
-        seq += 1
-
+    for seq, r in enumerate(mission_items(home, takeoff_alt, waypoints, wp_alt, add_rtl,
+                                          speed, vio, terrain)):
+        lines.append(_wpl_line(seq, 1 if seq == 0 else 0, *r))
     return "\n".join(lines) + "\n"
 
 
 # ------------------------------------------------------------------- QGC .plan
 
 def to_plan(home, takeoff_alt, waypoints, wp_alt, add_rtl=True,
-            cruise_speed=12.0, hover_speed=5.0):
-    """Build a QGroundControl .plan (JSON) string for an ArduCopter mission."""
-    items = []
-    jump = 1
+            cruise_speed=12.0, hover_speed=5.0, speed=0.0, vio=False, terrain=False):
+    """Build a QGroundControl .plan (JSON) string for an ArduCopter mission.
 
-    def simple(command, params, alt):
-        nonlocal jump
-        item = {
+    Items = mission_items() without row 0 (QGC keeps home in plannedHomePosition)."""
+    items = []
+    # QGC AltitudeMode per frame: 1 = relative to home, 4 = terrain frame.
+    alt_mode = {FRAME_REL: 1, FRAME_TERRAIN: 4}
+    for jump, (frame, cmd, p1, p2, p3, p4, la, lo, alt) in enumerate(
+            mission_items(home, takeoff_alt, waypoints, wp_alt, add_rtl, speed, vio, terrain)[1:], 1):
+        if cmd == CMD_DO_CHANGE_SPEED:
+            # QGC writes DO_* items in MAV_FRAME_MISSION (2) with no altitude.
+            items.append({"autoContinue": True, "command": cmd, "doJumpId": jump, "frame": 2,
+                          "params": [p1, p2, p3, 0, 0, 0, 0], "type": "SimpleItem"})
+            continue
+        if cmd in (CMD_TAKEOFF, CMD_RTL):
+            # Copter takeoff has no horizontal target; QGC's own writer emits 0/0 for
+            # lat/lon (params 5/6). ArduCopter ignores them, but 0/0 round-trips cleanly.
+            params = [0, 0, 0, 0, 0, 0, alt]
+        else:
+            params = [p1, p2, p3, None if cmd == CMD_WAYPOINT else p4, la, lo, alt]
+        items.append({
             "AMSLAltAboveTerrain": None,
             "Altitude": alt,
-            "AltitudeMode": 1,            # 1 = relative to home
+            "AltitudeMode": alt_mode.get(frame, 1),
             "autoContinue": True,
-            "command": command,
+            "command": cmd,
             "doJumpId": jump,
-            "frame": 3,                   # MAV_FRAME_GLOBAL_RELATIVE_ALT
+            "frame": frame,
             "params": params,
             "type": "SimpleItem",
-        }
-        jump += 1
-        return item
-
-    # Copter takeoff has no horizontal target; QGC's own writer emits 0/0 for
-    # lat/lon (params 5/6). ArduCopter ignores them, but 0/0 round-trips cleanly.
-    items.append(simple(22, [0, 0, 0, 0, 0, 0, takeoff_alt], takeoff_alt))
-    for lat, lon in waypoints:
-        items.append(simple(16, [0, 0, 0, None, lat, lon, wp_alt], wp_alt))
-    if add_rtl:
-        items.append(simple(20, [0, 0, 0, 0, 0, 0, 0], 0))
+        })
 
     plan = {
         "fileType": "Plan",
@@ -97,7 +132,7 @@ def to_plan(home, takeoff_alt, waypoints, wp_alt, add_rtl=True,
         "mission": {
             "cruiseSpeed": cruise_speed,
             "firmwareType": 3,            # MAV_AUTOPILOT_ARDUPILOTMEGA
-            "globalPlanAltitudeMode": 1,
+            "globalPlanAltitudeMode": 0 if terrain else 1,   # 0 = mixed: per-item modes
             "hoverSpeed": hover_speed,
             "items": items,
             "plannedHomePosition": [home[0], home[1], home[2]],
