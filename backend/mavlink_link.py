@@ -103,41 +103,33 @@ def _humanize_reason(txt):
     return f"ArduPilot: {txt}"
 
 
-def build_mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0):
+def build_mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
+                        vio=False, terrain=False):
     """Build the ordered mission items for upload.
 
     Returns a list of dicts: {seq, frame, command, current, autocontinue,
     p1..p4, lat, lon, alt}. lat/lon are degrees here; the uploader converts to
     int32 (deg*1e7) for MISSION_ITEM_INT.
 
-    When `speed` > 0 a DO_CHANGE_SPEED item is inserted right after takeoff so
-    the vehicle flies the mission at the CHOSEN speed (otherwise it just uses its
-    default WPNAV_SPEED and ignores the planned speed). Layout:
-        0 home · 1 takeoff · [2 do_change_speed] · waypoints… · [rtl]
+    The layout is mission.mission_items — the SAME rows the .waypoints/.plan export
+    writes, so a file and an upload of one plan agree (home, DO_CHANGE_SPEED after
+    takeoff when `speed` > 0, the GPS-denied start/end profile when `vio`):
+        GPS: 0 home · 1 takeoff · [do_change_speed] · waypoints… · [rtl]
+        VIO: 0 home · 1 takeoff · loiter 5 s · [do_change_speed] · waypoints… ·
+             wp home · loiter 25 s · land
     """
+    from .mission import mission_items
     items = []
-
-    def add(frame, command, lat, lon, alt, current=0, p1=0.0, p2=0.0, p3=0.0, p4=0.0):
+    for seq, (frame, command, p1, p2, p3, p4, lat, lon, alt) in enumerate(
+            mission_items(home, takeoff_alt, waypoints, wp_alt, rtl, speed, vio, terrain)):
+        # WP0 = home (absolute frame, current=1) — ArduPilot overwrites with the real
+        # home at arm, same convention as the .waypoints export.
         items.append({
-            "seq": len(items), "frame": frame, "command": command,
-            "current": current, "autocontinue": 1,
-            "p1": p1, "p2": p2, "p3": p3, "p4": p4,
+            "seq": seq, "frame": frame, "command": command,
+            "current": 1 if seq == 0 else 0, "autocontinue": 1,
+            "p1": float(p1), "p2": float(p2), "p3": float(p3), "p4": float(p4),
             "lat": lat, "lon": lon, "alt": alt,
         })
-
-    # WP0 = home (absolute frame, current=1) — ArduPilot overwrites with the real
-    # home at arm, same convention as the .waypoints export.
-    add(FRAME_GLOBAL, CMD_WAYPOINT, home[0], home[1], home[2], current=1)
-    # Takeoff to relative altitude.
-    add(FRAME_GLOBAL_REL, CMD_TAKEOFF, home[0], home[1], takeoff_alt)
-    # Hold the planned ground speed for the whole mission.
-    if speed and speed > 0:
-        add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0.0, 0.0, 0.0,
-            p1=1.0, p2=float(speed), p3=-1.0)   # type=groundspeed, speed m/s, throttle no-change
-    for lat, lon in waypoints:
-        add(FRAME_GLOBAL_REL, CMD_WAYPOINT, lat, lon, wp_alt)
-    if rtl:
-        add(FRAME_GLOBAL_REL, CMD_RTL, 0.0, 0.0, 0.0)
     return items
 
 
@@ -437,7 +429,7 @@ class MavLink:
                 # Relative-alt frames 3 and 6 (the _INT variant) are synonymous in
                 # MISSION_ITEM_INT, as are absolute 0 and 5 — some autopilots store
                 # one and report the other, so don't flag that as a mismatch.
-                _equiv = ({3, 6}, {0, 5})
+                _equiv = ({3, 6}, {0, 5}, {10, 11})   # 10/11 = terrain, float/_INT
                 same_frame = e["frame"] == a["frame"] or any(
                     e["frame"] in g and a["frame"] in g for g in _equiv)
                 if not same_frame:
@@ -488,12 +480,17 @@ class MavLink:
         # base_mode = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED (1), param2 = mode number.
         return self.command(CMD_DO_SET_MODE, [1.0, float(num)])
 
+    def get_param(self, name, timeout=5.0):
+        """Read an autopilot parameter: {"ok": True, "value": v}."""
+        return self.set_param(name, None, timeout)
+
     def set_param(self, name, value, timeout=5.0):
-        """Set an autopilot parameter (e.g. WPNAV_SPEED) and wait for confirmation."""
+        """Set an autopilot parameter (e.g. WPNAV_SPEED) and wait for confirmation.
+        value None = read only (get_param)."""
         if not self._conn or not (self._thread and self._thread.is_alive()):
             return {"ok": False, "error": "Немає звʼязку. Спочатку підключись до дрона."}
         ev = threading.Event()
-        req = {"name": name, "value": float(value), "event": ev, "result": None}
+        req = {"name": name, "value": None if value is None else float(value), "event": ev, "result": None}
         with self._lock:
             if self._upload or self._download or self._command or self._param:
                 return {"ok": False, "error": "Триває інший обмін з дроном — зачекай."}
@@ -980,8 +977,9 @@ class MavLink:
 
         try:
             for comp in (self._target_comp or 1, 0):       # autopilot, then broadcast
-                conn.mav.param_set_send(ts, comp, nm, float(val),
-                                        mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
+                if val is not None:
+                    conn.mav.param_set_send(ts, comp, nm, float(val),
+                                            mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
                 conn.mav.param_request_read_send(ts, comp, nm, -1)
                 deadline = time.time() + 3.0
                 while time.time() < deadline:
@@ -989,8 +987,10 @@ class MavLink:
                     if m is None:
                         break
                     if _match(m):
+                        if val is None:                    # get_param: just the value
+                            result = {"ok": True, "value": m.param_value}
                         # Confirm the value actually changed (within 1%).
-                        if abs(float(m.param_value) - float(val)) <= max(1.0, abs(val) * 0.01):
+                        elif abs(float(m.param_value) - float(val)) <= max(1.0, abs(val) * 0.01):
                             result = {"ok": True, "value": m.param_value}
                         else:
                             result = {"ok": False,

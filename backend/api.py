@@ -34,6 +34,10 @@ COPTER_WP_RADIUS_DEFAULT_M = 2.0
 MAX_FIELD_HA = 10000.0
 
 
+TERRAIN_NO_RFND = ("«Висота над землею» потребує далекоміра на FC (RNGFND1_TYPE = 0): без нього "
+                   "FC на першій точці сяде (Terrain Unavailable). Вимкни опцію або налаштуй далекомір.")
+
+
 class Api:
     def __init__(self):
         self.window = None
@@ -415,7 +419,7 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    def _mission_items(self, home_override=None):
+    def _mission_items(self, home_override=None, terrain=False, route=None):
         """Build MAVLink mission items from the last-built route (or None).
 
         HOME = where the drone will arm: when connected, use ArduPilot's own home
@@ -425,14 +429,17 @@ class Api:
         if not self._state:
             return None
         from .mavlink_link import build_mission_items, LINK
-        s = self._state
+        s = dict(self._state)
+        if route:                      # one sortie / the remainder, not the whole plan (#60)
+            s["waypoints"] = [(float(p[0]), float(p[1])) for p in route]
         home = s["home"]
         if home_override:
-            # GPS-denied: the operator's take-off point is home (no fix to take it from).
+            # GPS-denied: the operator's take-off point is home (no fix to take it from),
+            # and the mission ends with the VIO profile (hover over home, LAND) — #54.
             return build_mission_items(
                 (float(home_override["lat"]), float(home_override["lng"]), 0.0),
                 s["takeoff_alt"], s["waypoints"], s["wp_alt"], s.get("rtl", True),
-                speed=s.get("speed", 0))
+                speed=s.get("speed", 0), vio=True, terrain=terrain)
         try:
             st = LINK.status()
             if st.get("home_lat") is not None and st.get("home_lon") is not None:
@@ -444,12 +451,32 @@ class Api:
             pass
         return build_mission_items(
             home, s["takeoff_alt"], s["waypoints"], s["wp_alt"], s.get("rtl", True),
-            speed=s.get("speed", 0))
+            speed=s.get("speed", 0), terrain=terrain)
+
+    def _terrain_blocker(self):
+        """Terrain-frame waypoints need a terrain source on the FC. With no rangefinder
+        (and no terrain data, which FMP does not serve) ArduCopter 4.7.0 raises
+        "Failsafe: Terrain Unavailable" at the first waypoint and LANDs there (SITL,
+        2026-11-03). None = fine or unknown (the read failed: do not block on a flaky link)."""
+        try:
+            from .mavlink_link import LINK
+            r = LINK.get_param("RNGFND1_TYPE")
+        except Exception:
+            return None
+        if r.get("ok") and int(round(float(r["value"]))) == 0:
+            return TERRAIN_NO_RFND
+        return None
 
     def mav_upload_mission(self, params=None):
         """Upload the last-built mission, then read it back to CONFIRM it landed
         on the vehicle (so the user knows the upload truly succeeded)."""
-        items = self._mission_items((params or {}).get("vio_home"))
+        p0 = params or {}
+        if p0.get("terrain"):
+            err = self._terrain_blocker()
+            if err:
+                return {"ok": False, "error": err}
+        items = self._mission_items(p0.get("vio_home"), terrain=bool(p0.get("terrain")),
+                                    route=p0.get("route"))
         if items is None:
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
         try:
@@ -457,6 +484,8 @@ class Api:
             res = LINK.upload_mission(items)
             if not res.get("ok"):
                 return res
+            res["vio"] = bool(p0.get("vio_home"))
+            res["tail"] = 3 if res["vio"] else (1 if self._state.get("rtl", True) else 0)
             # Remember EXACTLY what we put on the vehicle, so a later standalone
             # verify compares against the uploaded mission — not a freshly-rebuilt
             # one whose home/takeoff/RTL may differ if GPS/home arrived meanwhile.
@@ -634,26 +663,41 @@ class Api:
     def export_files(self, fmt):
         """Build export file contents without writing them: [{name, content}].
         Missions split into battery flights give one file per flight (mission_f1, _f2, …).
-        Used by the browser/APK engine (download) and by export() (desktop save dialog)."""
+        Used by the browser/APK engine (download) and by export() (desktop save dialog).
+
+        `fmt` is the format name, or {fmt, vio_home, terrain, flights}:
+          vio_home {lat,lng} — GPS-denied: row 0 / takeoff on that home (as the upload
+                    does, #52) and the VIO start/end profile (#54);
+          terrain  — waypoint altitudes in the terrain frame (10);
+          flights  — [[[lat,lng],…],…] sorties to write one file each (#60)."""
         if not self._state:
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
+        opts = fmt if isinstance(fmt, dict) else {}
+        if opts:
+            fmt = opts.get("fmt")
         try:
             s = self._state
+            vh = opts.get("vio_home")
+            home = (float(vh["lat"]), float(vh["lng"]), 0.0) if vh else s["home"]
+            vio, terrain = bool(vh), bool(opts.get("terrain"))
             if fmt in ("waypoints", "plan"):
-                flights = s.get("flights") or [s["waypoints"]]
+                flights = ([[(float(p[0]), float(p[1])) for p in fl] for fl in opts["flights"] if fl]
+                           if opts.get("flights") else None) or s.get("flights") or [s["waypoints"]]
                 files = []
                 for i, fl in enumerate(flights, 1):
                     if fmt == "waypoints":
-                        content = to_waypoints(s["home"], s["takeoff_alt"], fl, s["wp_alt"], s["rtl"])
+                        content = to_waypoints(home, s["takeoff_alt"], fl, s["wp_alt"], s["rtl"],
+                                               speed=s["speed"], vio=vio, terrain=terrain)
                     else:
-                        content = to_plan(s["home"], s["takeoff_alt"], fl, s["wp_alt"], s["rtl"],
-                                          cruise_speed=s["speed"])
+                        content = to_plan(home, s["takeoff_alt"], fl, s["wp_alt"], s["rtl"],
+                                          cruise_speed=s["speed"], speed=s["speed"],
+                                          vio=vio, terrain=terrain)
                     name = f"mission.{fmt}" if len(flights) == 1 else f"mission_f{i}.{fmt}"
                     files.append({"name": name, "content": content})
                 return {"ok": True, "files": files}
             if fmt == "fence_plan":
                 return {"ok": True, "files": [{"name": "field_fence.plan",
-                        "content": to_geofence_plan(s["contour"], s["home"], s.get("exclusions"))}]}
+                        "content": to_geofence_plan(s["contour"], home, s.get("exclusions"))}]}
             if fmt == "fence_mp":
                 return {"ok": True, "files": [{"name": "field.fence", "content": to_fence_mp(s["contour"])}]}
             if fmt == "contour_geojson":
@@ -669,6 +713,8 @@ class Api:
         if not r.get("ok"):
             return r
         files = r["files"]
+        if isinstance(fmt, dict):
+            fmt = fmt.get("fmt")
         try:
             if len(files) == 1:
                 path = self._save_dialog(files[0]["name"])

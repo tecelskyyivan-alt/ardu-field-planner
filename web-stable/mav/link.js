@@ -15,6 +15,9 @@
 
   const FRAME_GLOBAL = 0, FRAME_GLOBAL_REL = 3, FRAME_MISSION = 2;
   const CMD_WAYPOINT = 16, CMD_RTL = 20, CMD_TAKEOFF = 22, CMD_DO_CHANGE_SPEED = 178;
+  const CMD_LOITER_TIME = 19, CMD_LAND = 21, FRAME_TERRAIN = 10;
+  // GPS-denied (VIO) profile holds, s — mirror backend/mission.py VIO_HOLD_START_S / _END_S.
+  const VIO_HOLD_START_S = 5, VIO_HOLD_END_S = 25;
   // #12p3: ArduPilot geofence storage (MAV_MISSION_TYPE_FENCE = 1) — polygon vertices only.
   const CMD_FENCE_INCLUSION = 5001, CMD_FENCE_EXCLUSION = 5002;   // MAV_CMD_NAV_FENCE_POLYGON_VERTEX_*
   const MISSION_TYPE_FENCE = 1;
@@ -90,19 +93,35 @@
     return "ArduPilot: " + txt;
   }
 
-  // Build the ordered mission items for upload (mirrors mavlink_link.build_mission_items).
-  // Layout: 0 home(abs) · 1 takeoff · [2 do_change_speed] · waypoints… · [rtl].
-  function buildMissionItems(home, takeoffAlt, waypoints, wpAlt, rtl, speed) {
+  // Build the ordered mission items for upload — the SAME layout as backend/mission.py
+  // mission_items (the .waypoints/.plan export and the desktop upload):
+  //   GPS: 0 home(abs) · 1 takeoff · [do_change_speed] · waypoints… · [rtl]
+  //   VIO (opts.vio): 0 home · 1 takeoff · loiter 5 s · [do_change_speed] · waypoints… ·
+  //        wp home · loiter 25 s · land — `rtl` is ignored, the end is fixed (#54).
+  // opts.terrain: waypoints + the end over home in frame 10 (above the ground under the drone).
+  function buildMissionItems(home, takeoffAlt, waypoints, wpAlt, rtl, speed, opts) {
+    const vio = !!(opts && opts.vio), wf = (opts && opts.terrain) ? FRAME_TERRAIN : FRAME_GLOBAL_REL;
     const items = [];
     const add = (frame, command, lat, lon, alt, current, p1, p2, p3, p4) =>
       items.push({ seq: items.length, frame, command, current: current || 0, autocontinue: 1,
         p1: p1 || 0, p2: p2 || 0, p3: p3 || 0, p4: p4 || 0, lat, lon, alt });
     add(FRAME_GLOBAL, CMD_WAYPOINT, home[0], home[1], home[2] || 0, 1);
     add(FRAME_GLOBAL_REL, CMD_TAKEOFF, home[0], home[1], takeoffAlt);
+    if (vio) add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, VIO_HOLD_START_S);
     if (speed && speed > 0) add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0, 0, 0, 0, 1.0, speed, -1.0);
-    for (const [lat, lon] of waypoints) add(FRAME_GLOBAL_REL, CMD_WAYPOINT, lat, lon, wpAlt);
-    if (rtl) add(FRAME_GLOBAL_REL, CMD_RTL, 0, 0, 0);
+    for (const [lat, lon] of waypoints) add(wf, CMD_WAYPOINT, lat, lon, wpAlt);
+    if (vio) {
+      add(wf, CMD_WAYPOINT, home[0], home[1], wpAlt);
+      add(wf, CMD_LOITER_TIME, home[0], home[1], wpAlt, 0, VIO_HOLD_END_S);
+      add(FRAME_GLOBAL_REL, CMD_LAND, home[0], home[1], 0);
+    } else if (rtl) add(FRAME_GLOBAL_REL, CMD_RTL, 0, 0, 0);
     return items;
+  }
+  // Mission items around the route: before it (lead) and after it (tail), for the HUD and
+  // the battery-swap resume index. Must match buildMissionItems.
+  function missionShape(speed, rtl, opts) {
+    const vio = !!(opts && opts.vio);
+    return { lead: 2 + (vio ? 1 : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
   }
 
   // INAV mission builder. INAV's MAVLink receiver (src/main/telemetry/mavlink.c,
@@ -151,12 +170,23 @@
     return items;
   }
 
+  // The GPS-denied companion's STATUSTEXT families (ardu-gps-denied): "VIO …" health, "VIOSUP:"
+  // the in-flight supervisor, "MISSION …" its mission check, "VIOFS:" the FC Lua backstop.
+  function vioFamily(text) {
+    const m = /^(VIOSUP|VIOFS|VIO|MISSION)\b/.exec(String(text || ""));
+    return m ? m[1] : null;
+  }
+
   function blankTlm() {
     return { connected: false, heartbeat_age: null, armed: null, mode: null, lat: null, lon: null,
       alt_rel: null, sats: null, fix_type: null, groundspeed: null, heading: null,
       battery_v: null, battery_pct: null, wp_current: null, wp_total: null, last_text: null,
       home_lat: null, home_lon: null,
       origin_lat: null, origin_lon: null,   // EKF origin (GPS_GLOBAL_ORIGIN) — the GPS-denied frame
+      // The companion's STATUSTEXT by family (VIO / VIOSUP / MISSION / VIOFS): {text, ts} (#59).
+      vio_msgs: {},
+      // FC reboots seen this connection (time_boot_ms went backwards) — the app re-verifies (#58).
+      boot_count: 0,
       // GPS quality + velocity — for the anti-jamming / anti-spoofing guard.
       hdop: null, h_acc: null, gps_vel: null, vx: null, vy: null, vz: null };
   }
@@ -353,6 +383,17 @@
         // starts forwarding the FC's streams. Idempotent + self-throttled inside.
         this._maybeRequestStreams(this._tsys, this._tcomp);
       } else if (m.name === "GLOBAL_POSITION_INT") {
+        // FC reboot: its clock restarts. The mission it flies and the EKF origin can then be
+        // something else than what we put there (02.11: a saved plan came back) — count it and
+        // forget the origin, so it is asked again and the app re-verifies the mission (#58).
+        if (f.time_boot_ms != null) {
+          if (this._lastBootMs != null && f.time_boot_ms + 3000 < this._lastBootMs) {
+            tl.boot_count = (tl.boot_count || 0) + 1;
+            tl.origin_lat = null; tl.origin_lon = null; tl.home_lat = null; tl.home_lon = null;
+            this._log("FC reboot detected (time_boot_ms " + this._lastBootMs + " -> " + f.time_boot_ms + ")");
+          }
+          this._lastBootMs = f.time_boot_ms;
+        }
         if (!this._streamsOk) this._log("✓ telemetry streaming (GLOBAL_POSITION_INT arrived)");
         this._streamsOk = true; this._lastPosTs = Date.now();
         tl.lat = f.lat / 1e7; tl.lon = f.lon / 1e7;
@@ -390,6 +431,8 @@
         if (f.total != null && f.total > 0) tl.wp_total = f.total;
       } else if (m.name === "STATUSTEXT") {
         tl.last_text = f.text;
+        const fam = vioFamily(f.text);
+        if (fam) (tl.vio_msgs || (tl.vio_msgs = {}))[fam] = { text: String(f.text).replace(/\0+$/, ""), ts: Date.now() };
       }
     }
 
@@ -700,7 +743,7 @@
       const isInav = this._tlm.autopilot != null && this._tlm.autopilot !== 3;
       const mismatches = [];
       if (actual.length !== expected.length) mismatches.push(`кількість: очікувалось ${expected.length}, у дроні ${actual.length}`);
-      const equiv = [new Set([3, 6]), new Set([0, 5])];
+      const equiv = [new Set([3, 6]), new Set([0, 5]), new Set([10, 11])];   // 10/11 = terrain
       for (let i = 0; i < Math.max(expected.length, actual.length); i++) {
         const e = expected[i], a = actual[i];
         if (!e) { mismatches.push(`#${i}: зайвий пункт у дроні (cmd ${a.command})`); continue; }
@@ -869,5 +912,6 @@
     }
   }
 
-  root.MAV_LINK = { MavLink, buildMissionItems, buildMissionItemsInav, buildFenceItems, humanize };
+  root.MAV_LINK = { MavLink, buildMissionItems, buildMissionItemsInav, buildFenceItems, humanize,
+    missionShape, vioFamily };
 })(typeof globalThis !== "undefined" ? globalThis : this);

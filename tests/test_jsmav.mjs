@@ -279,5 +279,60 @@ for (const held of [null, [495300000, 240100000]]) {
   link.disconnect(); clearInterval(hb);
 }
 
+console.log("\n== GPS-denied (VIO) profile: same layout as backend/mission.py, verifies (#54) ==");
+{
+  const two = [[49.501, 24.0], [49.502, 24.0]];
+  const v = MAV_LINK.buildMissionItems([49.5275, 24.004, 0], 30, two, 30, true, 12, { vio: true });
+  check("[vio] commands = home, TAKEOFF, LOITER 5, SPEED, legs, WP home, LOITER 25, LAND (= test_vio_home_upload.py)",
+    JSON.stringify(v.map((i) => i.command)) === JSON.stringify([16, 22, 19, 178, 16, 16, 16, 19, 21]));
+  check("[vio] holds 5 / 25 s, LAND on home", v[2].p1 === 5 && v[7].p1 === 25 && v[8].lat === 49.5275 && v[8].lon === 24.004);
+  const tv = MAV_LINK.buildMissionItems([49.5275, 24.004, 0], 30, two, 30, true, 12, { vio: true, terrain: true });
+  check("[vio] terrain: frames 0,3,3,3,10,10,10,10,3",
+    JSON.stringify(tv.map((i) => i.frame)) === JSON.stringify([0, 3, 3, 3, 10, 10, 10, 10, 3]));
+  const sh = MAV_LINK.missionShape(12, true, { vio: true }), sg = MAV_LINK.missionShape(0, true, {});
+  check("[vio] missionShape lead/tail = items around the route (VIO 4/3, GPS no speed 2/1)",
+    sh.lead === 4 && sh.tail === 3 && v.length === sh.lead + two.length + sh.tail && sg.lead === 2 && sg.tail === 1);
+  // the FC reports terrain as frame 11 (_INT) — still the same mission
+  const stored = toStored(tv).map((e) => (e.frame === 10 ? Object.assign({}, e, { frame: 11 }) : e));
+  const t = makeMissionVehicle(stored);
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const ver = await link.verifyMission(tv, 3000);
+  check("[vio] read-back of the terrain mission (frame 11 back) verifies", ver.ok && ver.verified);
+  link.disconnect(); t._stopHb();
+}
+
+console.log("\n== companion STATUSTEXT (#59) and FC reboot (#58) ==");
+{
+  check("[vio] families: VIOSUP: / VIOFS: / VIO / MISSION; others null",
+    MAV_LINK.vioFamily("VIOSUP: hold 1.2s") === "VIOSUP" && MAV_LINK.vioFamily("VIOFS: LAND") === "VIOFS" &&
+    MAV_LINK.vioFamily("VIO ok 101 fps") === "VIO" && MAV_LINK.vioFamily("MISSION MATCH 16") === "MISSION" &&
+    MAV_LINK.vioFamily("Mission: 3 WP") === null && MAV_LINK.vioFamily("VIOLET") === null);
+  const veh = MAVLINK.createParser();
+  const t = { ondata: null, close() {}, write(b) { veh.push(b); } };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  const link = new MAV_LINK.MavLink();
+  let boot = 50000;
+  const hb = setInterval(() => {
+    send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 4, system_status: 3, mavlink_version: 3 });
+    send("GLOBAL_POSITION_INT", { time_boot_ms: boot, lat: 494900000, lon: 240100000, relative_alt: 0, hdg: 27000 });
+    boot += 200;
+  }, 100);
+  await link.connect(t);
+  send("STATUSTEXT", { severity: 6, text: "VIOSUP: hold 1.2s" });
+  send("STATUSTEXT", { severity: 6, text: "MISSION MATCH 16" });
+  await sleep(300);
+  const s1 = link.status();
+  check("[vio] STATUSTEXT kept per family", s1.vio_msgs.VIOSUP && s1.vio_msgs.VIOSUP.text === "VIOSUP: hold 1.2s" &&
+    s1.vio_msgs.MISSION.text === "MISSION MATCH 16");
+  check("[reboot] no reboot while the clock runs forward", s1.boot_count === 0);
+  link._tlm.origin_lat = 49.5; link._tlm.origin_lon = 24.0;
+  boot = 1200;                                     // FC rebooted
+  await sleep(400);
+  const s2 = link.status();
+  check("[reboot] time_boot_ms back -> boot_count 1, the origin is asked again", s2.boot_count === 1 && s2.origin_lat == null);
+  clearInterval(hb); link.disconnect();
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);
