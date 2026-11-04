@@ -102,32 +102,8 @@
         Без GPS (VIO): дім — точка на мапі
       </label>
       <div id="vio-panel" style="display:none">
-        <p class="hint">Постав дім точно там, де дрон стоятиме на старті. При заливці місії FMP
-          запише його у FC як точку відліку (origin) — далі Pi і FC беруть її самі; курс дає компас.</p>
-        <div class="row">
-          <button id="vio-set-home" type="button">Поставити дім на мапі</button>
-          <input id="vio-home" type="text" placeholder="49.5275000, 24.0040000" />
-        </div>
-        <label>Допуск дрейфу, м
-          <input id="vio-tol" type="number" value="40" min="5" step="5" />
-        </label>
-        <label class="row">
-          <input id="vio-calibrated" type="checkbox" />
-          mount_yaw виміряно (rig.json)
-        </label>
-        <label class="row">
-          <input id="vio-terrain" type="checkbox" />
-          Висота над землею (рамка рельєфу, далекомір)
-        </label>
-        <p class="hint">Лише з далекоміром на FC (RNGFND1_*): без нього FC сяде на першій точці.</p>
-        <label>АКБ, А·год
-          <input id="vio-pack" type="number" value="8" min="0.5" step="0.5" />
-        </label>
-        <label>Витрата, А·год/хв
-          <input id="vio-ahmin" type="number" value="0.71" min="0.05" step="0.01" />
-        </label>
-        <p class="hint">Місія без GPS: зліт, 5 с над домом, маршрут, повернення на висоті,
-          25 с над домом (прив'язка дому), посадка. Поле понад 80 % АКБ ділиться на вильоти.</p>
+        <p class="hint">Постав дім там, де дрон стоятиме на старті — решту FMP зробить сам.</p>
+        <button id="vio-set-home" type="button">Поставити дім на мапі</button>
         <div id="vio-info" class="hint"></div>
         <button id="vio-sortie-reset" type="button" style="display:none">Вильоти — спочатку</button>
       </div>
