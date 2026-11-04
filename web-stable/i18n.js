@@ -245,6 +245,17 @@ window.FMP_TR = {
   "Залий місію ще раз.": "Upload the mission again.",
   "«Висота над землею» потребує далекоміра на FC (RNGFND1_TYPE = 0): без нього FC на першій точці сяде (Terrain Unavailable). Вимкни опцію або налаштуй далекомір.": "«Height above ground» needs a rangefinder on the FC (RNGFND1_TYPE = 0): without one the FC lands at the first waypoint (Terrain Unavailable). Turn the option off or set up the rangefinder.",
   "Лише з далекоміром на FC (RNGFND1_*): без нього FC сяде на першій точці.": "Only with a rangefinder on the FC (RNGFND1_*): without one the FC lands at the first waypoint.",
+  " від носа": " of the nose",
+  "Компас нездоровий — калібруй до зльоту.": "Compass unhealthy — calibrate before takeoff.",
+  "Поле задалеко: на дорогу туди й назад не вистачить АКБ.": "Field too far: the battery won't cover the way there and back.",
+  "Виліт {0} з {1}": "Sortie {0} of {1}",
+  "Задовгий виліт — точність VIO не гарантована.": "Sortie too long — VIO accuracy not guaranteed.",
+  "Галси закороткі для {0} м/с.": "Legs too short for {0} m/s.",
+  "FC тримає інший дім — перезавантаж FC на старті й залий місію ще раз.": "The FC holds another home — reboot the FC at the start point and upload again.",
+  "Дім у FC не записано — залий місію ще раз.": "Home not written to the FC — upload the mission again.",
+  "Дім у FC не збігається з цим — залий місію ще раз.": "The FC's home differs from this one — upload the mission again.",
+  "Постав дім.": "Set home.",
+  "Постав дім там, де дрон стоятиме на старті — решту FMP зробить сам.": "Set home where the drone will stand at takeoff — FMP does the rest.",
 };
 
 // ---- dynamic user-facing strings (messages / statuses / stats labels) ----

@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.100";
+  const APP_VERSION = "2.5.101";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -5837,18 +5837,18 @@
     if (h && h.lat != null) {
       vioHome = h; vioOriginResult = null;
       try { localStorage.setItem(VIO_KEY, JSON.stringify(vioHome)); } catch (e) {}
-      if ($("vio-home")) $("vio-home").value = vioHome.lat.toFixed(7) + ", " + vioHome.lng.toFixed(7);
       appLog("vio: home restored for the field");
     }
   }
   function vioOn() { return !!($("vio-mode") && $("vio-mode").checked); }
-  function vioTerrain() { return vioOn() && !!($("vio-terrain") && $("vio-terrain").checked); }
-  function vioNum(id, dflt) { const v = parseFloat($(id) && $(id).value); return v > 0 ? v : dflt; }
+  // Relative altitude, as every VIO flight so far flew; the terrain frame stays in the code
+  // (and needs a rangefinder) but is not a pilot setting (owner, 04.11: only "set home").
+  function vioTerrain() { return false; }
   // Time / energy model inputs (#56): the flight-time model of ardu-gps-denied, × Ah/min.
   function vioModel() {
     return { speed: Math.max(parseFloat($("speed").value) || 0, 0.5),
       takeoffAlt: Math.max(parseFloat($("alt").value) || 0, 2),
-      packAh: vioNum("vio-pack", 8.0), ahPerMin: vioNum("vio-ahmin", 0.71) };
+      packAh: 8.0, ahPerMin: 0.71 };   // 6S 8 Ah Li-ion, measured at 13 m/s (ardu-gps-denied energy.py)
   }
   const VIO_PACK_BUDGET = 0.8;     // a sortie may use up to 80 % of the pack (owner, 02.11)
   // ---- sorties (#60): a field over 80 % of the pack is split by legs; FMP keeps which are done.
@@ -5929,7 +5929,6 @@
       const all = vioHomes(); all[currentFieldName] = vioHome;
       try { localStorage.setItem(VIO_HOMES, JSON.stringify(all)); } catch (e) {}
     }
-    if ($("vio-home")) $("vio-home").value = vioHome.lat.toFixed(7) + ", " + vioHome.lng.toFixed(7);
     appLog("vio: home set (" + why + ")");     // OPSEC: no coordinates in the log
     vioRender();
   }
@@ -5953,7 +5952,7 @@
     if (typeof _mavLink !== "undefined" && _mavLink) _mavLink.origin_watch = vioOn();
     if (!vioOn() || !vioHome) {
       vioClearMap();
-      if (vioOn() && $("vio-info")) $("vio-info").textContent = t("Дім не поставлено.");
+      if (vioOn() && $("vio-info")) $("vio-info").textContent = t("Постав дім.");
       return;
     }
     const s = (mavConnected && lastStatus) ? lastStatus : null;
@@ -5970,110 +5969,48 @@
         vioHomeMarker.setIcon(vioArrowIcon(hdg)); vioHomeMarker._hdg = hdg;
       }
     }
+    // Only what the pilot acts on: where the field is, what one pack flies, and problems.
+    // Everything else (profile, speed, sorties, checks) FMP does by itself (owner, 04.11).
+    const km = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + t(" км") : Math.round(m) + t(" м"));
     const lines = [];
     const ring = boundaryFromPolygon();
     const near = ring ? VIO.nearestOnRing(vioHome.lat, vioHome.lng, ring) : null;
-    let fieldBrg = null;
     if (near) {
-      fieldBrg = VIO.bearingDeg(vioHome.lat, vioHome.lng, near.lat, near.lng);
-      lines.push(t("Поле: ") + Math.round(near.dist) + t(" м на ") + Math.round(fieldBrg) + "° (" +
-        VIO.compass8(fieldBrg) + t(") від дому"));
+      const fieldBrg = VIO.bearingDeg(vioHome.lat, vioHome.lng, near.lat, near.lng);
+      let f = t("Поле: ") + km(near.dist) + ", " + VIO.compass8(fieldBrg);
+      if (hdg != null) f += " · " + t(VIO.sideWord(VIO.relativeDeg(fieldBrg, hdg))) + t(" від носа");
+      lines.push(f);
       const pts = [ll, [near.lat, near.lng]];
       if (!vioLine) vioLine = L.polyline(pts, { color: "#1e88e5", weight: 2, dashArray: "4 6" }).addTo(map);
       else vioLine.setLatLngs(pts);
-    } else {
-      lines.push(t("Поле ще не задано."));
-      if (vioLine) { map.removeLayer(vioLine); vioLine = null; }
-    }
-    if (s && s.mag_ok != null) {
-      lines.push(s.mag_ok ? "✅ " + t("Компас здоровий.")
-        : "⚠️ " + t("Компас нездоровий — без GPS курс лише з нього: калібрування (А3) до зльоту."));
-    }
-    if (hdg != null) {
-      let nose = t("Ніс дрона: ") + Math.round(hdg) + "° (" + VIO.compass8(hdg) + ")";
-      if (fieldBrg != null) {
-        const rel = VIO.relativeDeg(fieldBrg, hdg);
-        nose += t(" — поле ") + t(VIO.sideWord(rel)) + (Math.abs(rel) > 20 && Math.abs(rel) < 160
-          ? t(" під ") + Math.round(Math.abs(rel)) + "°" : "");
-      }
-      lines.push(nose);
-    } else {
-      lines.push(t("Ніс дрона: невідомо (немає звʼязку з FC)."));
-    }
-    const tol = parseFloat($("vio-tol") && $("vio-tol").value) || 40;
-    const cal = !!($("vio-calibrated") && $("vio-calibrated").checked);
-    const r = VIO.reachM(tol, cal);
+    } else if (vioLine) { map.removeLayer(vioLine); vioLine = null; }
+    if (s && s.mag_ok === false) lines.push("⚠️ " + t("Компас нездоровий — калібруй до зльоту."));
     const cur = vioCurrentSortie(), so = vioSorties();
     const flyRoute = cur ? cur.route : lastRoute;     // a sortie is what one pack flies
-    if (flyRoute && flyRoute.length) {
-      const sp = VIO.routeSpan(vioHome, flyRoute);
-      const fly = 2 * sp.farthest + sp.length;    // out, the passes, back: the anchor never resets
-      lines.push(t("Маршрут: найдальша точка ") + Math.round(sp.farthest) + t(" м від дому, з дорогою туди й назад ~") +
-        Math.round(fly) + t(" м."));
-      // #55: the line from this aircraft's flights decides; MARS-LVIG stays for reference.
-      const mr = VIO.measuredReachM(tol);
-      const okM = fly <= mr.reach;
-      lines.push((okM ? "✅ " : "⚠️ ") + t("Досяжність за польотами апарата (найгірше ") +
-        (100 * mr.share).toFixed(1) + t(" % шляху) при допуску ") + tol + t(" м: ~") + (mr.reach / 1000).toFixed(1) + t(" км") +
-        (mr.beyond ? t(" (понад найдовший виміряний політ ") + (VIO.measuredMaxPath() / 1000).toFixed(1) + t(" км)") : "") +
-        (okM ? "" : t(" — маршрут довший, точність не гарантована.")));
-      lines.push(t("Довідково, публічні дані MARS-LVIG") + (cal ? "" : t(" (без калібрування)")) + ": " +
-        (r.reach === 0 ? t("недосяжно навіть 100 м") : (r.beyond ? t("понад виміряне") : Math.round(r.reach) + t(" м"))) + ".");
-      // #56: time and charge, one sortie at a time.
+    if (so === null && lastRoute && lastRoute.length > 1) {
+      lines.push("⚠️ " + t("Поле задалеко: на дорогу туди й назад не вистачить АКБ."));
+    } else if (flyRoute && flyRoute.length) {
       const m = vioModel();
       const mt = VIO.missionTime(vioHome, flyRoute, m), en = VIO.energy(mt.total_s, m.ahPerMin, m.packAh);
-      const over = en.pct > 100 * VIO_PACK_BUDGET;
-      lines.push((over ? "⚠️ " : "✅ ") + (cur ? tf(t("Виліт {0} з {1}: "), cur.idx + 1, cur.n) : t("Політ: ")) +
-        fmtDuration(mt.total_s) + ", ~" + en.ah.toFixed(1) + t(" А·год = ") + Math.round(en.pct) + t(" % АКБ") +
-        (over ? t(" — понад 80 %.") : "."));
-      // #7 / #56: where the route ends — a BATT_CRT LAND there lands in the field.
-      const last = flyRoute[flyRoute.length - 1];
-      const endD = VIO.haversineM(vioHome.lat, vioHome.lng, last[0], last[1]);
-      lines.push((over && endD > 100 ? "⚠️ " : "") + t("Кінець маршруту: ") + Math.round(endD) + t(" м від дому") +
-        (over && endD > 100 ? t(" — якщо спрацює BATT_CRT (LAND), дрон сяде там, у полі.") : "."));
-      // #57: passes too short to reach the set speed.
-      const sl = VIO.shortLegs(flyRoute, m.speed, parseFloat($("spacing").value) || 20);
-      if (sl.passes) lines.push(sl.short
-        ? "⚠️ " + tf(t("{0} з {1} галсів коротші за {2} м — {3} м/с на них не набирається (розгін і гальмування)."),
-            sl.short, sl.passes, Math.round(sl.need), m.speed)
-        : "✅ " + tf(t("Галси довші за {0} м — {1} м/с набирається."), Math.round(sl.need), m.speed));
-    }
-    // #60: sorties.
-    if (so === null && lastRoute && lastRoute.length > 1 && vioHome)
-      lines.push("⚠️ " + t("Навіть одна точка маршруту не влазить у 80 % АКБ — перевір АКБ і витрату."));
-    else if (so && so.length > 1) {
-      const d = vioSortieDone();
-      lines.push(d >= so.length ? "✅ " + tf(t("Усі {0} вильоти поля пройдено."), so.length)
-        : tf(t("Поле ділиться на {0} вильоти (кожен ≤ 80 % АКБ). Пройдено: {1}. Залити — виліт {2}: точки {3}–{4} з {5}."),
-            so.length, d, d + 1, so[Math.min(d, so.length - 1)].from + 1, so[Math.min(d, so.length - 1)].to + 1, lastRoute.length));
+      const d = so && so.length > 1 ? vioSortieDone() : 0;
+      if (so && so.length > 1 && d >= so.length) lines.push("✅ " + tf(t("Усі {0} вильоти поля пройдено."), so.length));
+      else lines.push("✅ " + (cur ? tf(t("Виліт {0} з {1}"), cur.idx + 1, cur.n) : t("Політ")) + " · " +
+        fmtDuration(mt.total_s) + " · " + Math.round(en.pct) + t(" % АКБ"));
+      const sp = VIO.routeSpan(vioHome, flyRoute);
+      if (2 * sp.farthest + sp.length > VIO.measuredReachM(40).reach)
+        lines.push("⚠️ " + t("Задовгий виліт — точність VIO не гарантована."));
+      if (VIO.shortLegs(flyRoute, m.speed, parseFloat($("spacing").value) || 20).short)
+        lines.push("⚠️ " + tf(t("Галси закороткі для {0} м/с."), m.speed));
     }
     if ($("vio-sortie-reset")) $("vio-sortie-reset").style.display = (so && so.length > 1 && vioSortieDone() > 0) ? "" : "none";
-    // #59: the companion's messages.
-    for (const x of vioFreshMsgs(s)) lines.push((x.alarm ? "⚠️ " : "") + x.text + " (" + Math.round(x.age) + t(" с тому)"));
-    if (vioOriginResult) {
-      const o = vioOriginResult;
-      if (o.ok) lines.push("✅ " + t("Дім записано у FC як origin — Pi візьме його сам."));
-      else if (o.held) lines.push("⚠️ " + t("FC уже тримає інший origin за ") +
-        Math.round(VIO.haversineM(vioHome.lat, vioHome.lng, o.held[0], o.held[1])) +
-        t(" м — перезавантаж FC на точці старту й залий місію ще раз."));
-      else lines.push("⚠️ " + t("Origin у FC не записано: ") + (o.error || ""));
-    }
-    if (s && s.origin_lat != null) {
-      const d = VIO.haversineM(vioHome.lat, vioHome.lng, s.origin_lat, s.origin_lon);
-      lines.push((d <= VIO.ORIGIN_TOL_M ? "✅ " : "⚠️ ") + t("Origin на FC: ") + Math.round(d) + t(" м від дому") +
-        (d <= VIO.ORIGIN_TOL_M ? "" : t(" — vio_onboard відмовить (код 16): перевір точку старту й --origin.")));
-    } else if (s) {
-      lines.push(t("Origin на FC ще не задано — його ставить Pi на старті vio_onboard."));
-    }
+    // Origin: only when something is wrong (the companion's messages are in the HUD).
+    if (vioOriginResult && !vioOriginResult.ok) lines.push("⚠️ " + (vioOriginResult.held
+      ? t("FC тримає інший дім — перезавантаж FC на старті й залий місію ще раз.")
+      : t("Дім у FC не записано — залий місію ще раз.")));
+    else if (s && s.origin_lat != null &&
+             VIO.haversineM(vioHome.lat, vioHome.lng, s.origin_lat, s.origin_lon) > VIO.ORIGIN_TOL_M)
+      lines.push("⚠️ " + t("Дім у FC не збігається з цим — залий місію ще раз."));
     if ($("vio-info")) $("vio-info").innerHTML = lines.map(esc).join("<br>");
-  }
-  if ($("vio-home")) {
-    if (vioHome) $("vio-home").value = vioHome.lat.toFixed(7) + ", " + vioHome.lng.toFixed(7);
-    $("vio-home").addEventListener("change", () => {
-      const ll = VIO.parseLatLon($("vio-home").value);
-      if (ll) vioSetHome(ll, "typed");
-      else setMsg(t("Координати дому: два числа «широта, довгота»."), "error");
-    });
   }
   if ($("vio-set-home")) $("vio-set-home").addEventListener("click", () => {
     setMsg(t("Клікни на мапі точку старту дрона."), null);
@@ -6085,18 +6022,11 @@
     const c = JSON.parse(localStorage.getItem(VIO_CFG) || "null");
     if (c) {
       if ($("vio-mode")) $("vio-mode").checked = !!c.on;
-      if ($("vio-tol") && c.tol) $("vio-tol").value = c.tol;
-      if ($("vio-calibrated")) $("vio-calibrated").checked = !!c.cal;
-      if ($("vio-terrain")) $("vio-terrain").checked = !!c.terrain;
-      if ($("vio-pack") && c.pack) $("vio-pack").value = c.pack;
-      if ($("vio-ahmin") && c.ahmin) $("vio-ahmin").value = c.ahmin;
     }
   } catch (e) {}
-  ["vio-mode", "vio-tol", "vio-calibrated", "vio-terrain", "vio-pack", "vio-ahmin"].forEach((id) => {
+  ["vio-mode"].forEach((id) => {
     if ($(id)) $(id).addEventListener("change", () => {
-      try { localStorage.setItem(VIO_CFG, JSON.stringify({ on: vioOn(), tol: $("vio-tol").value,
-        cal: $("vio-calibrated").checked, terrain: !!($("vio-terrain") && $("vio-terrain").checked),
-        pack: $("vio-pack") && $("vio-pack").value, ahmin: $("vio-ahmin") && $("vio-ahmin").value })); } catch (e) {}
+      try { localStorage.setItem(VIO_CFG, JSON.stringify({ on: vioOn() })); } catch (e) {}
       vioRender();
       updateMissionStatus();
     });
