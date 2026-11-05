@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.102";
+  const APP_VERSION = "2.5.103";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -5841,9 +5841,14 @@
     }
   }
   function vioOn() { return !!($("vio-mode") && $("vio-mode").checked); }
-  // Relative altitude, as every VIO flight so far flew; the terrain frame stays in the code
-  // (and needs a rangefinder) but is not a pilot setting (owner, 04.11: only "set home").
-  function vioTerrain() { return false; }
+  // GPS-denied (VIO) missions fly the TERRAIN frame (10): the legs and the end over home at the set
+  // height above the ground by the FC's rangefinder, as the ardu-gps-denied missions fly (rfnd40).
+  // Owner, field 05.11: «зроби щоб fmp літав за далекоміром — з vio». In the relative frame (3) the
+  // M19 upload flew 40 m above HOME, 28-34 m over a field higher than home: the crossing fix registered
+  // 0 of 39 tries and home was not found (ardu-gps-denied ERROR_BUDGET §3.1.391). Still not a pilot
+  // setting (04.11: only "set home"); GPS missions keep the relative frame; with no rangefinder on the
+  // FC the upload is refused (RNGFND1_TYPE 0 -> Terrain Unavailable -> LAND at the first waypoint).
+  function vioTerrain() { return vioOn(); }
   // Time / energy model inputs (#56): the flight-time model of ardu-gps-denied, × Ah/min.
   function vioModel() {
     return { speed: Math.max(parseFloat($("speed").value) || 0, 0.5),
