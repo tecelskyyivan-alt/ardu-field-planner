@@ -185,6 +185,9 @@
       origin_lat: null, origin_lon: null,   // EKF origin (GPS_GLOBAL_ORIGIN) — the GPS-denied frame
       // The companion's STATUSTEXT by family (VIO / VIOSUP / MISSION / VIOFS): {text, ts} (#59).
       vio_msgs: {},
+      // Crossing fixes the companion applied since arming ("VIO: crossing fix 4.3 m (+1.2 N -4.1 E)"; a refused one,
+      // "... REJECTED > 9.0 m", is not counted): field 05.11 — seven went by unseen, vio_msgs keeps only the newest.
+      crossing: { n: 0, last_m: null, ts: null },
       // FC reboots seen this connection (time_boot_ms went backwards) — the app re-verifies (#58).
       boot_count: 0,
       // GPS quality + velocity — for the anti-jamming / anti-spoofing guard.
@@ -362,7 +365,9 @@
           this._tsys = m.sysid; this._tcomp = m.compid; this._apSeen = true;
           tl.autopilot = f.autopilot;   // 3 = ArduPilot, 0 = INAV/generic — drives dual-stack
           tl.vehicle_type = f.type;     // 1 = plane, 2 = quad… selects the mode table
-          tl.armed = !!(f.base_mode & 0x80);   // MAV_MODE_FLAG_SAFETY_ARMED
+          const armedNow = !!(f.base_mode & 0x80);   // MAV_MODE_FLAG_SAFETY_ARMED
+          if (armedNow && tl.armed === false) tl.crossing = { n: 0, last_m: null, ts: null };   // a new flight
+          tl.armed = armedNow;
           tl.mode = modeName(f.custom_mode, f.type);
           // Keep asking for HOME until we have it (first ask precedes GPS lock).
           if (tl.home_lat == null && !this._busy && Date.now() - this._lastHomeReq > 8000) {
@@ -433,6 +438,11 @@
         tl.last_text = f.text;
         const fam = vioFamily(f.text);
         if (fam) (tl.vio_msgs || (tl.vio_msgs = {}))[fam] = { text: String(f.text).replace(/\0+$/, ""), ts: Date.now() };
+        const cf = /^VIO: crossing fix ([\d.]+) m \(/.exec(String(f.text || ""));
+        if (cf) {
+          const c = tl.crossing || { n: 0 };
+          tl.crossing = { n: c.n + 1, last_m: +cf[1], ts: Date.now() };
+        }
       }
     }
 
