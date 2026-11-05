@@ -334,5 +334,44 @@ console.log("\n== companion STATUSTEXT (#59) and FC reboot (#58) ==");
   clearInterval(hb); link.disconnect();
 }
 
+console.log("\n== ArduPilot 4.7 over ELRS: plain MISSION_REQUEST, ~1 s round trip, ACK 13 on a stale item ==");
+{
+  // Field 05.11 (FMP log 12:01, Mac via the backpack): COUNT 17 -> first REQUEST after
+  // 1.06 s -> MISSION_ACK 13 after 4 s, upload failed. ArduPilot 4.7 always asks with a
+  // plain MISSION_REQUEST (MissionItemProtocol.cpp:370), answers an item whose seq is
+  // not the one it asked for with ACK INVALID_SEQUENCE (:272) and KEEPS the transfer,
+  // re-asking every 1 s (:406). FMP's 0.8 s re-send of the last item lands as stale on
+  // a 1 s round trip; FMP took that ACK as the end.
+  const half = 500;                                   // one way; round trip 1 s
+  const veh = MAVLINK.createParser();
+  let n = 0, expect = 0, lastReq = 0, acks13 = 0, done = false, items = 0;
+  const t = { ondata: null, close() {} };
+  const send = (name, f) => setTimeout(() => { const b = MAVLINK.encode(name, f, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); }, half);
+  const req = () => { lastReq = Date.now(); send("MISSION_REQUEST", { target_system: 255, target_component: 0, seq: expect, mission_type: 0 }); };
+  const ackT = (type) => send("MISSION_ACK", { target_system: 255, target_component: 0, type, mission_type: 0 });
+  t.write = (bytes) => setTimeout(() => {
+    for (const m of veh.push(bytes)) {
+      if (m.name === "MISSION_COUNT") { n = m.fields.count; expect = 0; done = false; req(); }
+      else if ((m.name === "MISSION_ITEM" || m.name === "MISSION_ITEM_INT") && !done) {
+        items++;
+        if (m.fields.seq !== expect) { acks13++; ackT(13); continue; }
+        expect++;
+        if (expect < n) req(); else { done = true; ackT(0); }
+      }
+    }
+  }, half);
+  const hb = setInterval(() => {
+    send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 0, system_status: 3, mavlink_version: 3 });
+    if (n && !done && Date.now() - lastReq > 1000) req();      // ArduPilot's own re-request
+  }, 200);
+  const its = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps.slice(0, 10), 30, true, 7);
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const up = await link.uploadMission(its, 60000);
+  check(`[ap47] upload ok over a 1 s round trip (stale items ACKed 13: ${acks13})`, up.ok === true && done);
+  check("[ap47] the vehicle stored every item", expect === its.length);
+  clearInterval(hb); link.disconnect();
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);
