@@ -5855,6 +5855,9 @@
   const VIO_SORTIES = "fmp_vio_sorties";   // {key, done}
   function vioSorties() {
     if (!vioReady || !vioOn() || !vioHome || !lastRoute || lastRoute.length < 2) return null;
+    // Split only when the pilot asked for it with «Продовжувати місію після заміни батареї»;
+    // otherwise the whole field is one sortie, whatever the energy model says (owner, 05.11).
+    if (!resumeOn()) return [{ from: 0, to: lastRoute.length - 1, route: lastRoute }];
     const m = vioModel(), sp = parseFloat($("spacing").value) || 20;
     const key = routeSig(lastRoute) + "|" + vioHome.lat.toFixed(6) + "," + vioHome.lng.toFixed(6) + "|" +
       [m.speed, m.takeoffAlt, m.packAh, m.ahPerMin, sp].join(",");
@@ -6031,6 +6034,7 @@
       updateMissionStatus();
     });
   });
+  if ($("mission-resume")) $("mission-resume").addEventListener("change", () => { if (vioOn()) { vioRender(); updateMissionStatus(); } });
   if ($("vio-sortie-reset")) $("vio-sortie-reset").addEventListener("click", () => {
     if (!confirm(t("Почати вильоти поля спочатку (виліт 1)?"))) return;
     vioSortieSetDone(0); vioRender(); updateMissionStatus();
