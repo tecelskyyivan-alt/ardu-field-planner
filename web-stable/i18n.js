@@ -411,6 +411,8 @@ Object.assign(window.FMP_TR, {
   "Відстань": "Distance",
   "Час": "Time",
   "Батарея": "Battery",
+  "Поправки": "Fixes",
+  "{0}, остання {1} м": "{0}, last {1} m",
   "Сер. швидкість": "Avg speed",
   "з початку години": "This hour",
   "з початку дня": "Today",

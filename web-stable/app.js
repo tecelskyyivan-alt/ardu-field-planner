@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.103";
+  const APP_VERSION = "2.5.104";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -4596,7 +4596,7 @@
     ["battery", t("Батарея")], ["alt", "Висота"], ["speed", "Швидкість"], ["wp", "Точка"],
     ["progress", "Прогрес"], ["tonext", "До точки"], ["remaining", "Лишилось"],
     ["eta", "ETA"], ["finish", "До завершення"], ["land", "До посадки"], ["message", "Повідомл."],
-    ["vio", "VIO"],
+    ["vio", "VIO"], ["crossing", t("Поправки")],
   ];
   let _hud = null;
   // ---- on-map telemetry overlay (#11): same data as the pinned notification, single source
@@ -4707,6 +4707,12 @@
     const vm = vioFreshMsgs(s);
     hudSet(rows, "vio", vm.map((x) => x.text).join(" · "),
       vm.some((x) => x.alarm) ? "#ff7b72" : null, vm.length > 0);
+    // Crossing fixes since arming, in VIO mode (field 05.11: seven went by unseen; the VIO row keeps only the newest).
+    // Shown only once the companion's texts reach us at all: with the FC's MAV3_OPTIONS 2 (05.11) they do not, and a
+    // "0" there would read as "no fixes" when there may have been several.
+    const cx = s.crossing;
+    hudSet(rows, "crossing", cx && cx.n ? tf(t("{0}, остання {1} м"), cx.n, cx.last_m.toFixed(1)) : "0",
+      null, vioOn() && !!cx && Object.keys(s.vio_msgs || {}).length > 0);
   }
 
   // Live mission countdowns ("до завершення" / "до посадки") tick smoothly between

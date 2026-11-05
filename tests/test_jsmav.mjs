@@ -334,6 +334,38 @@ console.log("\n== companion STATUSTEXT (#59) and FC reboot (#58) ==");
   clearInterval(hb); link.disconnect();
 }
 
+console.log("\n== crossing fixes counted since arming (field 05.11: seven went by unseen) ==");
+{
+  const veh = MAVLINK.createParser();
+  const t = { ondata: null, close() {}, write(b) { veh.push(b); } };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  const link = new MAV_LINK.MavLink();
+  let armed = 0, boot = 50000;
+  const hb = setInterval(() => {
+    send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: armed, custom_mode: 4, system_status: 3, mavlink_version: 3 });
+    send("GLOBAL_POSITION_INT", { time_boot_ms: boot, lat: 494900000, lon: 240100000, relative_alt: 0, hdg: 27000 });
+    boot += 200;
+  }, 100);
+  await link.connect(t);
+  await sleep(250);
+  armed = 0x80;
+  await sleep(250);
+  send("STATUSTEXT", { severity: 6, text: "VIO: crossing fix 4.3 m (+1.2 N -4.1 E)" });
+  send("STATUSTEXT", { severity: 6, text: "VIO: crossing fix 12.3 m REJECTED > 9.0 m" });
+  send("STATUSTEXT", { severity: 6, text: "VIO: crossing fix 7.1 m (-3.0 N +6.4 E)" });
+  await sleep(250);
+  const c1 = link.status().crossing;
+  check("[crossing] two applied, the refused one not counted; last 7.1 m", c1.n === 2 && c1.last_m === 7.1);
+  armed = 0;
+  await sleep(250);
+  check("[crossing] disarming keeps the count for the debrief", link.status().crossing.n === 2);
+  armed = 0x80;
+  await sleep(250);
+  const c2 = link.status().crossing;
+  check("[crossing] the next arming starts a new count", c2.n === 0 && c2.last_m === null);
+  clearInterval(hb); link.disconnect();
+}
+
 console.log("\n== ArduPilot 4.7 over ELRS: plain MISSION_REQUEST, ~1 s round trip, ACK 13 on a stale item ==");
 {
   // Field 05.11 (FMP log 12:01, Mac via the backpack): COUNT 17 -> first REQUEST after
