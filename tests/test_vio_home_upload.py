@@ -72,27 +72,30 @@ check("#52 export and upload: same rows (command, frame, lat, lon, alt)",
           and abs(float(r[9]) - it["lon"]) < 1e-7 and abs(float(r[10]) - it["alt"]) < 1e-5
           for r, it in zip(rows, up)))
 cmds = [int(r[3]) for r in rows]
-check("#54 VIO profile: home, TAKEOFF, LOITER 5, SPEED, legs, WP home, LOITER 25, LAND",
-      cmds == [16, 22, 19, 178, 16, 16, 16, 19, 21])
-check("#54 holds are 5 s and 25 s, over home", float(rows[2][4]) == 5 and float(rows[7][4]) == 25
-      and abs(float(rows[7][8]) - 49.5275) < 1e-7 and abs(float(rows[8][9]) - 24.004) < 1e-7)
-check("#54 back over home at mission altitude", float(rows[6][10]) == 30.0 and abs(float(rows[6][8]) - 49.5275) < 1e-7)
-check("#53 DO_CHANGE_SPEED: type 1 (ground), the panel's speed", float(rows[3][4]) == 1 and float(rows[3][5]) == 12)
+check("#54 VIO profile: home, TAKEOFF, LOITER 5, LOITER 105 m, LOITER back, SPEED, legs, WP home, LOITER 25, LAND",
+      cmds == [16, 22, 19, 19, 19, 178, 16, 16, 16, 19, 21])
+check("#54 holds are 5 s and 25 s, over home", float(rows[2][4]) == 5 and float(rows[9][4]) == 25
+      and abs(float(rows[9][8]) - 49.5275) < 1e-7 and abs(float(rows[10][9]) - 24.004) < 1e-7)
+check("climb over home to 105 m (home keys to 100 m, Ivan 05.11), then back to 30 m before the legs",
+      float(rows[3][10]) == 105.0 and float(rows[3][4]) == 3 and int(rows[3][2]) == 3
+      and abs(float(rows[3][8]) - 49.5275) < 1e-7 and float(rows[4][10]) == 30.0 and abs(float(rows[4][9]) - 24.004) < 1e-7)
+check("#54 back over home at mission altitude", float(rows[8][10]) == 30.0 and abs(float(rows[8][8]) - 49.5275) < 1e-7)
+check("#53 DO_CHANGE_SPEED: type 1 (ground), the panel's speed", float(rows[5][4]) == 1 and float(rows[5][5]) == 12)
 g = wpl_rows(a.export_files("waypoints")["files"][0]["content"])
 check("#53 GPS export carries the speed too, ends in RTL; row 0 = centroid as before",
       [int(r[3]) for r in g] == [16, 22, 178, 16, 16, 20] and abs(float(g[0][8]) - 49.60) < 1e-7)
 check("no speed -> no DO_CHANGE_SPEED row (file flies the FC's)",
       178 not in [int(r[3]) for r in wpl_rows(state_api(0).export_files("waypoints")["files"][0]["content"])])
 t = wpl_rows(a.export_files({"fmt": "waypoints", "vio_home": pad, "terrain": True})["files"][0]["content"])
-check("terrain: legs + end over home in frame 10, takeoff/land relative (3)",
-      [int(r[2]) for r in t] == [0, 3, 3, 3, 10, 10, 10, 10, 3])
+check("terrain: legs + end over home in frame 10, takeoff, climb and land relative (3)",
+      [int(r[2]) for r in t] == [0, 3, 3, 3, 3, 3, 10, 10, 10, 10, 3])
 pl = _json.loads(a.export_files({"fmt": "plan", "vio_home": pad, "terrain": True})["files"][0]["content"])
 m = pl["mission"]
 check(".plan: plannedHome = VIO home, same command list as the file (minus row 0)",
       abs(m["plannedHomePosition"][0] - 49.5275) < 1e-9 and
       [it["command"] for it in m["items"]] == cmds[1:])
 check(".plan: terrain items AltitudeMode 4, global mixed (0)",
-      m["globalPlanAltitudeMode"] == 0 and m["items"][3]["AltitudeMode"] == 4 and m["items"][0]["AltitudeMode"] == 1)
+      m["globalPlanAltitudeMode"] == 0 and m["items"][5]["AltitudeMode"] == 4 and m["items"][0]["AltitudeMode"] == 1)
 fl = a.export_files({"fmt": "waypoints", "vio_home": pad,
                      "flights": [[[49.501, 24.0], [49.502, 24.0]], [[49.503, 24.0], [49.504, 24.0]]]})
 check("#60 sorties: one file each, each with the VIO profile",
@@ -101,12 +104,12 @@ check("#60 sorties: one file each, each with the VIO profile",
 ml.LINK = FakeLink({})
 a = state_api()
 a.mav_upload_mission({"vio_home": pad, "terrain": True, "verify": False})
-check("upload with terrain -> frame 10 on the legs", [it["frame"] for it in ml.LINK.items][4] == 10)
+check("upload with terrain -> frame 10 on the legs", [it["frame"] for it in ml.LINK.items][6] == 10)
 ml.LINK = FakeLink({})
 a = state_api()
 r = a.mav_upload_mission({"vio_home": pad, "route": [[49.503, 24.0]], "verify": False})
 check("#60 desktop upload of one sortie: only its points between the VIO start and end",
-      [(it["command"], round(it["lat"], 3)) for it in ml.LINK.items][4:6] == [(16, 49.503), (16, 49.528)]
+      [(it["command"], round(it["lat"], 3)) for it in ml.LINK.items][6:8] == [(16, 49.503), (16, 49.528)]
       and r["tail"] == 3 and r["vio"] is True)
 r = state_api().mav_upload_mission({"verify": False})
 check("GPS upload reports tail 1 (RTL)", r["tail"] == 1 and r["vio"] is False)

@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.104";
+  const APP_VERSION = "2.5.105";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2974,7 +2974,7 @@
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
   function missionLead() {
-    return 2 + (vioHomeForUpload() ? 1 : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);   // + VIO loiter 5 s
+    return 2 + (vioHomeForUpload() ? 3 : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);   // + VIO: 5 s, 105 m, back
   }
   // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
   // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).

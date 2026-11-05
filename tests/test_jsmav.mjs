@@ -283,15 +283,18 @@ console.log("\n== GPS-denied (VIO) profile: same layout as backend/mission.py, v
 {
   const two = [[49.501, 24.0], [49.502, 24.0]];
   const v = MAV_LINK.buildMissionItems([49.5275, 24.004, 0], 30, two, 30, true, 12, { vio: true });
-  check("[vio] commands = home, TAKEOFF, LOITER 5, SPEED, legs, WP home, LOITER 25, LAND (= test_vio_home_upload.py)",
-    JSON.stringify(v.map((i) => i.command)) === JSON.stringify([16, 22, 19, 178, 16, 16, 16, 19, 21]));
-  check("[vio] holds 5 / 25 s, LAND on home", v[2].p1 === 5 && v[7].p1 === 25 && v[8].lat === 49.5275 && v[8].lon === 24.004);
+  check("[vio] commands = home, TAKEOFF, LOITER 5, LOITER 105 m, LOITER back, SPEED, legs, WP home, LOITER 25, LAND (= test_vio_home_upload.py)",
+    JSON.stringify(v.map((i) => i.command)) === JSON.stringify([16, 22, 19, 19, 19, 178, 16, 16, 16, 19, 21]));
+  check("[vio] holds 5 / 25 s, LAND on home", v[2].p1 === 5 && v[9].p1 === 25 && v[10].lat === 49.5275 && v[10].lon === 24.004);
+  check("[vio] up over home to 105 m (home keys to 100 m, Ivan 05.11), then back to the mission height before the legs",
+    v[3].alt === 105 && v[3].p1 === 3 && v[3].frame === 3 && v[3].lat === 49.5275 && v[3].lon === 24.004 &&
+    v[4].alt === 30 && v[4].frame === 3 && v[4].lat === 49.5275 && v[4].lon === 24.004);
   const tv = MAV_LINK.buildMissionItems([49.5275, 24.004, 0], 30, two, 30, true, 12, { vio: true, terrain: true });
-  check("[vio] terrain: frames 0,3,3,3,10,10,10,10,3",
-    JSON.stringify(tv.map((i) => i.frame)) === JSON.stringify([0, 3, 3, 3, 10, 10, 10, 10, 3]));
+  check("[vio] terrain: frames 0,3,3,3,3,3,10,10,10,10,3 (the climb over home stays relative)",
+    JSON.stringify(tv.map((i) => i.frame)) === JSON.stringify([0, 3, 3, 3, 3, 3, 10, 10, 10, 10, 3]));
   const sh = MAV_LINK.missionShape(12, true, { vio: true }), sg = MAV_LINK.missionShape(0, true, {});
-  check("[vio] missionShape lead/tail = items around the route (VIO 4/3, GPS no speed 2/1)",
-    sh.lead === 4 && sh.tail === 3 && v.length === sh.lead + two.length + sh.tail && sg.lead === 2 && sg.tail === 1);
+  check("[vio] missionShape lead/tail = items around the route (VIO 6/3, GPS no speed 2/1)",
+    sh.lead === 6 && sh.tail === 3 && v.length === sh.lead + two.length + sh.tail && sg.lead === 2 && sg.tail === 1);
   // the FC reports terrain as frame 11 (_INT) — still the same mission
   const stored = toStored(tv).map((e) => (e.frame === 10 ? Object.assign({}, e, { frame: 11 }) : e));
   const t = makeMissionVehicle(stored);

@@ -18,6 +18,8 @@
   const CMD_LOITER_TIME = 19, CMD_LAND = 21, FRAME_TERRAIN = 10;
   // GPS-denied (VIO) profile holds, s — mirror backend/mission.py VIO_HOLD_START_S / _END_S.
   const VIO_HOLD_START_S = 5, VIO_HOLD_END_S = 25;
+  // Then up over home to 105 m and back down before the route (Ivan 05.11: always) — mirror VIO_KEY_TOP_M / _S.
+  const VIO_KEY_TOP_M = 105, VIO_KEY_TOP_S = 3;
   // #12p3: ArduPilot geofence storage (MAV_MISSION_TYPE_FENCE = 1) — polygon vertices only.
   const CMD_FENCE_INCLUSION = 5001, CMD_FENCE_EXCLUSION = 5002;   // MAV_CMD_NAV_FENCE_POLYGON_VERTEX_*
   const MISSION_TYPE_FENCE = 1;
@@ -107,7 +109,11 @@
         p1: p1 || 0, p2: p2 || 0, p3: p3 || 0, p4: p4 || 0, lat, lon, alt });
     add(FRAME_GLOBAL, CMD_WAYPOINT, home[0], home[1], home[2] || 0, 1);
     add(FRAME_GLOBAL_REL, CMD_TAKEOFF, home[0], home[1], takeoffAlt);
-    if (vio) add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, VIO_HOLD_START_S);
+    if (vio) {
+      add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, VIO_HOLD_START_S);
+      add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], VIO_KEY_TOP_M, 0, VIO_KEY_TOP_S);   // home keys to 100 m
+      add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, 1);               // the transit at mission height
+    }
     if (speed && speed > 0) add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0, 0, 0, 0, 1.0, speed, -1.0);
     for (const [lat, lon] of waypoints) add(wf, CMD_WAYPOINT, lat, lon, wpAlt);
     if (vio) {
@@ -121,7 +127,7 @@
   // the battery-swap resume index. Must match buildMissionItems.
   function missionShape(speed, rtl, opts) {
     const vio = !!(opts && opts.vio);
-    return { lead: 2 + (vio ? 1 : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
+    return { lead: 2 + (vio ? 3 : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
   }
 
   // INAV mission builder. INAV's MAVLink receiver (src/main/telemetry/mavlink.c,
