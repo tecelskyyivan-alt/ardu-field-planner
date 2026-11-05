@@ -612,7 +612,7 @@
                 if (onProgress) { try { onProgress(0, n); } catch (e) {} }
               }
             } else if (lastReqSeq >= 0 && Date.now() - lastResend > RESEND_GAP) {
-              // ArduPilot tolerates a duplicate/old item (ignores it) and re-emits its
+              // ArduPilot answers a duplicate/old item with ACK 13 (ignored above) and re-emits its
               // request, so re-sending the last requested item safely un-sticks a stall.
               sendItem(lastReqSeq, lastReqV1); lastResend = Date.now();
             }
@@ -628,6 +628,10 @@
           if ((m.fields.mission_type || 0) !== missionType) continue;
           if (m.name === "MISSION_ACK") {
             this._log("mission: ACK type " + m.fields.type);
+            // ArduPilot answers a STALE item (our re-send crossing its next request on a
+            // ~1 s ELRS round trip) with INVALID_SEQUENCE and KEEPS the transfer, re-asking
+            // in 1 s (MissionItemProtocol.cpp:272/:406). Not the end — field 05.11.
+            if (!isInav && m.fields.type === 13) continue;
             // wp_total is the MISSION (type 0) waypoint count, used all flight for progress/
             // completion. A fence (type 1, or any future non-0 mission_type) transfer ACKs
             // through this SAME handler — must never overwrite it with the fence's own vertex
@@ -656,6 +660,7 @@
           if (m && missionType !== 0 && !m.v2) return { ok: false, error: FENCE_V1_ERR };   // true v1 frame — see note above
           if (m && (m.fields.mission_type || 0) !== missionType) continue;   // cross-type — not ours
           if (m && m.name === "MISSION_ACK") {
+            if (!isInav && m.fields.type === 13) continue;   // stale item, see the main loop
             if (m.fields.type === 0) { if (missionType === 0) this._tlm.wp_total = n; return { ok: true, count: n }; }
             return { ok: false, error: this._rejectMission(m.fields.type) };
           }
