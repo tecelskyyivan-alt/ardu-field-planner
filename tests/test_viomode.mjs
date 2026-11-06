@@ -116,5 +116,41 @@ check("sorties cut after a pass end: each sortie has whole passes (even count, s
 check("sorties: one fits -> one", V.splitSorties(home, field, 1e6, o, 20).length === 1);
 check("sorties: budget below one point -> null", V.splitSorties(home, field, 10, o, 20) === null);
 
+
+// 2.5.106: the companion's warnings, newest first, and one beep per new one
+{
+  const now = 1_000_000;
+  const log = [
+    { text: "VIO READY 41wp 8.7km 61% 24.6V", sev: 6, ts: now - 50_000 },          // info: not a warning
+    { text: "VIO MISSION CHANGED since READY", sev: 4, ts: now - 40_000 },
+    { text: "PreArm: Throttle below failsafe", sev: 2, ts: now - 35_000 },          // the FC's own: not the companion
+    { text: "VIO: crossing fix 6.6 m (+1 N -6 E)", sev: 6, ts: now - 30_000 },
+    { text: "VIOSUP: LAND no integrated frame 1.5 s", sev: 6, ts: now - 20_000 },   // info severity, alarm word
+    { text: "VIO NOT READY: pack 21.5V < 24.9V", sev: 4, ts: now - 10_000 },
+    { text: "VIOFS: posVar 2.60 >= hold thr 2.5", sev: 4, ts: now - 700_000 },     // older than 10 min
+  ];
+  const w = V.vioWarnings(log, now, 600_000, 3);
+  check("warnings: companion families only, warning severity or an alarm word, newest first, 3 at most",
+    w.length === 3 && w[0].text.startsWith("VIO NOT READY") && w[1].text.startsWith("VIOSUP: LAND") &&
+    w[2].text.startsWith("VIO MISSION CHANGED"));
+  check("warnings: NOT READY, LAND and CHANGED are alarms", w.every((x) => x.alarm));
+  check("warnings: age in seconds", Math.abs(w[0].age - 10) < 1e-9);
+  check("warnings: an empty or missing log is no warning", V.vioWarnings(undefined, now, 600_000, 3).length === 0);
+  check("alarm word: READY alone is not one", !V.VIO_ALARM.test("VIO READY 41wp 8.7km"));
+
+  const a = { text: "VIO NOT READY: pack 21.5V < 24.9V", ts: 100_000 };
+  check("alert: the first warning beeps", V.vioAlertDue(a, null));
+  check("alert: the same message again (the next render) does not",
+    !V.vioAlertDue(a, { text: a.text, ts: a.ts }));
+  check("alert: the same text repeated 30 s later does not",
+    !V.vioAlertDue({ text: a.text, ts: 130_000 }, { text: a.text, ts: 100_000 }));
+  check("alert: ...after 2 min it beeps again", V.vioAlertDue({ text: a.text, ts: 221_000 }, { text: a.text, ts: 100_000 }));
+  check("alert: another text beeps at once",
+    V.vioAlertDue({ text: "VIO MISSION CHANGED since READY", ts: 101_000 }, { text: a.text, ts: 100_000 }));
+  check("alert: nothing newer, no beep", !V.vioAlertDue(undefined, a));
+  check("alert: an OLDER warning with another text does not (only what came after the one beeped for)",
+    !V.vioAlertDue({ text: "VIO MISSION CHANGED since READY", ts: 90_000 }, a));
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

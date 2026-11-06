@@ -201,8 +201,30 @@
     return { lat, lng };
   }
 
+  // The companion's warnings, newest first (2.5.106: the manual flight without the laptop). The VIO row keeps only the
+  // newest text of each family, so "VIO MISSION CHANGED since READY" said at arming was gone with the first "VIO: …"
+  // after take-off. `log`: [{text, sev, ts}] oldest first (MavLink's msg_log); a warning is MAV_SEVERITY <= 4 or an
+  // alarm word; `max` of them within `maxAgeMs`, newest first.
+  const VIO_FAMILY = /^(VIOSUP|VIOFS|VIO|MISSION)\b/;
+  const VIO_ALARM = /LAND|FAIL|LOST|MISMATCH|DIFF|STOP|NOT READY|CHANGED/i;
+  function vioWarnings(log, now, maxAgeMs, max) {
+    const out = [];
+    for (let i = (log || []).length - 1; i >= 0 && out.length < max; i--) {
+      const m = log[i];
+      if (!m || !VIO_FAMILY.test(m.text) || now - m.ts > maxAgeMs) continue;
+      const alarm = m.sev <= 2 || VIO_ALARM.test(m.text);
+      if (m.sev <= 4 || alarm) out.push({ text: m.text, sev: m.sev, ts: m.ts, age: (now - m.ts) / 1000, alarm });
+    }
+    return out;
+  }
+  // One beep per NEW warning (`last` = the one beeped for, {text, ts}): only a message that came after it, and not
+  // the same text again within 2 min — the companion repeats "VIO NOT READY: …" every 30 s until it is ready.
+  function vioAlertDue(w, last) {
+    return !!w && (!last || (w.ts > last.ts && (w.text !== last.text || w.ts - last.ts > 120000)));
+  }
+
   global.VIO_MODE = { haversineM, bearingDeg, compass8, relativeDeg, sideWord, nearestOnRing,
-    routeSpan, reachM, driftWithin, originArgs, parseLatLon,
+    routeSpan, reachM, driftWithin, originArgs, parseLatLon, VIO_FAMILY, VIO_ALARM, vioWarnings, vioAlertDue,
     MEASURED, measuredShare, measuredMaxPath, measuredReachM, segPenaltyS, missionTime, energy,
     legNeedM, shortLegs, splitSorties,
     ENVELOPE_M, ENVELOPE_PLAN, ENVELOPE_UNCAL, ORIGIN_TOL_M: 8.0 };
