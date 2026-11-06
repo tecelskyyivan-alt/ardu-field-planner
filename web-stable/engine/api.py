@@ -393,14 +393,16 @@ class Api:
         {ok, ingress_ok, egress_ok, ingress:[{lat,lng}], egress:[{lat,lng}], home_inside, reason}.
         FAIL-SAFE: any leg not PROVABLY inside the field free-space comes back ok'd but with its
         *_ok False and an EMPTY list, so the caller flies a plain straight RTL (with a warning) and
-        never splices an obstacle-crossing waypoint into the mission."""
+        never splices an obstacle-crossing waypoint into the mission.
+        `route` [[lat, lng], …] (optional): plan for these ends instead of the built route's — the GPS-denied (VIO)
+        planner flies the route reversed, closed or as one sortie, and asks for those ends (2.5.108)."""
         p = params or {}
         s = self._state
         if not s or not s.get("waypoints"):
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
         try:
             boundary = s.get("contour") or []
-            wps = s["waypoints"]
+            wps = [(float(a), float(b)) for a, b in p["route"]] if p.get("route") else s["waypoints"]
             hp = p.get("home")
             if hp and hp.get("lat") is not None and hp.get("lng") is not None:
                 home = (float(hp["lat"]), float(hp["lng"]))   # live vehicle home overrides

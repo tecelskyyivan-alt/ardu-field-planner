@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.107";
+  const APP_VERSION = "2.5.108";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1769,9 +1769,10 @@
     if (vh) {
       fmt = { fmt: fmt0, vio_home: vh, terrain: vioTerrain() };
       const so = vioSorties();
-      // each as the crossing plan flies it (2.5.107): the file is the upload and the forecast
-      if (so && so.length > 1) fmt.flights = so.map((x) => vioPlanned(x.route));
-      else if (lastRoute && lastRoute.length) fmt.flights = [vioPlanned(lastRoute)];
+      // each as the crossing plan flies it, safe transit included (2.5.107-108): the file is the upload and the forecast
+      const rs = (so && so.length > 1) ? so.map((x) => x.route) : ((lastRoute && lastRoute.length) ? [lastRoute] : []);
+      await vioPlanReady(rs);
+      if (rs.length) fmt.flights = rs.map((r) => vioPlanned(r));
     }
     // Browser / APK: the engine builds the files, the browser downloads them (no server).
     const eng = window.FMP_ENGINE;
@@ -4977,6 +4978,7 @@
       try { _prevFlownRaw = localStorage.getItem(FLOWN_KEY); } catch (e) {}
       // GPS-denied field over one pack: upload the next sortie, not the whole field (#60).
       const sortie = vioCurrentSortie();
+      if (vioHomeForUpload()) await vioPlanReady([sortie ? sortie.route : lastRoute]);   // VIO: its safe transit
       const upRoute = planRoute();     // the sortie or the whole plan; in VIO mode as the crossing plan flies it
       try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: upRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
@@ -5094,10 +5096,15 @@
     try {
       const _rt = $("round-turn") && $("round-turn").checked;
       const _sp = parseFloat($("spacing").value) || 20;
+      // VIO: the remainder flies as it was uploaded (not re-planned), with the safe transit to its start and home
+      // (2.5.108). GPS mode: upRest is rem.rest.
+      vioAsIsSig = routeSig(rem.rest);
+      if (vioHomeForUpload()) await vioPlanReady([rem.rest]);
+      const upRest = vioPlanned(rem.rest);
       const r = await a.mav_upload_mission({
         vio_home: vioHomeForUpload(),
         terrain: vioTerrain(),
-        route: rem.rest,
+        route: upRest,
         onProgress: (s, tot) => setMsg(tf(t("Заливаю місію в дрон… {0}/{1} точок"), s, tot), null),
         turn_radius_m: isPlaneVehicle() ? null : (_rt ? Math.max(1, Math.min(10, _sp / 2)) : 0),
         verify: ($("mav-verify-fast") && $("mav-verify-fast").checked) ? "count" : "full",
@@ -5106,8 +5113,7 @@
       if (!r || !r.ok) { setMsg((r && r.error) || "Не вдалося залити залишок.", "error"); return; }
       // Тепер у дроні саме залишок: план на карті і «залито» — це він.
       lastRoute = rem.rest.slice();
-      flownRoute = rem.rest.slice();
-      vioAsIsSig = routeSig(rem.rest);     // VIO: the crossing planner leaves it as uploaded (2.5.107)
+      flownRoute = upRest.slice();
       // Derive home from the drone's live position — resume can be the first upload after a reopen,
       // where without this flownHome=null and _progGeom builds no RTL-leg/countdown (§4.2).
       if (lastStatus && lastStatus.home_lat != null) flownHome = { lat: lastStatus.home_lat, lng: lastStatus.home_lon };
@@ -5120,7 +5126,7 @@
       // set — see its comment), so r.splice_pre is always 0 here; pass it through anyway for
       // consistency with the full-upload call site above.
       flownSplicePost = r.splice_post || 0;      // always 0 (no splice on resume) — reset a stale value
-      flownSave(rem.rest, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
+      flownSave(upRest, flownHome, flownHasRtl, "confirmed", r.splice_pre || 0, flownSplicePost);
       promoteFieldOnUpload();        // + промоут контуру (UPSERT) і для залишку
       resumeClear();                 // прогрес нової (коротшої) місії почнеться з нуля
       redrawRouteLayer(rem.rest);
@@ -5889,11 +5895,13 @@
     // otherwise the whole field is one sortie, whatever the energy model says (owner, 05.11).
     if (!resumeOn()) return [{ from: 0, to: lastRoute.length - 1, route: lastRoute }];
     const m = vioModel(), sp = parseFloat($("spacing").value) || 20;
+    // "|c": split with the closure budget (2.5.108) — progress saved against the old split does not carry over
     const key = routeSig(lastRoute) + "|" + vioHome.lat.toFixed(6) + "," + vioHome.lng.toFixed(6) + "|" +
-      [m.speed, m.takeoffAlt, m.packAh, m.ahPerMin, sp].join(",");
+      [m.speed, m.takeoffAlt, m.packAh, m.ahPerMin, sp].join(",") + "|c";
     if (vioSortieCache && vioSortieCache.key === key) return vioSortieCache.list;
     const budgetS = VIO_PACK_BUDGET * m.packAh / m.ahPerMin * 60;
-    const r = VIO.splitSorties(vioHome, lastRoute, budgetS, m, sp);
+    // the closure the crossing planner may add is in each sortie's budget (2.5.108)
+    const r = VIO.splitSorties(vioHome, lastRoute, budgetS, Object.assign({ closure: true }, m), sp);
     const list = r ? r.map((x) => ({ from: x.from, to: x.to, route: lastRoute.slice(x.from, x.to + 1) })) : null;
     vioSortieCache = { key, list };
     return list;
@@ -5915,31 +5923,67 @@
   }
   // The route FMP means to fly next: the current sortie, or the whole plan.
   function planRoute() { const c = vioCurrentSortie(); return vioPlanned(c ? c.route : lastRoute); }
-  // ---- crossing fixes (2.5.107, ardu-gps-denied plan 3.1): the mission a VIO route flies — as built or reversed
+  // ---- crossing fixes (2.5.107-108, ardu-gps-denied plan 3.1): the mission a VIO route flies — as built or reversed
   // so the transit crosses the legs, open or closed over the transit — chosen by ardu-gps-denied's fmp_check forecast
-  // (VIO.planVioRoute). Per route, home and speed: it walks the route at 20 Hz. GPS mode: null, the route as built.
-  // shortcut: the sortie split budgets the route as built; a closure adds ~100-200 m after it — fold it into
-  // splitSorties when a sortie sits at the 80 % edge.
+  // (VIO.planVioRoute) along the very waypoints flown: the transit and the closure go round cut-outs by FMP's safe
+  // transit (#12; Ivan 06.11: cut-outs can be trees, buildings, power lines). GPS mode: null, the route as built.
   const vioPlans = new WeakMap();
   let vioAsIsSig = null;          // a resumed remainder (battery swap) flies on as uploaded: forecast only
+  // The engine's safe paths for a route's ends and home, once per build (it plans on its last build).
+  let vioPathsBuild = null, vioPaths = new Map();
+  function vioPathsEntry(route) {
+    if (vioPathsBuild !== lastBuildStats) { vioPathsBuild = lastBuildStats; vioPaths = new Map(); }
+    const k = [route[0], route[route.length - 1], [vioHome.lat, vioHome.lng]]
+      .map((p) => (+p[0]).toFixed(7) + "," + (+p[1]).toFixed(7)).join("|");
+    let e = vioPaths.get(k);
+    if (!e) {
+      e = { paths: null, done: false };
+      e.promise = vioFetchPaths(route).then((p) => { e.paths = p; }, () => {})
+        .then(() => { e.done = true; vioRender(); updateMissionStatus(); });
+      vioPaths.set(k, e);
+    }
+    return e;
+  }
+  async function vioSafeTransit(home, a, b) {
+    const eng = window.FMP_ENGINE, p = { home: { lat: home[0], lng: home[1] }, route: [a, b] };
+    try {
+      const call = (!IS_QT && eng && eng.available()) ? eng.safeTransit(p) : api().safe_transit(p);
+      // no answer in 20 s (a dead worker never answers): straight, as the upload's own splice would fall back
+      const t = await Promise.race([call, new Promise((res) => setTimeout(() => res(null), 20000))]);
+      return t && t.ok ? t : null;
+    } catch (e) { return null; }
+  }
+  // home -> route[0] and home -> route[N] (the upload's #12 splice, for these ends), and from the far end to each
+  // closure point; null = no engine or no build: straight, as the splice falls back.
+  async function vioFetchPaths(route) {
+    const H = [vioHome.lat, vioHome.lng], r0 = route[0], rN = route[route.length - 1];
+    const ll = (q) => q.map((x) => [x.lat, x.lng]);
+    const t = await vioSafeTransit(H, r0, rN);
+    if (!t) return null;
+    const out = { inFirst: t.ingress_ok ? ll(t.ingress) : null, inLast: t.egress_ok ? ll(t.egress).reverse() : null };
+    const cf = VIO.closureOn(vioHome, out.inFirst || [H, r0]), cr = VIO.closureOn(vioHome, out.inLast || [H, rN]);
+    const af = cf && await vioSafeTransit(cf.cp, r0, rN), ar = cr && await vioSafeTransit(cr.cp, r0, rN);
+    out.apFwd = af && af.egress_ok ? ll(af.egress) : null;              // route[N] -> the closure point on inFirst
+    out.apRev = ar && ar.ingress_ok ? ll(ar.ingress).reverse() : null;  // route[0] -> the one on inLast
+    return out;
+  }
   function vioPlanFor(route) {
     if (!vioReady || !vioOn() || !vioHome || !route || route.length < 2) return null;
+    const e = vioPathsEntry(route);
+    if (!e.done) return null;          // the engine is still answering: upload and export wait for it
     const speed = parseFloat($("speed").value) || 0, asIs = routeSig(route) === vioAsIsSig, c = vioPlans.get(route);
-    if (c && c.lat === vioHome.lat && c.lng === vioHome.lng && c.speed === speed && c.asIs === asIs) return c.plan;
-    const plan = VIO.planVioRoute(vioHome, route, speed, asIs);
-    vioPlans.set(route, { lat: vioHome.lat, lng: vioHome.lng, speed, asIs, plan });
+    if (c && c.e === e && c.lat === vioHome.lat && c.lng === vioHome.lng && c.speed === speed && c.asIs === asIs) return c.plan;
+    const rings = collectExclusions().concat(hazardCorridors(hazardClearanceM()));
+    const plan = VIO.planVioRoute(vioHome, route, speed, asIs, e.paths,
+      (a, b) => rings.some((g) => VIO.segmentHitsRing(a, b, g)));
+    vioPlans.set(route, { e, lat: vioHome.lat, lng: vioHome.lng, speed, asIs, plan });
     return plan;
   }
   function vioPlanned(route) { const p = vioPlanFor(route); return p ? p.route : route; }
-  // The VIO transit is straight, not routed round cut-outs (no safe-transit splice): does it, or the closure, cross one?
-  function vioPlanCrossesCut(plan) {
-    if (plan.cut == null) {
-      const rings = collectExclusions().concat(hazardCorridors(hazardClearanceM()));
-      const h = [vioHome.lat, vioHome.lng], r = plan.route, segs = [[h, r[0]], [r[r.length - 1], h]];
-      if (plan.closed) segs.push([r[r.length - 2], r[r.length - 1]]);
-      plan.cut = segs.some(([a, b]) => rings.some((g) => VIO.segmentHitsRing(a, b, g)));
-    }
-    return plan.cut;
+  // Upload and export fly the plan: wait for the engine's paths of their route(s). GPS mode: nothing to wait for.
+  function vioPlanReady(routes) {
+    if (!vioReady || !vioOn() || !vioHome) return Promise.resolve();
+    return Promise.all(routes.filter((r) => r && r.length > 1).map((r) => vioPathsEntry(r).promise));
   }
   // A sortie counts as done once the FC reaches the 25 s hover over home (all its legs flown).
   function vioSortieTick(s) {
@@ -6009,13 +6053,15 @@
   function vioPlanMap(plan) {
     if (!plan && !vioPlanLine) return;        // never planned (GPS mode): the markers stay as the build drew them
     const r = plan ? plan.route : lastRoute;
+    const s0 = plan ? plan.legsFrom : 0, s1 = plan ? plan.legsTo : (r ? r.length - 1 : 0);   // the legs' start / end
     if (routeMarkers && r && r.length > 1) {
-      const [st, fin] = routeMarkers.getLayers(), legEnd = r[r.length - (plan && plan.closed ? 2 : 1)];
-      if (st && !st.getLatLng().equals(r[0])) st.setLatLng(r[0]);
-      if (fin && !fin.getLatLng().equals(legEnd)) fin.setLatLng(legEnd);
+      const [st, fin] = routeMarkers.getLayers();
+      if (st && !st.getLatLng().equals(r[s0])) st.setLatLng(r[s0]);
+      if (fin && !fin.getLatLng().equals(r[s1])) fin.setLatLng(r[s1]);
     }
     if (!plan) { if (vioPlanLine) { map.removeLayer(vioPlanLine); vioPlanLine = null; } return; }
-    const pts = [...(plan.closed ? [r[r.length - 2]] : []), r[r.length - 1], [vioHome.lat, vioHome.lng], r[0]];
+    // the way home (closure, safe transit) and out to the legs, through home
+    const pts = [...r.slice(s1), [vioHome.lat, vioHome.lng], ...r.slice(0, s0 + 1)];
     if (!vioPlanLine) vioPlanLine = L.polyline(pts, { color: "#ff8c2d", weight: 2, dashArray: "2 6", interactive: false }).addTo(map);
     else vioPlanLine.setLatLngs(pts);
   }
@@ -6080,7 +6126,10 @@
           (plan.closed ? tf(t(" · замикання +{0} м"), Math.round(plan.extraM)) : ""));
         if (fc.end_m > VIO.FORECAST_GATE_M)
           lines.push("⚠️ " + tf(t("У кінці ~{0} м — понад 20 м, дім може не знайтися."), Math.round(fc.end_m)));
-        if (vioPlanCrossesCut(plan)) lines.push("⚠️ " + t("Переліт без GPS іде прямо через виріз чи небезпеку."));
+        // the safe transit could not route round it, so a straight segment still crosses one (2.5.108)
+        if (plan.blocked) lines.push("⚠️ " + t("Обійти виріз чи небезпеку не вдалося — переліт іде над ними напряму."));
+      } else if (legsRoute && legsRoute.length > 1) {
+        lines.push(t("Прогноз поправок на перетинах — рахую…"));    // the engine's safe transit is on its way
       } else {
         const sp = VIO.routeSpan(vioHome, flyRoute);
         if (2 * sp.farthest + sp.length > VIO.measuredReachM(40).reach)

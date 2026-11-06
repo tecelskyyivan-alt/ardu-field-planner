@@ -125,7 +125,9 @@
     return v <= 13 ? v / 2.5 + 1 : 6.2 + (v - 13) * (13.65 - 6.2) / (22 - 13);
   }
   // home -> route… -> home, VIO profile: climb at 2.5 m/s, holds 5 + 25 s, ~35 s LAND.
-  // Returns {total_s, path_m, segments}. o: {speed, takeoffAlt, holdStart, holdEnd, landS, climb}.
+  // Returns {total_s, path_m, segments}. o: {speed, takeoffAlt, holdStart, holdEnd, landS, climb, closure}.
+  // closure (2.5.108, the sortie split): budget the closure the crossing planner may add — the longer of the two
+  // directions' last -> closure point -> home over last -> home, one segment more.
   function missionTime(home, route, o) {
     const v = Math.max(+(o && o.speed) || 0, 0.5);
     const climb = (o && o.climb) || 2.5;
@@ -134,6 +136,15 @@
     for (let i = 1; i < pts.length; i++) {
       const d = haversineM(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
       if (d > 0.5) { path += d; segs++; }
+    }
+    if (o && o.closure && route && route.length > 1) {
+      const f = toNE(home, route[0][0], route[0][1]), l = toNE(home, route[route.length - 1][0], route[route.length - 1][1]);
+      let extra = 0;
+      for (const [a, b] of [[f, l], [l, f]]) {
+        const cp = closurePoint(a, b);
+        if (cp) extra = Math.max(extra, Math.hypot(b[0] - cp[0], b[1] - cp[1]) + CLOSURE_M - Math.hypot(b[0], b[1]));
+      }
+      if (extra > 0) { path += extra; segs++; }
     }
     const hold = ((o && o.holdStart != null) ? o.holdStart : 5) + ((o && o.holdEnd != null) ? o.holdEnd : 25);
     const total = path / v + segs * segPenaltyS(v) + ((o && o.takeoffAlt) || 0) / climb + hold +
@@ -352,41 +363,89 @@
     return forecastNE([...(route || []).map((p) => toNE(home, p[0], p[1])), [0, 0]], speed);
   }
 
-  // make_missions_next.closure_point: a point on the transit line home -> `first` at CLOSURE_M from home, so the last
-  // CLOSURE_M of the return fly over the keys the transit laid (>= 40 m out). null when the route starts closer than
-  // CLOSURE_M + 20 m (nothing to close over) or the way from `last` to it passes within CLOSURE_CLEAR_M of home (the
-  // home fix would start on a pass over home). first / last: [n, e] m from home.
+  // The closure point: CLOSURE_M along the transit path [[n, e]…] from home (its first point), so the last CLOSURE_M of
+  // the return fly back over the keys the transit laid (>= 40 m out): {cp, i} — cp on the segment path[i-1] -> path[i].
+  // null when the path is shorter than CLOSURE_M + 20 m (nothing to close over). make_missions_next.closure_point on a
+  // straight transit; on a detour round a cut-out, the same 100 m of the path the aircraft flew out.
+  function closureOnPath(path) {
+    let total = 0;
+    for (let i = 1; i < path.length; i++) total += Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+    if (total < CLOSURE_M + 20) return null;
+    for (let i = 1, s = 0; i < path.length; i++) {
+      const d = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+      if (s + d >= CLOSURE_M) {
+        const t = (CLOSURE_M - s) / d;
+        return { cp: [path[i - 1][0] + t * (path[i][0] - path[i - 1][0]), path[i - 1][1] + t * (path[i][1] - path[i - 1][1])], i };
+      }
+      s += d;
+    }
+    return null;
+  }
+  // The same on a [lat, lng] transit path from home: {cp: [lat, lng], i}.
+  function closureOn(home, path) {
+    const c = closureOnPath(path.map((p) => toNE(home, p[0], p[1])));
+    return c && { cp: fromNE(home, c.cp), i: c.i };
+  }
+  // Does the way [[n, e]…] keep CLOSURE_CLEAR_M from home? (Nearer, the home fix would start on a pass over home.)
+  function clearOfHome(way) {
+    for (let i = 1; i < way.length; i++) {
+      const a = way[i - 1], bn = way[i][0] - a[0], be = way[i][1] - a[1];
+      const t = Math.max(0, Math.min(1, -(a[0] * bn + a[1] * be) / Math.max(bn * bn + be * be, 1e-9)));
+      if (Math.hypot(a[0] + t * bn, a[1] + t * be) < CLOSURE_CLEAR_M) return false;
+    }
+    return true;
+  }
+  // make_missions_next.closure_point: on the straight transit home -> `first`; null when there is nothing to close over
+  // or the way from `last` to it passes home. first / last: [n, e] m from home.
   function closurePoint(first, last) {
-    const d = Math.hypot(first[0], first[1]);
-    if (d < CLOSURE_M + 20) return null;
-    const cp = [first[0] * CLOSURE_M / d, first[1] * CLOSURE_M / d];
-    const bn = cp[0] - last[0], be = cp[1] - last[1];
-    const t = Math.max(0, Math.min(1, -(last[0] * bn + last[1] * be) / Math.max(bn * bn + be * be, 1e-9)));
-    return Math.hypot(last[0] + t * bn, last[1] + t * be) < CLOSURE_CLEAR_M ? null : cp;
+    const c = closureOnPath([[0, 0], first]);
+    return c && clearOfHome([last, c.cp]) ? c.cp : null;
   }
 
   // The VIO mission FMP flies for `route` (the whole field or one sortie): as built or reversed — so the transit from
   // home crosses the legs — each open or closed over the transit. Chosen by the forecast: the lowest error at the end
   // plus the worst on the way (the home fix and the field both count: a reversal can keep the end and double the
   // error mid-field, M16 20 -> 40 m); a near tie (0.5 m) goes to the simpler one — reversing is free, closing costs
-  // path. `asBuilt`: the forecast only (a resumed remainder flies on as uploaded). {route, reversed, closed, fc,
+  // path. `asBuilt`: the forecast only (a resumed remainder flies on as uploaded).
+  // `paths` (2.5.108): FMP's safe transit (#12: inside the field, round cut-outs), [lat, lng] polylines with both ends —
+  // inFirst home -> route[0], inLast home -> route[N], apFwd route[N] -> the closure point on inFirst, apRev route[0]
+  // -> the one on inLast; a missing one is flown straight. `blocked(a, b)`: that straight segment crosses a cut-out —
+  // a candidate with one is flown only when every candidate has one. The forecast is of the waypoints flown.
+  // {route: every waypoint between the start profile and the VIO end, legsFrom, legsTo, reversed, closed, blocked, fc,
   // extraM, options}.
-  function planVioRoute(home, route, speed, asBuilt) {
+  function planVioRoute(home, route, speed, asBuilt, paths, blocked) {
     if (!home || !route || route.length < 2) return null;
+    const H = [home.lat, home.lng], N = route.length - 1, P = paths || {}, mid = (p) => p.slice(1, -1);
+    const back = (p) => p.slice().reverse();
+    const ends = (reversed) => {
+      const r = reversed ? back(route) : route, pin = reversed ? P.inLast : P.inFirst, pout = reversed ? P.inFirst : P.inLast;
+      return { r, inn: pin || [H, r[0]], out: pout || [H, r[N]], sIn: pin ? [] : [[H, r[0]]], sOut: pout ? [] : [[r[N], H]] };
+    };
     const opts = [];
-    for (const reversed of (asBuilt ? [false] : [false, true]))
-      opts.push({ reversed, closed: false, route: reversed ? route.slice().reverse() : route });
+    for (const reversed of (asBuilt ? [false] : [false, true])) {
+      const E = ends(reversed), pre = mid(E.inn);
+      opts.push({ reversed, closed: false, route: [...pre, ...E.r, ...mid(back(E.out))], legsFrom: pre.length,
+        legsTo: pre.length + N, straight: [...E.sIn, ...E.sOut] });
+    }
     for (const o of (asBuilt ? [] : opts.slice())) {
-      const r = o.route, cp = closurePoint(toNE(home, r[0][0], r[0][1]), toNE(home, r[r.length - 1][0], r[r.length - 1][1]));
-      if (cp) opts.push({ reversed: o.reversed, closed: true, route: [...r, fromNE(home, cp)] });
+      const E = ends(o.reversed), c = closureOn(home, E.inn), pa = o.reversed ? P.apRev : P.apFwd;
+      if (!c) continue;
+      const ap = pa || [E.r[N], c.cp];
+      if (!clearOfHome(ap.map((p) => toNE(home, p[0], p[1])))) continue;
+      const pre = mid(E.inn);
+      opts.push({ reversed: o.reversed, closed: true, legsFrom: pre.length, legsTo: pre.length + N,
+        route: [...pre, ...E.r, ...mid(ap), c.cp, ...back(E.inn.slice(1, c.i))],
+        straight: [...E.sIn, ...(pa ? [] : [[E.r[N], c.cp]])] });
     }
     let best = null;
-    const score = (o) => o.fc.end_m + o.fc.worst_m;
+    const key = (o) => (o.blocked ? 1e6 : 0) + o.fc.end_m + o.fc.worst_m;
     for (const o of opts) {
       o.fc = crossingForecast(home, o.route, speed);
-      if (!best || score(o) < score(best) - 0.5) best = o;
+      o.blocked = !!blocked && o.straight.some(([a, b]) => blocked(a, b));
+      if (!best || key(o) < key(best) - 0.5) best = o;
     }
-    return Object.assign({}, best, { extraM: best.fc.path_m - opts[0].fc.path_m, options: opts });
+    const open = opts.find((o) => o.reversed === best.reversed && !o.closed);
+    return Object.assign({}, best, { extraM: best.fc.path_m - open.fc.path_m, options: opts });
   }
 
   // Does the segment a-b ([lat, lng]) touch the ring ([{lat, lng}…])? Local metric projection at a; a cut-out the
@@ -411,6 +470,6 @@
     MEASURED, measuredShare, measuredMaxPath, measuredReachM, segPenaltyS, missionTime, energy,
     legNeedM, shortLegs, splitSorties,
     AIRCRAFT_DRIFT, FORECAST_GATE_M, CLOSURE_M, toNE, fromNE, planError, routeFixes, forecastNE, crossingForecast,
-    closurePoint, planVioRoute, segmentHitsRing,
+    closurePoint, closureOn, closureOnPath, clearOfHome, planVioRoute, segmentHitsRing,
     ENVELOPE_M, ENVELOPE_PLAN, ENVELOPE_UNCAL, ORIGIN_TOL_M: 8.0 };
 })(typeof window !== "undefined" ? window : globalThis);
