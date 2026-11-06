@@ -209,16 +209,32 @@ check("sorties: budget below one point -> null", V.splitSorties(home, field, 10,
   const pr = V.planVioRoute(home, ll.slice().reverse(), 13);
   check("plan: a route built from the near end is turned round so the transit crosses the legs, then closed",
     pr.reversed && pr.closed && near(pr.fc.end_m, 0.910, 0.01) && pr.route[0] === ll[0]);
+  const pa = V.planVioRoute(home, ll.slice().reverse(), 13, true);
+  check("plan asBuilt (a resumed remainder): the forecast of the route as uploaded, nothing turned or added",
+    !pa.reversed && !pa.closed && pa.options.length === 1 && pa.route.length === ll.length && near(pa.fc.end_m, 15.561, 0.01));
   // no crossing either way, the start too close to close over: 4 km of legs north of home, as built kept
   const lane = [[0, 100], [2000, 100], [2000, 180], [0, 180]].map((ne) => V.fromNE(home, ne));
   const pl = V.planVioRoute(home, lane, 13);
   check("plan: no crossing either way -> as built, open, over the 20 m gate (the panel warns)",
     !pl.reversed && !pl.closed && pl.fc.fixes.length === 0 && pl.fc.end_m > V.FORECAST_GATE_M);
   check("plan: no route -> null", V.planVioRoute(home, [ll[0]], 13) === null && V.planVioRoute(null, ll, 13) === null);
+  // 4 legs of 500 m, 80 m apart, home 60 m west of the first. route_fixes: as built 2 fixes, 0.874 m at the end,
+  // 25.13 m on the way; reversed 2, 0.885, 15.09 — the same end, the field flown with 10 m less error
+  const four = [[0, 60], [500, 60], [500, 140], [0, 140], [0, 220], [500, 220], [500, 300], [0, 300]];
+  const p4 = V.planVioRoute(home, four.map((ne) => V.fromNE(home, ne)), 22);
+  const o4 = p4.options.find((o) => !o.reversed && !o.closed);
+  check("plan: the same end either way (0.87 / 0.89 m) -> the direction with 15.1 m on the way, not 25.1",
+    p4.reversed && !p4.closed && near(p4.fc.end_m, 0.885, 0.005) && near(p4.fc.worst_m, 15.09, 0.005) &&
+    near(o4.fc.end_m, 0.874, 0.005) && near(o4.fc.worst_m, 25.128, 0.005));
+  // two keys exactly as near: CrossingFix's scan (`d <= best_d`) takes the later one — route_fixes: [1573.0, 49.0]
+  const tie = V.routeFixes([[0, 0], [200, 0], [200, 600], [45, 600], [45, -600]], 20, 0);
+  check("routeFixes: of two equally near keys the later one, as route_fixes ([1573.0, 49.0])",
+    tie.length === 1 && tie[0][0] === 1573.0 && tie[0][1] === 49.0);
 
   const sq = [{ lat: 49.501, lng: 23.999 }, { lat: 49.501, lng: 24.001 }, { lat: 49.502, lng: 24.001 }, { lat: 49.502, lng: 23.999 }];
-  check("segmentHitsRing: across a cut-out, from inside it, and past it",
+  check("segmentHitsRing: across a cut-out, out of it, wholly inside it, and past it",
     V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], sq) && V.segmentHitsRing([49.5015, 24.0], [49.5, 24.0], sq) &&
+    V.segmentHitsRing([49.5015, 24.0], [49.5016, 24.0002], sq) &&
     !V.segmentHitsRing([49.5, 24.0], [49.5, 24.003], sq) && !V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], [sq[0], sq[1]]));
 }
 

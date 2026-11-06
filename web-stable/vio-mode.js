@@ -369,12 +369,14 @@
   // home crosses the legs — each open or closed over the transit. Chosen by the forecast: the lowest error at the end
   // plus the worst on the way (the home fix and the field both count: a reversal can keep the end and double the
   // error mid-field, M16 20 -> 40 m); a near tie (0.5 m) goes to the simpler one — reversing is free, closing costs
-  // path. {route, reversed, closed, fc, extraM, options}.
-  function planVioRoute(home, route, speed) {
+  // path. `asBuilt`: the forecast only (a resumed remainder flies on as uploaded). {route, reversed, closed, fc,
+  // extraM, options}.
+  function planVioRoute(home, route, speed, asBuilt) {
     if (!home || !route || route.length < 2) return null;
     const opts = [];
-    for (const reversed of [false, true]) opts.push({ reversed, closed: false, route: reversed ? route.slice().reverse() : route });
-    for (const o of opts.slice()) {
+    for (const reversed of (asBuilt ? [false] : [false, true]))
+      opts.push({ reversed, closed: false, route: reversed ? route.slice().reverse() : route });
+    for (const o of (asBuilt ? [] : opts.slice())) {
       const r = o.route, cp = closurePoint(toNE(home, r[0][0], r[0][1]), toNE(home, r[r.length - 1][0], r[r.length - 1][1]));
       if (cp) opts.push({ reversed: o.reversed, closed: true, route: [...r, fromNE(home, cp)] });
     }
