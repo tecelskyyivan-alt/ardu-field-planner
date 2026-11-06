@@ -152,5 +152,75 @@ check("sorties: budget below one point -> null", V.splitSorties(home, field, 10,
     !V.vioAlertDue({ text: "VIO MISSION CHANGED since READY", ts: 90_000 }, a));
 }
 
+// 2.5.107: crossing fixes — the port of ardu-gps-denied's fmp_check forecast. Every expected number here is what
+// ardu-gps-denied's own code gives for the same input (mission_executor/crossing_fix.py route_fixes / plan_error,
+// tests/test_crossing_fix.py and tests/test_fmp_check.py vectors), not what this port gives.
+{
+  check("planError: the error goes back to the key's and grows again (test_crossing_fix vectors 30 / 10 / 16)",
+    near(V.planError(3000, [], 0.01), 30, 1e-9) && near(V.planError(3000, [[2500, 500]], 0.01), 10, 1e-9) &&
+    near(V.planError(5000, [[2500, 500], [4000, 2600]], 0.01), 16, 1e-9));
+  // rate 0 = route_fixes without drift_frac: every registration lands
+  const square = V.routeFixes([[0, 0], [0, 2500], [300, 2500], [300, 1200], [-300, 1200]], 22, 0);
+  check("routeFixes: a leg square to the transit 100+ s later corrects once, at route_fixes' [4423.1, 1194.5]",
+    square.length === 1 && square[0][0] === 4423.1 && square[0][1] === 1194.5);
+  check("routeFixes: the same crossing 36 s after the key does not (key age 60 s)",
+    V.routeFixes([[0, 0], [0, 800], [300, 800], [300, 700], [-300, 700]], 22, 0).length === 0);
+  check("routeFixes: a route that never crosses itself does not",
+    V.routeFixes([[0, 0], [0, 1500], [300, 1500]], 22, 0).length === 0);
+  const loop = [[0, 0], [0, 1200], [300, 1200], [300, 500], [-300, 500]];
+  const l1 = V.routeFixes(loop, 22, 0.0101);
+  check("routeFixes: 2 km between the passes at 1.01 % is inside the 25 m reach -> [2523.1, 501.6]; at 2 % it is not",
+    l1.length === 1 && l1[0][0] === 2523.1 && l1[0][1] === 501.6 && V.routeFixes(loop, 22, 0.02).length === 0);
+  // test_fmp_check LOOP: 1 fix, 13.75 m at the end (34.17 without), 25.48 m just before the crossing
+  const fl = V.forecastNE([[1200, 0], [1200, 300], [500, 300], [500, -300]], 0);
+  check("forecastNE: fmp_check's LOOP — 1 fix, end 13.75, worst 25.48, 34.17 without, scored at 22 m/s",
+    fl.fixes.length === 1 && near(fl.end_m, 13.752, 0.005) && near(fl.worst_m, 25.483, 0.005) &&
+    near(fl.nofix_m, 34.169, 0.005) && fl.speed === 22);
+  check("forecastNE: a faster mission is scored at its own speed", V.forecastNE([[100, 0]], 25).speed === 25);
+
+  // A real 30 ha field's route as N, E metres from its home (M16, 10 points; flown 03.11 at 13 m/s). fmp_check on
+  // that flight's file: 5 fixes, 15.55 m at the end, 20.44 m on the way; route_fixes with the closure point: 7, 0.91.
+  const M16 = [[-667.7, 431.1], [-12.4, 315.6], [-24.5, 236.5], [-682.8, 352.6], [-698.0, 274.0], [-36.6, 157.4],
+    [-48.8, 78.3], [-713.2, 195.5], [-728.3, 116.9], [-60.9, -0.8]];
+  const f16 = V.forecastNE([...M16, [0, 0]], 13);
+  check("forecastNE: M16 as fmp_check scores it — 5 fixes, 15.55 / 20.44 m, the first at [2024.0, 578.2]",
+    f16.fixes.length === 5 && near(f16.end_m, 15.549, 0.005) && near(f16.worst_m, 20.442, 0.005) &&
+    f16.fixes[0][0] === 2024.0 && f16.fixes[0][1] === 578.2);
+  const cp = V.closurePoint(M16[0], M16[M16.length - 1]);
+  check("closurePoint: 100 m out on the transit line", near(cp[0], -84.011, 0.001) && near(cp[1], 54.242, 0.001));
+  const c16 = V.forecastNE([...M16, cp, [0, 0]], 13);
+  check("closure: the return over the transit's keys — 7 fixes, 0.91 m at the end (route_fixes: 7, 0.910)",
+    c16.fixes.length === 7 && near(c16.end_m, 0.910, 0.005) && near(c16.worst_m, 20.442, 0.005));
+  check("closurePoint: none when the route starts within 120 m (nothing to close over)",
+    V.closurePoint([0, 110], [500, 500]) === null);
+  check("closurePoint: none when the way to it passes within 30 m of home (the home fix would start on a pass)",
+    V.closurePoint([0, 400], [0, -300]) === null && V.closurePoint([0, 400], [200, -300]) !== null);
+
+  // The planner on that route, placed at this file's synthetic home (no real coordinates in the repo)
+  const ll = M16.map((ne) => V.fromNE(home, ne));
+  check("toNE / fromNE round-trip to 1 mm", ll.every((p, i) => near(V.toNE(home, p[0], p[1])[0], M16[i][0], 1e-3) &&
+    near(V.toNE(home, p[0], p[1])[1], M16[i][1], 1e-3)));
+  const p16 = V.planVioRoute(home, ll, 13);
+  check("plan: M16 as built + closure — 0.91 m at the end instead of 15.55, +99 m of path",
+    !p16.reversed && p16.closed && p16.route.length === 11 && near(p16.fc.end_m, 0.910, 0.01) &&
+    near(p16.extraM, 98.8, 0.5) && p16.options.length === 3);
+  check("plan: the reversal kept M16's end (15.56) but doubled the error mid-field (39.9) — not chosen",
+    p16.options.some((o) => o.reversed && !o.closed && near(o.fc.end_m, 15.561, 0.01) && near(o.fc.worst_m, 39.883, 0.01)));
+  const pr = V.planVioRoute(home, ll.slice().reverse(), 13);
+  check("plan: a route built from the near end is turned round so the transit crosses the legs, then closed",
+    pr.reversed && pr.closed && near(pr.fc.end_m, 0.910, 0.01) && pr.route[0] === ll[0]);
+  // no crossing either way, the start too close to close over: 4 km of legs north of home, as built kept
+  const lane = [[0, 100], [2000, 100], [2000, 180], [0, 180]].map((ne) => V.fromNE(home, ne));
+  const pl = V.planVioRoute(home, lane, 13);
+  check("plan: no crossing either way -> as built, open, over the 20 m gate (the panel warns)",
+    !pl.reversed && !pl.closed && pl.fc.fixes.length === 0 && pl.fc.end_m > V.FORECAST_GATE_M);
+  check("plan: no route -> null", V.planVioRoute(home, [ll[0]], 13) === null && V.planVioRoute(null, ll, 13) === null);
+
+  const sq = [{ lat: 49.501, lng: 23.999 }, { lat: 49.501, lng: 24.001 }, { lat: 49.502, lng: 24.001 }, { lat: 49.502, lng: 23.999 }];
+  check("segmentHitsRing: across a cut-out, from inside it, and past it",
+    V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], sq) && V.segmentHitsRing([49.5015, 24.0], [49.5, 24.0], sq) &&
+    !V.segmentHitsRing([49.5, 24.0], [49.5, 24.003], sq) && !V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], [sq[0], sq[1]]));
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

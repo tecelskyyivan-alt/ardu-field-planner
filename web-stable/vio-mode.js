@@ -223,9 +223,192 @@
     return !!w && (!last || (w.ts > last.ts && (w.text !== last.text || w.ts - last.ts > 120000)));
   }
 
+  // ---- crossing fixes (2.5.107, ardu-gps-denied plan 3.1) ------------------------------------------------
+  // The only mid-mission reset without GPS: where the route flies over ground it flew a minute or more before (the
+  // transit from home crossing the legs), the companion registers the frame against the earlier one and corrects the
+  // VIO. This is ardu-gps-denied's `tools/fmp_check.py` forecast, ported line for line: `mission_executor/
+  // crossing_fix.py` (CrossingFix fed the plan by `route_fixes`, `plan_error`) and the numbers of `mission_planner/
+  // fmp_import.py` `_aircraft_rows`. Copied, not derived — re-copy when those move.
+  const AIRCRAFT_DRIFT = 0.0101;   // the error grows 1.01 % of path: the worst of 12 flights 02-03.11 (AIRCRAFT_DRIFT)
+  const CF = { minAgl: 15, minHome: 40, keyEvery: 10, maxKeys: 800, minKeyAge: 60, triggerR: 12, need: 2,
+    window: 6, minGap: 0.5, pathStep: 1, hz: 20, latency: 0.45, agl: 40, reach: 25 };   // CrossingFix / route_fixes
+  const SCORE_SPEED = 22;          // fmp_check --speed (the ops speed); the mission's own speed when faster
+  const R_WGS = 6378137;           // fmp_import scores in geo.ll_to_xy: equirectangular at home, this radius
+  const FORECAST_GATE_M = 20;      // plan 3.1: every VIO mission <= 20 m at the end, or a warning
+  const CLOSURE_M = 100, CLOSURE_CLEAR_M = 30;   // make_missions_next.closure_point (close100)
+
+  function toNE(home, lat, lng) {
+    return [(lat - home.lat) * rad * R_WGS, (lng - home.lng) * rad * R_WGS * Math.cos(home.lat * rad)];
+  }
+  function fromNE(home, ne) {
+    return [home.lat + ne[0] / R_WGS / rad, home.lng + ne[1] / (R_WGS * Math.cos(home.lat * rad)) / rad];
+  }
+
+  // The error after x m of route: each fix [path m, its key's path m] puts it back to what it was at the key — the
+  // fix aligns to the earlier pass, not to the truth.
+  function planError(x, fixes, rate) {
+    let last = null;
+    for (const f of fixes) { if (f[0] > x) break; last = f; }
+    return last === null ? rate * x : planError(last[1], fixes, rate) + rate * (x - last[0]);
+  }
+
+  // route_fixes: where the flight program corrects on a planned route [[n, e] m from home, …], flown at `speed`, a
+  // frame every 1/hz s; a registration lands `latency` s after it was submitted unless the two frames' errors are
+  // more than `reach` apart. Every registration measures exactly the plan's offset, so the deltas are all zero and
+  // agree: CrossingFix._agree reduces to `need` of them inside `window` (median 0, under any cap).
+  function routeFixes(route, speed, rate) {
+    const out = [], keys = [], grid = new Map();     // grid: keys by triggerR-sized cell, so a frame looks at 9 cells
+    let clock = 0, pathM = 0, pathRef = null, keyRef = null, job = null, jobDoneT = -Infinity, pending = null;
+    let deltas = [];
+    const round1 = (x) => Math.round(x * 10) / 10;
+    const cellKey = (a, b) => a * 1e6 + b;          // unique while |b| < 5e5 cells (6000 km)
+    // _near: the nearest usable key within triggerR, the later one on a tie (the scan's `d <= best_d`).
+    function near(n, e, now) {
+      let best = null, bestD2 = CF.triggerR * CF.triggerR;
+      const cn = Math.floor(n / CF.triggerR), ce = Math.floor(e / CF.triggerR);
+      for (let a = cn - 1; a <= cn + 1; a++) for (let b = ce - 1; b <= ce + 1; b++) {
+        for (const i of grid.get(cellKey(a, b)) || []) {
+          const k = keys[i];
+          if (k.spent || now - k.t < CF.minKeyAge) continue;     // one altitude: the AGL gate never binds
+          const d2 = (n - k.n) * (n - k.n) + (e - k.e) * (e - k.e);
+          if (d2 < bestD2 || (d2 === bestD2 && (best === null || i > best))) { best = i; bestD2 = d2; }
+        }
+      }
+      return best;
+    }
+    function submit(s, ki, tFrame) {
+      const apart = Math.abs(planError(s, out, rate) - planError(keys[ki].path, out, rate));
+      job = { doneT: clock + CF.latency, ok: apart <= CF.reach, ki, tFrame };
+    }
+    function agree(now) {
+      deltas = deltas.filter((d) => now - d.t <= CF.window);
+      if (deltas.length < CF.need) return null;
+      const ki = deltas[deltas.length - 1].ki, k = keys[ki];
+      for (const kk of keys) if (Math.hypot(kk.n - k.n, kk.e - k.e) <= 2 * CF.triggerR) kk.spent = true;
+      deltas = [];
+      return ki;
+    }
+    function offer(n, e, s) {
+      const now = clock;
+      if (pathRef === null) pathRef = [n, e];
+      const step = Math.hypot(n - pathRef[0], e - pathRef[1]);
+      if (step >= CF.pathStep) { pathM += step; pathRef = [n, e]; }
+      let fixKi = null;
+      if (job !== null && now >= job.doneT) {
+        const j = job; job = null; jobDoneT = now;
+        if (j.ok) deltas.push({ t: j.tFrame, ki: j.ki });
+        fixKi = agree(now);
+      }
+      if (CF.agl >= CF.minAgl && Math.hypot(n, e) >= CF.minHome && keys.length < CF.maxKeys &&
+          (keyRef === null || Math.hypot(n - keyRef[0], e - keyRef[1]) >= CF.keyEvery)) {
+        keys.push({ n, e, t: now, path: pathM, spent: false });
+        const c = cellKey(Math.floor(n / CF.triggerR), Math.floor(e / CF.triggerR));
+        if (!grid.has(c)) grid.set(c, []);
+        grid.get(c).push(keys.length - 1);
+        keyRef = [n, e];
+      }
+      const ki = near(n, e, now);
+      if (job === null && fixKi === null && now - jobDoneT >= CF.minGap) {
+        const p = pending; pending = null;
+        if (ki !== null) submit(s, ki, now);
+        else if (p !== null && !keys[p.ki].spent) submit(p.s, p.ki, p.t);
+      } else if (ki !== null) {
+        // busy or pausing while passing a key: keep the frame nearest it, register it when the worker frees (T37)
+        const d = Math.hypot(n - keys[ki].n, e - keys[ki].e);
+        if (pending === null || d < pending.d) pending = { d, s, ki, t: now };
+      }
+      return fixKi;
+    }
+    let s = 0;
+    const step = speed / CF.hz;
+    for (let i = 1; i < route.length; i++) {
+      const [n0, e0] = route[i - 1], [n1, e1] = route[i];
+      const seg = Math.hypot(n1 - n0, e1 - e0), k = Math.max(1, Math.ceil(seg / step));
+      for (let j = 1; j <= k; j++) {
+        s += seg / k;
+        clock = s / speed;
+        const fk = offer(n0 + (n1 - n0) * j / k, e0 + (e1 - e0) * j / k, s);
+        if (fk !== null) out.push([round1(s), round1(keys[fk].path)]);
+      }
+    }
+    return out;
+  }
+
+  // fmp_check's drift rows for the waypoints [[n, e] m from home, …] as its loader reads them (every NAV_WAYPOINT in
+  // order, the VIO end's "WP home" included), home -> them -> home: {fixes: [[s, key s]…], end_m, worst_m (on the
+  // way), nofix_m, path_m, lastFixM (metres before the end), speed}.
+  function forecastNE(xy, speed) {
+    const pts = [[0, 0], ...xy, [0, 0]];
+    let path = 0;
+    for (let i = 1; i < pts.length; i++) path += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    const v = Math.max(SCORE_SPEED, +speed || 0), fixes = routeFixes(pts, v, AIRCRAFT_DRIFT);
+    const end = planError(path, fixes, AIRCRAFT_DRIFT);
+    const worst = Math.max(end, ...fixes.map((f) => planError(f[0] - 1e-6, fixes, AIRCRAFT_DRIFT)));
+    return { fixes, end_m: end, worst_m: worst, nofix_m: AIRCRAFT_DRIFT * path, path_m: path, speed: v,
+      lastFixM: fixes.length ? path - fixes[fixes.length - 1][0] : null };
+  }
+  // The same for an FMP VIO mission: home -> route -> WP home (mission_items' VIO end).
+  function crossingForecast(home, route, speed) {
+    return forecastNE([...(route || []).map((p) => toNE(home, p[0], p[1])), [0, 0]], speed);
+  }
+
+  // make_missions_next.closure_point: a point on the transit line home -> `first` at CLOSURE_M from home, so the last
+  // CLOSURE_M of the return fly over the keys the transit laid (>= 40 m out). null when the route starts closer than
+  // CLOSURE_M + 20 m (nothing to close over) or the way from `last` to it passes within CLOSURE_CLEAR_M of home (the
+  // home fix would start on a pass over home). first / last: [n, e] m from home.
+  function closurePoint(first, last) {
+    const d = Math.hypot(first[0], first[1]);
+    if (d < CLOSURE_M + 20) return null;
+    const cp = [first[0] * CLOSURE_M / d, first[1] * CLOSURE_M / d];
+    const bn = cp[0] - last[0], be = cp[1] - last[1];
+    const t = Math.max(0, Math.min(1, -(last[0] * bn + last[1] * be) / Math.max(bn * bn + be * be, 1e-9)));
+    return Math.hypot(last[0] + t * bn, last[1] + t * be) < CLOSURE_CLEAR_M ? null : cp;
+  }
+
+  // The VIO mission FMP flies for `route` (the whole field or one sortie): as built or reversed — so the transit from
+  // home crosses the legs — each open or closed over the transit. Chosen by the forecast: the lowest error at the end
+  // plus the worst on the way (the home fix and the field both count: a reversal can keep the end and double the
+  // error mid-field, M16 20 -> 40 m); a near tie (0.5 m) goes to the simpler one — reversing is free, closing costs
+  // path. {route, reversed, closed, fc, extraM, options}.
+  function planVioRoute(home, route, speed) {
+    if (!home || !route || route.length < 2) return null;
+    const opts = [];
+    for (const reversed of [false, true]) opts.push({ reversed, closed: false, route: reversed ? route.slice().reverse() : route });
+    for (const o of opts.slice()) {
+      const r = o.route, cp = closurePoint(toNE(home, r[0][0], r[0][1]), toNE(home, r[r.length - 1][0], r[r.length - 1][1]));
+      if (cp) opts.push({ reversed: o.reversed, closed: true, route: [...r, fromNE(home, cp)] });
+    }
+    let best = null;
+    const score = (o) => o.fc.end_m + o.fc.worst_m;
+    for (const o of opts) {
+      o.fc = crossingForecast(home, o.route, speed);
+      if (!best || score(o) < score(best) - 0.5) best = o;
+    }
+    return Object.assign({}, best, { extraM: best.fc.path_m - opts[0].fc.path_m, options: opts });
+  }
+
+  // Does the segment a-b ([lat, lng]) touch the ring ([{lat, lng}…])? Local metric projection at a; a cut-out the
+  // straight VIO transit flies over (it is not routed around them).
+  function segmentHitsRing(a, b, ring) {
+    if (!ring || ring.length < 3) return false;
+    const kx = Math.cos(a[0] * rad), P = (p) => [(p.lng - a[1]) * kx, p.lat - a[0]];
+    const B = [(b[1] - a[1]) * kx, b[0] - a[0]], A = [0, 0];
+    const cross = (o, p, q) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const p = P(ring[i]), q = P(ring[j]);
+      if ((p[1] > 0) !== (q[1] > 0) && 0 < (q[0] - p[0]) * (0 - p[1]) / (q[1] - p[1]) + p[0]) inside = !inside;
+      const d1 = cross(p, q, A), d2 = cross(p, q, B), d3 = cross(A, B, p), d4 = cross(A, B, q);
+      if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))) return true;
+    }
+    return inside;
+  }
+
   global.VIO_MODE = { haversineM, bearingDeg, compass8, relativeDeg, sideWord, nearestOnRing,
     routeSpan, reachM, driftWithin, originArgs, parseLatLon, VIO_FAMILY, VIO_ALARM, vioWarnings, vioAlertDue,
     MEASURED, measuredShare, measuredMaxPath, measuredReachM, segPenaltyS, missionTime, energy,
     legNeedM, shortLegs, splitSorties,
+    AIRCRAFT_DRIFT, FORECAST_GATE_M, CLOSURE_M, toNE, fromNE, planError, routeFixes, forecastNE, crossingForecast,
+    closurePoint, planVioRoute, segmentHitsRing,
     ENVELOPE_M, ENVELOPE_PLAN, ENVELOPE_UNCAL, ORIGIN_TOL_M: 8.0 };
 })(typeof window !== "undefined" ? window : globalThis);
