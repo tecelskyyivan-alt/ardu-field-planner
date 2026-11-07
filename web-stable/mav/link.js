@@ -98,9 +98,10 @@
   // Build the ordered mission items for upload — the SAME layout as backend/mission.py
   // mission_items (the .waypoints/.plan export and the desktop upload):
   //   GPS: 0 home(abs) · 1 takeoff · [do_change_speed] · waypoints… · [rtl]
-  //   VIO (opts.vio): 0 home · 1 takeoff · loiter 5 s · [do_change_speed] · waypoints… ·
-  //        wp home · loiter 25 s · land — `rtl` is ignored, the end is fixed (#54).
+  //   VIO (opts.vio): 0 home · 1 takeoff · loiter 5 s · [loiter 3 s at 105 m · loiter 1 s back] · [do_change_speed] ·
+  //        waypoints… · wp home · loiter 25 s · land — `rtl` is ignored, the end is fixed (#54).
   // opts.terrain: waypoints + the end over home in frame 10 (above the ground under the drone).
+  // opts.climb === false: no climb to 105 m — the forecast at the end is <= 40 m (VIO_MODE.climbNeeded, Ivan 07.11).
   function buildMissionItems(home, takeoffAlt, waypoints, wpAlt, rtl, speed, opts) {
     const vio = !!(opts && opts.vio), wf = (opts && opts.terrain) ? FRAME_TERRAIN : FRAME_GLOBAL_REL;
     const items = [];
@@ -111,8 +112,10 @@
     add(FRAME_GLOBAL_REL, CMD_TAKEOFF, home[0], home[1], takeoffAlt);
     if (vio) {
       add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, VIO_HOLD_START_S);
-      add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], VIO_KEY_TOP_M, 0, VIO_KEY_TOP_S);   // home keys to 100 m
-      add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, 1);               // the transit at mission height
+      if (opts.climb !== false) {
+        add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], VIO_KEY_TOP_M, 0, VIO_KEY_TOP_S);   // home keys to 100 m
+        add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, 1);             // the transit at mission height
+      }
     }
     if (speed && speed > 0) add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0, 0, 0, 0, 1.0, speed, -1.0);
     for (const [lat, lon] of waypoints) add(wf, CMD_WAYPOINT, lat, lon, wpAlt);
@@ -127,7 +130,7 @@
   // the battery-swap resume index. Must match buildMissionItems.
   function missionShape(speed, rtl, opts) {
     const vio = !!(opts && opts.vio);
-    return { lead: 2 + (vio ? 3 : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
+    return { lead: 2 + (vio ? (opts.climb === false ? 1 : 3) : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
   }
 
   // INAV mission builder. INAV's MAVLink receiver (src/main/telemetry/mavlink.c,

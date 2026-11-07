@@ -255,6 +255,8 @@ window.FMP_TR = {
   " · маршрут навпаки": " · route reversed",
   " · замикання +{0} м": " · closing loop +{0} m",
   "У кінці ~{0} м — понад 20 м, дім може не знайтися.": "At the end ~{0} m — over 20 m, home may not be found.",
+  "Підйом над домом до 105 м: у кінці ~{0} м, понад {1} м.": "Climb over home to 105 m: ~{0} m at the end, over {1} m.",
+  "Без підйому до 105 м: у кінці ~{0} м, до {1} м.": "No climb to 105 m: ~{0} m at the end, within {1} m.",
   "Обійти виріз чи небезпеку не вдалося — переліт іде над ними напряму.": "Could not route round a cut-out or hazard — the transit flies straight over it.",
   "Прогноз поправок на перетинах — рахую…": "Crossing-fix forecast — computing…",
   "FC тримає інший дім — перезавантаж FC на старті й залий місію ще раз.": "The FC holds another home — reboot the FC at the start point and upload again.",
