@@ -408,5 +408,25 @@ console.log("\n== ArduPilot 4.7 over ELRS: plain MISSION_REQUEST, ~1 s round tri
   clearInterval(hb); link.disconnect();
 }
 
+console.log("\n== every STATUSTEXT kept, the newest 12, with its severity (2.5.106) ==");
+{
+  const veh = MAVLINK.createParser();
+  const t = { ondata: null, close() {}, write(b) { veh.push(b); } };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  const link = new MAV_LINK.MavLink();
+  const hb = setInterval(() => {
+    send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 4, system_status: 3, mavlink_version: 3 });
+  }, 100);
+  await link.connect(t);
+  await sleep(150);
+  for (let i = 0; i < 14; i++) send("STATUSTEXT", { severity: i === 13 ? 2 : 6, text: "VIO msg " + i });
+  await sleep(200);
+  const log = link.status().msg_log;
+  check("[log] the newest 12 kept, oldest first", log.length === 12 && log[0].text === "VIO msg 2" && log[11].text === "VIO msg 13");
+  check("[log] severity kept, NUL padding trimmed", log[11].sev === 2 && !/\0/.test(log[11].text) && log[10].sev === 6);
+  check("[log] timestamps in order", log.every((m, i) => i === 0 || m.ts >= log[i - 1].ts));
+  clearInterval(hb); link.disconnect();
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.105";
+  const APP_VERSION = "2.5.106";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -4596,7 +4596,7 @@
     ["battery", t("Батарея")], ["alt", "Висота"], ["speed", "Швидкість"], ["wp", "Точка"],
     ["progress", "Прогрес"], ["tonext", "До точки"], ["remaining", "Лишилось"],
     ["eta", "ETA"], ["finish", "До завершення"], ["land", "До посадки"], ["message", "Повідомл."],
-    ["vio", "VIO"], ["crossing", t("Поправки")],
+    ["vio", "VIO"], ["violog", t("Журнал VIO")], ["crossing", t("Поправки")],
   ];
   let _hud = null;
   // ---- on-map telemetry overlay (#11): same data as the pinned notification, single source
@@ -4671,6 +4671,8 @@
     const c = color || "";
     if (r.lastColor !== c) { r.val.style.color = c; r.lastColor = c; }   // diff colour writes (#6)
   }
+  let _vioAlerted = null;            // the companion warning last beeped for, {text, ts}
+  function vioAge(sec) { return sec < 60 ? tf(t("{0} с"), Math.round(sec)) : tf(t("{0} хв"), Math.round(sec / 60)); }
   function mavRenderHud(s, p) {
     const { rows } = mavHudEnsure();
     hudSet(rows, "link", s.connected ? "● онлайн" : t("○ немає heartbeat"),
@@ -4707,6 +4709,18 @@
     const vm = vioFreshMsgs(s);
     hudSet(rows, "vio", vm.map((x) => x.text).join(" · "),
       vm.some((x) => x.alarm) ? "#ff7b72" : null, vm.length > 0);
+    // The companion's warnings of the last 10 min, newest first (2.5.106): the VIO row above keeps only the newest per
+    // family, so "VIO MISSION CHANGED since READY" at arming was gone by the first text after take-off. A NEW one beeps
+    // and vibrates once (the GPS guard's beep) — the pilot flies without the laptop and is not watching the screen.
+    const vw = window.VIO_MODE.vioWarnings(s.msg_log, Date.now(), 600000, 3);
+    hudSet(rows, "violog", vw.map((w) => vioAge(w.age) + " " + w.text).join(" · "),
+      vw.some((w) => w.alarm) ? "#ff7b72" : "#e3b341", vioOn() && vw.length > 0);
+    if (vioOn() && window.VIO_MODE.vioAlertDue(vw[0], _vioAlerted)) {
+      _vioAlerted = { text: vw[0].text, ts: vw[0].ts };
+      gpsBeep();
+      try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+      appLog("vio: warning " + vw[0].text);
+    }
     // Crossing fixes since arming, in VIO mode (field 05.11: seven went by unseen; the VIO row keeps only the newest).
     // Shown only once the companion's texts reach us at all: with the FC's MAV3_OPTIONS 2 (05.11) they do not, and a
     // "0" there would read as "no fixes" when there may have been several.
@@ -5914,7 +5928,7 @@
       const x = m[k];
       if (x && Date.now() - x.ts < 120000)
         out.push({ fam: k, text: x.text, age: (Date.now() - x.ts) / 1000,
-          alarm: k === "VIOFS" || /LAND|FAIL|LOST|MISMATCH|DIFF|STOP/i.test(x.text) });
+          alarm: k === "VIOFS" || window.VIO_MODE.VIO_ALARM.test(x.text) });
     }
     return out;
   }
