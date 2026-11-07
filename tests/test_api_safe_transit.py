@@ -54,5 +54,14 @@ r4 = api_with_state([], home=(49.4900, 24.0014)).safe_transit(
 check("override: egress ends at the OVERRIDE home, not the state home",
       abs(r4["egress"][-1]["lat"]-49.4892) < 1e-4)
 
+# 5) 2.5.108: `route` — the GPS-denied planner asks for its own ends (a reversed route, a sortie): the legs go to
+#    THOSE ends, round the obstacle all the same; without it, the built route's (above)
+r5 = api_with_state([obst]).safe_transit({"route": [list(wps[-1]), list(wps[0])]})
+check("route: ingress to the given first end (the built route's LAST point)",
+      r5["ingress_ok"] and abs(r5["ingress"][-1]["lat"] - wps[-1][0]) < 1e-6 and abs(r5["ingress"][-1]["lng"] - wps[-1][1]) < 1e-6)
+check("route: egress from the given last end (the built route's FIRST point), round the obstacle (>2 pts)",
+      r5["egress_ok"] and abs(r5["egress"][0]["lat"] - wps[0][0]) < 1e-6 and len(r5["egress"]) > 2)
+check("route: the state's route is untouched", api_with_state([obst])._state["waypoints"] == wps)
+
 print("\nRESULT: " + (f"{failed} FAILURE(S)" if failed else "ALL CHECKS PASSED"))
 sys.exit(1 if failed else 0)

@@ -114,6 +114,24 @@ check("sorties: more than one, every point flown, each within the budget",
 check("sorties cut after a pass end: each sortie has whole passes (even count, starts on a pass start)",
   so.every((r) => (r.to - r.from + 1) % 2 === 0 && r.from % 2 === 0));
 check("sorties: one fits -> one", V.splitSorties(home, field, 1e6, o, 20).length === 1);
+// 2.5.108: the closure the crossing planner may add is in each sortie's budget (240 s: 6 sorties without, 7 with it)
+const oc = Object.assign({ closure: true }, o), soc = V.splitSorties(home, field, 240, oc, 20);
+check("sorties with the closure budget: 7 instead of 6, each fits with its closure",
+  so.length === 6 && soc.length === 7 && soc.every((r) => V.missionTime(home, field.slice(r.from, r.to + 1), oc).total_s <= 240));
+{
+  const M16ll = [[-667.7, 431.1], [-12.4, 315.6], [-24.5, 236.5], [-682.8, 352.6], [-698.0, 274.0], [-36.6, 157.4],
+    [-48.8, 78.3], [-713.2, 195.5], [-728.3, 116.9], [-60.9, -0.8]].map((ne) => V.fromNE(home, ne));
+  const a = V.missionTime(home, M16ll, { speed: 13 }), b = V.missionTime(home, M16ll, { speed: 13, closure: true });
+  check("missionTime closure: M16 +98.8 m (= the planner's closure, the reversed one has none) and one segment more",
+    near(b.path_m - a.path_m, 98.79, 0.05) && b.segments === a.segments + 1);
+  // the sorties field starts 111 m out (nothing to close over) and ends 246 m out: only the reversed mission closes
+  check("missionTime closure: the reversed direction's closure is budgeted too (+99.8 m on the sorties field)",
+    near(V.missionTime(home, field, oc).path_m - V.missionTime(home, field, o).path_m, 99.807, 0.01));
+  const nearHome = [[50, 0], [50, 100], [0, 100]].map((ne) => V.fromNE(home, ne));    // both ends within 120 m
+  check("missionTime closure: nothing to close over (a 1-point route, both ends within 120 m) -> nothing added",
+    V.missionTime(home, M16ll.slice(0, 1), { speed: 13, closure: true }).path_m === V.missionTime(home, M16ll.slice(0, 1), { speed: 13 }).path_m &&
+    V.missionTime(home, nearHome, oc).path_m === V.missionTime(home, nearHome, o).path_m);
+}
 check("sorties: budget below one point -> null", V.splitSorties(home, field, 10, o, 20) === null);
 
 
@@ -150,6 +168,130 @@ check("sorties: budget below one point -> null", V.splitSorties(home, field, 10,
   check("alert: nothing newer, no beep", !V.vioAlertDue(undefined, a));
   check("alert: an OLDER warning with another text does not (only what came after the one beeped for)",
     !V.vioAlertDue({ text: "VIO MISSION CHANGED since READY", ts: 90_000 }, a));
+}
+
+// 2.5.107: crossing fixes — the port of ardu-gps-denied's fmp_check forecast. Every expected number here is what
+// ardu-gps-denied's own code gives for the same input (mission_executor/crossing_fix.py route_fixes / plan_error,
+// tests/test_crossing_fix.py and tests/test_fmp_check.py vectors), not what this port gives.
+{
+  check("planError: the error goes back to the key's and grows again (test_crossing_fix vectors 30 / 10 / 16)",
+    near(V.planError(3000, [], 0.01), 30, 1e-9) && near(V.planError(3000, [[2500, 500]], 0.01), 10, 1e-9) &&
+    near(V.planError(5000, [[2500, 500], [4000, 2600]], 0.01), 16, 1e-9));
+  // rate 0 = route_fixes without drift_frac: every registration lands
+  const square = V.routeFixes([[0, 0], [0, 2500], [300, 2500], [300, 1200], [-300, 1200]], 22, 0);
+  check("routeFixes: a leg square to the transit 100+ s later corrects once, at route_fixes' [4423.1, 1194.5]",
+    square.length === 1 && square[0][0] === 4423.1 && square[0][1] === 1194.5);
+  check("routeFixes: the same crossing 36 s after the key does not (key age 60 s)",
+    V.routeFixes([[0, 0], [0, 800], [300, 800], [300, 700], [-300, 700]], 22, 0).length === 0);
+  check("routeFixes: a route that never crosses itself does not",
+    V.routeFixes([[0, 0], [0, 1500], [300, 1500]], 22, 0).length === 0);
+  const loop = [[0, 0], [0, 1200], [300, 1200], [300, 500], [-300, 500]];
+  const l1 = V.routeFixes(loop, 22, 0.0101);
+  check("routeFixes: 2 km between the passes at 1.01 % is inside the 25 m reach -> [2523.1, 501.6]; at 2 % it is not",
+    l1.length === 1 && l1[0][0] === 2523.1 && l1[0][1] === 501.6 && V.routeFixes(loop, 22, 0.02).length === 0);
+  // test_fmp_check LOOP: 1 fix, 13.75 m at the end (34.17 without), 25.48 m just before the crossing
+  const fl = V.forecastNE([[1200, 0], [1200, 300], [500, 300], [500, -300]], 0);
+  check("forecastNE: fmp_check's LOOP — 1 fix, end 13.75, worst 25.48, 34.17 without, scored at 22 m/s",
+    fl.fixes.length === 1 && near(fl.end_m, 13.752, 0.005) && near(fl.worst_m, 25.483, 0.005) &&
+    near(fl.nofix_m, 34.169, 0.005) && fl.speed === 22);
+  check("forecastNE: a faster mission is scored at its own speed", V.forecastNE([[100, 0]], 25).speed === 25);
+
+  // A real 30 ha field's route as N, E metres from its home (M16, 10 points; flown 03.11 at 13 m/s). fmp_check on
+  // that flight's file: 5 fixes, 15.55 m at the end, 20.44 m on the way; route_fixes with the closure point: 7, 0.91.
+  const M16 = [[-667.7, 431.1], [-12.4, 315.6], [-24.5, 236.5], [-682.8, 352.6], [-698.0, 274.0], [-36.6, 157.4],
+    [-48.8, 78.3], [-713.2, 195.5], [-728.3, 116.9], [-60.9, -0.8]];
+  const f16 = V.forecastNE([...M16, [0, 0]], 13);
+  check("forecastNE: M16 as fmp_check scores it — 5 fixes, 15.55 / 20.44 m, the first at [2024.0, 578.2]",
+    f16.fixes.length === 5 && near(f16.end_m, 15.549, 0.005) && near(f16.worst_m, 20.442, 0.005) &&
+    f16.fixes[0][0] === 2024.0 && f16.fixes[0][1] === 578.2);
+  const cp = V.closurePoint(M16[0], M16[M16.length - 1]);
+  check("closurePoint: 100 m out on the transit line", near(cp[0], -84.011, 0.001) && near(cp[1], 54.242, 0.001));
+  const c16 = V.forecastNE([...M16, cp, [0, 0]], 13);
+  check("closure: the return over the transit's keys — 7 fixes, 0.91 m at the end (route_fixes: 7, 0.910)",
+    c16.fixes.length === 7 && near(c16.end_m, 0.910, 0.005) && near(c16.worst_m, 20.442, 0.005));
+  check("closurePoint: none when the route starts within 120 m (nothing to close over)",
+    V.closurePoint([0, 110], [500, 500]) === null);
+  check("closurePoint: none when the way to it passes within 30 m of home (the home fix would start on a pass)",
+    V.closurePoint([0, 400], [0, -300]) === null && V.closurePoint([0, 400], [200, -300]) !== null);
+
+  // The planner on that route, placed at this file's synthetic home (no real coordinates in the repo)
+  const ll = M16.map((ne) => V.fromNE(home, ne));
+  check("toNE / fromNE round-trip to 1 mm", ll.every((p, i) => near(V.toNE(home, p[0], p[1])[0], M16[i][0], 1e-3) &&
+    near(V.toNE(home, p[0], p[1])[1], M16[i][1], 1e-3)));
+  const p16 = V.planVioRoute(home, ll, 13);
+  check("plan: M16 as built + closure — 0.91 m at the end instead of 15.55, +99 m of path",
+    !p16.reversed && p16.closed && p16.route.length === 11 && near(p16.fc.end_m, 0.910, 0.01) &&
+    near(p16.extraM, 98.8, 0.5) && p16.options.length === 3);
+  check("plan: the reversal kept M16's end (15.56) but doubled the error mid-field (39.9) — not chosen",
+    p16.options.some((o) => o.reversed && !o.closed && near(o.fc.end_m, 15.561, 0.01) && near(o.fc.worst_m, 39.883, 0.01)));
+  const pr = V.planVioRoute(home, ll.slice().reverse(), 13);
+  check("plan: a route built from the near end is turned round so the transit crosses the legs, then closed",
+    pr.reversed && pr.closed && near(pr.fc.end_m, 0.910, 0.01) && pr.route[0] === ll[0]);
+  const pa = V.planVioRoute(home, ll.slice().reverse(), 13, true);
+  check("plan asBuilt (a resumed remainder): the forecast of the route as uploaded, nothing turned or added",
+    !pa.reversed && !pa.closed && pa.options.length === 1 && pa.route.length === ll.length && near(pa.fc.end_m, 15.561, 0.01));
+  // no crossing either way, the start too close to close over: 4 km of legs north of home, as built kept
+  const lane = [[0, 100], [2000, 100], [2000, 180], [0, 180]].map((ne) => V.fromNE(home, ne));
+  const pl = V.planVioRoute(home, lane, 13);
+  check("plan: no crossing either way -> as built, open, over the 20 m gate (the panel warns)",
+    !pl.reversed && !pl.closed && pl.fc.fixes.length === 0 && pl.fc.end_m > V.FORECAST_GATE_M);
+  check("plan: no route -> null", V.planVioRoute(home, [ll[0]], 13) === null && V.planVioRoute(null, ll, 13) === null);
+  // 4 legs of 500 m, 80 m apart, home 60 m west of the first. route_fixes: as built 2 fixes, 0.874 m at the end,
+  // 25.13 m on the way; reversed 2, 0.885, 15.09 — the same end, the field flown with 10 m less error
+  const four = [[0, 60], [500, 60], [500, 140], [0, 140], [0, 220], [500, 220], [500, 300], [0, 300]];
+  const p4 = V.planVioRoute(home, four.map((ne) => V.fromNE(home, ne)), 22);
+  const o4 = p4.options.find((o) => !o.reversed && !o.closed);
+  check("plan: the same end either way (0.87 / 0.89 m) -> the direction with 15.1 m on the way, not 25.1",
+    p4.reversed && !p4.closed && near(p4.fc.end_m, 0.885, 0.005) && near(p4.fc.worst_m, 15.09, 0.005) &&
+    near(o4.fc.end_m, 0.874, 0.005) && near(o4.fc.worst_m, 25.128, 0.005));
+  // two keys exactly as near: CrossingFix's scan (`d <= best_d`) takes the later one — route_fixes: [1573.0, 49.0]
+  const tie = V.routeFixes([[0, 0], [200, 0], [200, 600], [45, 600], [45, -600]], 20, 0);
+  check("routeFixes: of two equally near keys the later one, as route_fixes ([1573.0, 49.0])",
+    tie.length === 1 && tie[0][0] === 1573.0 && tie[0][1] === 49.0);
+
+  // 2.5.108: the transit and the closure go round cut-outs (FMP's safe transit, the engine's paths, Ivan 06.11) and the
+  // forecast is of those very waypoints. The same M16 with the transit bent round a cut-out at (-300, 160):
+  // route_fixes on the waypoints flown gives 4 fixes / 15.655 / 20.796 open, 6 / 0.909 closed.
+  const H = [home.lat, home.lng], LL = (ne) => V.fromNE(home, ne);
+  const inFirst = [H, LL([-300, 160]), ll[0]];
+  const pd = V.planVioRoute(home, ll, 13, false, { inFirst, inLast: null, apFwd: null, apRev: null });
+  const od = pd.options.find((o) => !o.reversed && !o.closed);
+  check("detour: the open mission flies home -> (-300, 160) -> the legs; the forecast of it is route_fixes' (4, 15.655, 20.796)",
+    od.route[0] === inFirst[1] && od.route.length === 11 && od.legsFrom === 1 && od.legsTo === 10 &&
+    od.route[od.legsFrom] === ll[0] && od.route[od.legsTo] === ll[9] && od.fc.fixes.length === 4 &&
+    near(od.fc.end_m, 15.655, 0.005) && near(od.fc.worst_m, 20.796, 0.005));
+  const cpd = V.closureOn(home, inFirst);
+  check("detour: closed 100 m out along the bent transit (on its first leg, 340 m) — 6 fixes, 0.909 m (route_fixes)",
+    !pd.reversed && pd.closed && pd.route.length === 12 && near(pd.route[11][0], cpd.cp[0], 1e-12) && cpd.i === 1 &&
+    near(V.toNE(home, cpd.cp[0], cpd.cp[1])[0], -88.24, 0.01) && pd.fc.fixes.length === 6 && near(pd.fc.end_m, 0.909, 0.005));
+  // past a vertex: home -> (-60, 40) is 72 m, so the closure point is 28 m on, and the way home runs back over (-60, 40)
+  const c2 = V.closureOnPath([[0, 0], [-60, 40], [0, 300]]);
+  check("closureOnPath: 100 m along a bent path, past its vertex (i 2); none on a path under 120 m",
+    c2.i === 2 && near(c2.cp[0], -53.73, 0.01) && near(c2.cp[1], 67.17, 0.01) && V.closureOnPath([[0, 0], [0, 110]]) === null);
+  const fl4 = four.map(LL), inLast4 = [H, LL([-60, 40]), fl4[7]], cr4 = V.closureOn(home, inLast4);
+  const p4d = V.planVioRoute(home, fl4, 22, false, { inFirst: null, inLast: inLast4, apFwd: null, apRev: [fl4[0], LL([-20, 80]), cr4.cp] });
+  const rc4 = p4d.options.find((o) => o.reversed && o.closed);
+  check("detour closed: legs reversed, then the engine's way to the closure point, the point, back over the vertex",
+    rc4.legsFrom === 1 && rc4.route[0] === inLast4[1] && rc4.route[rc4.legsFrom] === fl4[7] && rc4.route[rc4.legsTo] === fl4[0] &&
+    rc4.route.length === 12 && near(rc4.route[10][1], cr4.cp[1], 1e-12) && rc4.route[11] === inLast4[1]);
+  const p4h = V.planVioRoute(home, fl4, 22, false, { inFirst: null, inLast: inLast4, apFwd: null, apRev: [fl4[0], LL([5, 5]), cr4.cp] });
+  check("clearOfHome: a way to the closure point over home -> no closed option",
+    !p4h.options.some((o) => o.closed) && V.clearOfHome([[0, 60], [-20, 80]]) && !V.clearOfHome([[0, 60], [5, 5], [-50, 70]]));
+  // straight segments over a cut-out: a candidate with one flies only when every candidate has one
+  const same = (a, b) => Math.abs(a[0] - b[0]) < 1e-12 && Math.abs(a[1] - b[1]) < 1e-12;
+  const overR0 = (a, b) => (same(a, H) && same(b, fl4[0])) || (same(a, fl4[0]) && same(b, H));
+  const pb = V.planVioRoute(home, fl4, 22, false, null, overR0), pp = V.planVioRoute(home, fl4, 22, false, null);
+  check("blocked: home <-> the first leg over a cut-out -> reversed and closed (its only clean option), not the plain pick",
+    pb.reversed && pb.closed && !pb.blocked && pp.reversed && !pp.closed);
+  const pall = V.planVioRoute(home, fl4, 22, false, null, () => true);
+  check("blocked: every option crosses one -> the plain pick, flagged for the panel warning",
+    pall.reversed === pp.reversed && pall.closed === pp.closed && pall.blocked);
+
+  const sq = [{ lat: 49.501, lng: 23.999 }, { lat: 49.501, lng: 24.001 }, { lat: 49.502, lng: 24.001 }, { lat: 49.502, lng: 23.999 }];
+  check("segmentHitsRing: across a cut-out, out of it, wholly inside it, and past it",
+    V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], sq) && V.segmentHitsRing([49.5015, 24.0], [49.5, 24.0], sq) &&
+    V.segmentHitsRing([49.5015, 24.0], [49.5016, 24.0002], sq) &&
+    !V.segmentHitsRing([49.5, 24.0], [49.5, 24.003], sq) && !V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], [sq[0], sq[1]]));
 }
 
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
