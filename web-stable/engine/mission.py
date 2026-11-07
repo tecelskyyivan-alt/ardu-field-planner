@@ -33,9 +33,10 @@ VIO_HOLD_END_S = 25.0
 # Then up over home to VIO_KEY_TOP_M and back down to the mission height before the route: the companion keys
 # 60 / 80 / 100 m on the way, and its 100 m retry stage finds home 50-90 m off (M17: 91 / 55 % of frames against
 # 10 / 0 % with keys to 40 m). 105, not 100: a key is the first frame AT or above its level. Ivan 07.11: only when the
-# companion may come back more than 50 m off — the caller decides from the forecast (`climb`, vio-mode.js
-# climbNeeded): below 50 m its 100 m retry finds home with the keys to the mission height (91-100 %), and the climb
-# costs +81 s and 5.5 % of the pack on M19 (ardu-gps-denied audits/climb-105-2026-11-07, SITL 4.7.0).
+# companion may come back more than 50 m off even if no crossing fix registers (05.11 attempt 3: none, 83 m) — the
+# caller decides from the no-fix forecast (`climb`, vio-mode.js climbNeeded): below 50 m its 100 m retry finds home
+# with the keys to the mission height (91-100 %); the climb costs +81 s and 5.5 % of the pack on M19
+# (ardu-gps-denied audits/climb-105-2026-11-07, SITL 4.7.0).
 VIO_KEY_TOP_M = 105.0
 VIO_KEY_TOP_S = 3.0
 
@@ -47,7 +48,8 @@ def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
     GPS:  home · TAKEOFF · [DO_CHANGE_SPEED] · waypoints · [RTL]
     VIO:  home · TAKEOFF · LOITER_TIME 5 · [LOITER_TIME 3 at 105 m · LOITER_TIME 1 back at takeoff_alt] ·
           [DO_CHANGE_SPEED] · waypoints · WP home · LOITER_TIME 25 · LAND (home)  — `rtl` is ignored: the end is fixed.
-    `climb` (VIO only): the two climb rows, home keys to 100 m — False when the forecast at the end is <= 40 m.
+    `climb` (VIO only): the two climb rows, home keys to 100 m — False when even without a crossing fix the forecast
+    at the end is <= 40 m.
     The climb is LOITER_TIME over home, not WAYPOINT: the route stays the only waypoints (ardu-gps-denied's loader
     flies one altitude frame for the whole body), and the transit leaves at the mission height.
     terrain=True puts the waypoints (and the VIO end over home) in frame 10, so the

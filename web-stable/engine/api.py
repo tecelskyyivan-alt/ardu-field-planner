@@ -477,7 +477,7 @@ class Api:
             err = self._terrain_blocker()
             if err:
                 return {"ok": False, "error": err}
-        # `vio_climb` False: the forecast at the end is <= 40 m, no climb to 105 m (vio-mode.js climbNeeded)
+        # `vio_climb` False: no climb to 105 m — even without a crossing fix <= 40 m at the end (vio-mode.js climbNeeded)
         items = self._mission_items(p0.get("vio_home"), terrain=bool(p0.get("terrain")),
                                     route=p0.get("route"), climb=p0.get("vio_climb") is not False)
         if items is None:
@@ -673,7 +673,7 @@ class Api:
                     does, #52) and the VIO start/end profile (#54);
           terrain  — waypoint altitudes in the terrain frame (10);
           flights  — [[[lat,lng],…],…] sorties to write one file each (#60);
-          climbs   — [bool per flight]: VIO climb to 105 m (False: forecast at the end <= 40 m); missing = climb."""
+          climbs   — [bool per flight]: VIO climb to 105 m (False: <= 40 m at the end without fixes); missing = climb."""
         if not self._state:
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
         opts = fmt if isinstance(fmt, dict) else {}

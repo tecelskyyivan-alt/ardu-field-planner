@@ -101,7 +101,8 @@
   //   VIO (opts.vio): 0 home · 1 takeoff · loiter 5 s · [loiter 3 s at 105 m · loiter 1 s back] · [do_change_speed] ·
   //        waypoints… · wp home · loiter 25 s · land — `rtl` is ignored, the end is fixed (#54).
   // opts.terrain: waypoints + the end over home in frame 10 (above the ground under the drone).
-  // opts.climb === false: no climb to 105 m — the forecast at the end is <= 40 m (VIO_MODE.climbNeeded, Ivan 07.11).
+  // opts.climb === false: no climb to 105 m — even without a crossing fix the forecast at the end is <= 40 m
+  // (VIO_MODE.climbNeeded, Ivan 07.11).
   function buildMissionItems(home, takeoffAlt, waypoints, wpAlt, rtl, speed, opts) {
     const vio = !!(opts && opts.vio), wf = (opts && opts.terrain) ? FRAME_TERRAIN : FRAME_GLOBAL_REL;
     const items = [];

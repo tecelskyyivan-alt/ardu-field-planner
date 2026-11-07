@@ -5992,8 +5992,8 @@
     return plan;
   }
   function vioPlanned(route) { const p = vioPlanFor(route); return p ? p.route : route; }
-  // Ivan 07.11: climb over home to 105 m (home keys to 100 m) only when the forecast at the end is over 40 m; no
-  // forecast (not planned yet) -> climb. GPS mode: no VIO profile at all (`vio_home` null), the value is unused.
+  // Ivan 07.11: climb over home to 105 m (home keys to 100 m) only when the error at the end without a crossing fix is
+  // over 40 m (VIO.climbNeeded); no forecast (not planned yet) -> climb. GPS mode: no VIO profile (`vio_home` null).
   function vioClimbFor(route) { const p = vioPlanFor(route); return VIO.climbNeeded(p ? p.fc : null); }
   // Upload and export fly the plan: wait for the engine's paths of their route(s). GPS mode: nothing to wait for.
   function vioPlanReady(routes) {
@@ -6141,9 +6141,10 @@
           (plan.closed ? tf(t(" · замикання +{0} м"), Math.round(plan.extraM)) : ""));
         if (fc.end_m > VIO.FORECAST_GATE_M)
           lines.push("⚠️ " + tf(t("У кінці ~{0} м — понад 20 м, дім може не знайтися."), Math.round(fc.end_m)));
-        lines.push(VIO.climbNeeded(fc) ? tf(t("Підйом над домом до 105 м: у кінці ~{0} м, понад {1} м."),
-          Math.round(fc.end_m), VIO.CLIMB_GATE_M)
-          : tf(t("Без підйому до 105 м: у кінці ~{0} м, до {1} м."), Math.round(fc.end_m), VIO.CLIMB_GATE_M));
+        lines.push(VIO.climbNeeded(fc) ? tf(t("Підйом над домом до 105 м: без поправок у кінці ~{0} м, понад {1} м."),
+          Math.round(fc.nofix_m), VIO.CLIMB_GATE_M)
+          : tf(t("Без підйому до 105 м: навіть без поправок у кінці ~{0} м, до {1} м."), Math.round(fc.nofix_m),
+            VIO.CLIMB_GATE_M));
         // the safe transit could not route round it, so a straight segment still crosses one (2.5.108)
         if (plan.blocked) lines.push("⚠️ " + t("Обійти виріз чи небезпеку не вдалося — переліт іде над ними напряму."));
       } else if (legsRoute && legsRoute.length > 1) {

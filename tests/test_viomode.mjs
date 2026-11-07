@@ -294,11 +294,14 @@ check("sorties: budget below one point -> null", V.splitSorties(home, field, 10,
     !V.segmentHitsRing([49.5, 24.0], [49.5, 24.003], sq) && !V.segmentHitsRing([49.5, 24.0], [49.503, 24.0], [sq[0], sq[1]]));
 }
 
-// Ivan 07.11: the climb over home to 105 m only when the forecast at the end is over 40 m (CLIMB_GATE_M)
+// Ivan 07.11: the climb over home to 105 m only when the error at the end WITHOUT a crossing fix is over 40 m
 {
-  check("climbNeeded: 40 m at the end -> no climb, 40.1 m -> climb, no forecast -> climb, NaN -> climb",
-    V.CLIMB_GATE_M === 40 && !V.climbNeeded({ end_m: 40 }) && V.climbNeeded({ end_m: 40.1 }) &&
-    V.climbNeeded(null) && V.climbNeeded(undefined) && V.climbNeeded({ end_m: NaN }) && !V.climbNeeded({ end_m: 15 }));
+  check("climbNeeded: on nofix_m — 40 m -> no climb, 40.1 -> climb; no forecast / NaN -> climb; end_m does not decide",
+    V.CLIMB_GATE_M === 40 && !V.climbNeeded({ nofix_m: 40, end_m: 90 }) && V.climbNeeded({ nofix_m: 40.1, end_m: 1 }) &&
+    V.climbNeeded(null) && V.climbNeeded(undefined) && V.climbNeeded({ nofix_m: NaN }) && V.climbNeeded({ end_m: 15 }));
+  const fc16 = V.forecastNE([[0, 0], [2265, 0], [0, 0]], 13);         // a 4.53 km route, M16's length
+  check("a 4.5 km route (M16) climbs, a 3 km one does not (nofix ~1 % of the path)",
+    V.climbNeeded(fc16) && !V.climbNeeded(V.forecastNE([[0, 0], [1500, 0], [0, 0]], 13)));
 }
 
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
