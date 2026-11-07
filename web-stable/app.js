@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.108";
+  const APP_VERSION = "2.5.109";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -1772,7 +1772,10 @@
       // each as the crossing plan flies it, safe transit included (2.5.107-108): the file is the upload and the forecast
       const rs = (so && so.length > 1) ? so.map((x) => x.route) : ((lastRoute && lastRoute.length) ? [lastRoute] : []);
       await vioPlanReady(rs);
-      if (rs.length) fmt.flights = rs.map((r) => vioPlanned(r));
+      if (rs.length) {
+        fmt.flights = rs.map((r) => vioPlanned(r));
+        fmt.climbs = rs.map((r) => vioClimbFor(r));     // per file: the climb to 105 m by its forecast (Ivan 07.11)
+      }
     }
     // Browser / APK: the engine builds the files, the browser downloads them (no server).
     const eng = window.FMP_ENGINE;
@@ -2976,8 +2979,12 @@
   }
   // Скільки службових пунктів іде ПЕРЕД точками маршруту: home + takeoff
   // (+ do_change_speed, якщо задана швидкість) — див. buildMissionItems.
+  // What the last VIO upload did about the climb to 105 m (vioClimbFor), for missionLead() — declared here, before any
+  // caller can run (a later `let` would be in its dead zone for a boot-time call).
+  let vioClimbUp = true;
   function missionLead() {
-    return 2 + (vioHomeForUpload() ? 3 : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);   // + VIO: 5 s, 105 m, back
+    // + VIO: 5 s, then 105 m and back unless the last upload left the climb out (vioClimbUp, Ivan 07.11)
+    return 2 + (vioHomeForUpload() ? (vioClimbUp === false ? 1 : 3) : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);
   }
   // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
   // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).
@@ -3338,7 +3345,8 @@
       }
       // GPS-denied: the VIO start/end profile (hover over home, LAND) and, optionally,
       // terrain-frame altitudes — the same layout the file export writes (#52-#54).
-      const vioOpts = { vio: !isInav && !!(p && p.vio_home), terrain: !isInav && !!(p && p.terrain) };
+      const vioOpts = { vio: !isInav && !!(p && p.vio_home), terrain: !isInav && !!(p && p.terrain),
+        climb: !(p && p.vio_climb === false) };
       // Terrain frame needs a terrain source on the FC: with no rangefinder ArduCopter 4.7.0
       // raises "Terrain Unavailable" at the first waypoint and LANDs there (SITL 03.11). A
       // failed read does not block (flaky link); a clear 0 does. Mirrors api._terrain_blocker.
@@ -4980,9 +4988,11 @@
       const sortie = vioCurrentSortie();
       if (vioHomeForUpload()) await vioPlanReady([sortie ? sortie.route : lastRoute]);   // VIO: its safe transit
       const upRoute = planRoute();     // the sortie or the whole plan; in VIO mode as the crossing plan flies it
+      vioClimbUp = vioClimbFor(sortie ? sortie.route : lastRoute);   // missionLead() after the upload counts it
       try { localStorage.setItem(FLOWN_KEY, JSON.stringify({ route: upRoute, status: "uploading", ts: Date.now() })); } catch (e) {}
       const r = await a.mav_upload_mission({
         vio_home: vioHomeForUpload(),
+        vio_climb: vioClimbUp,
         terrain: vioTerrain(),
         // VIO: exactly the planned route, no safe-transit splice (it targets the engine route's ends) — the exported
         // file and the forecast fly the same straight transit (2.5.107)
@@ -5101,8 +5111,10 @@
       vioAsIsSig = routeSig(rem.rest);
       if (vioHomeForUpload()) await vioPlanReady([rem.rest]);
       const upRest = vioPlanned(rem.rest);
+      vioClimbUp = vioClimbFor(rem.rest);   // a new pack, a new companion process: the climb by the remainder's forecast
       const r = await a.mav_upload_mission({
         vio_home: vioHomeForUpload(),
+        vio_climb: vioClimbUp,
         terrain: vioTerrain(),
         route: upRest,
         onProgress: (s, tot) => setMsg(tf(t("Заливаю місію в дрон… {0}/{1} точок"), s, tot), null),
@@ -5980,6 +5992,9 @@
     return plan;
   }
   function vioPlanned(route) { const p = vioPlanFor(route); return p ? p.route : route; }
+  // Ivan 07.11: climb over home to 105 m (home keys to 100 m) only when the error at the end without a crossing fix is
+  // over 40 m (VIO.climbNeeded); no forecast (not planned yet) -> climb. GPS mode: no VIO profile (`vio_home` null).
+  function vioClimbFor(route) { const p = vioPlanFor(route); return VIO.climbNeeded(p ? p.fc : null); }
   // Upload and export fly the plan: wait for the engine's paths of their route(s). GPS mode: nothing to wait for.
   function vioPlanReady(routes) {
     if (!vioReady || !vioOn() || !vioHome) return Promise.resolve();
@@ -6126,6 +6141,10 @@
           (plan.closed ? tf(t(" · замикання +{0} м"), Math.round(plan.extraM)) : ""));
         if (fc.end_m > VIO.FORECAST_GATE_M)
           lines.push("⚠️ " + tf(t("У кінці ~{0} м — понад 20 м, дім може не знайтися."), Math.round(fc.end_m)));
+        lines.push(VIO.climbNeeded(fc) ? tf(t("Підйом над домом до 105 м: без поправок у кінці ~{0} м, понад {1} м."),
+          Math.round(fc.nofix_m), VIO.CLIMB_GATE_M)
+          : tf(t("Без підйому до 105 м: навіть без поправок у кінці ~{0} м, до {1} м."), Math.round(fc.nofix_m),
+            VIO.CLIMB_GATE_M));
         // the safe transit could not route round it, so a straight segment still crosses one (2.5.108)
         if (plan.blocked) lines.push("⚠️ " + t("Обійти виріз чи небезпеку не вдалося — переліт іде над ними напряму."));
       } else if (legsRoute && legsRoute.length > 1) {

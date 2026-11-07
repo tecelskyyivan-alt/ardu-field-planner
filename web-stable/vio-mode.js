@@ -246,6 +246,15 @@
   const SCORE_SPEED = 22;          // fmp_check --speed (the ops speed); the mission's own speed when faster
   const R_WGS = 6378137;           // fmp_import scores in geo.ll_to_xy: equirectangular at home, this radius
   const FORECAST_GATE_M = 20;      // plan 3.1: every VIO mission <= 20 m at the end, or a warning
+  // Ivan 07.11: the climb over home to 105 m (home keys to 100 m) only when the error at the end WITHOUT a single
+  // crossing fix (nofix_m, AIRCRAFT_DRIFT x path) is over this. The climb is the insurance for crossings that do not
+  // register: 05.11 attempt 3 (M19 from FMP) got none and came back 83 m off, where only a 100 m key finds home; below
+  // 50 m off the companion's 100 m retry finds it with the keys to the mission height (91-100 %, M17 03.11,
+  // ardu-gps-denied §3.1.379). The climb costs +81 s and 5.5 % of the pack on M19 (audits/climb-105-2026-11-07).
+  // M16 (46 m) and M19 (88 m) climb; a route under ~4 km does not.
+  const CLIMB_GATE_M = 40;
+  // fc = crossingForecast(...) or null: no forecast (not planned yet, GPS mode) -> climb, the safe side.
+  function climbNeeded(fc) { return !(fc && fc.nofix_m <= CLIMB_GATE_M); }
   const CLOSURE_M = 100, CLOSURE_CLEAR_M = 30;   // make_missions_next.closure_point (close100)
 
   function toNE(home, lat, lng) {
@@ -469,7 +478,8 @@
     routeSpan, reachM, driftWithin, originArgs, parseLatLon, VIO_FAMILY, VIO_ALARM, vioWarnings, vioAlertDue,
     MEASURED, measuredShare, measuredMaxPath, measuredReachM, segPenaltyS, missionTime, energy,
     legNeedM, shortLegs, splitSorties,
-    AIRCRAFT_DRIFT, FORECAST_GATE_M, CLOSURE_M, toNE, fromNE, planError, routeFixes, forecastNE, crossingForecast,
+    AIRCRAFT_DRIFT, FORECAST_GATE_M, CLIMB_GATE_M, climbNeeded, CLOSURE_M, toNE, fromNE, planError, routeFixes,
+    forecastNE, crossingForecast,
     closurePoint, closureOn, closureOnPath, clearOfHome, planVioRoute, segmentHitsRing,
     ENVELOPE_M, ENVELOPE_PLAN, ENVELOPE_UNCAL, ORIGIN_TOL_M: 8.0 };
 })(typeof window !== "undefined" ? window : globalThis);

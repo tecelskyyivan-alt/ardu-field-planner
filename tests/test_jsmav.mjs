@@ -295,6 +295,16 @@ console.log("\n== GPS-denied (VIO) profile: same layout as backend/mission.py, v
   const sh = MAV_LINK.missionShape(12, true, { vio: true }), sg = MAV_LINK.missionShape(0, true, {});
   check("[vio] missionShape lead/tail = items around the route (VIO 6/3, GPS no speed 2/1)",
     sh.lead === 6 && sh.tail === 3 && v.length === sh.lead + two.length + sh.tail && sg.lead === 2 && sg.tail === 1);
+  // Ivan 07.11: no climb to 105 m when the forecast at the end is <= 40 m — the layout of 2.5.104, and the lead with it
+  const nc = MAV_LINK.buildMissionItems([49.5275, 24.004, 0], 30, two, 30, true, 12, { vio: true, climb: false });
+  const shn = MAV_LINK.missionShape(12, true, { vio: true, climb: false });
+  check("[vio] climb: false -> home, TAKEOFF, LOITER 5, SPEED, legs, WP home, LOITER 25, LAND; lead 4 = its items",
+    JSON.stringify(nc.map((i) => i.command)) === JSON.stringify([16, 22, 19, 178, 16, 16, 16, 19, 21]) &&
+    !nc.some((i) => i.alt === 105) && shn.lead === 4 && nc.length === shn.lead + two.length + shn.tail);
+  check("[vio] climb: true or left out -> the climb (the safe side)",
+    JSON.stringify(MAV_LINK.buildMissionItems([49.5275, 24.004, 0], 30, two, 30, true, 12, { vio: true, climb: true })
+      .map((i) => [i.command, i.alt])) === JSON.stringify(v.map((i) => [i.command, i.alt])) &&
+    MAV_LINK.missionShape(12, true, { vio: true, climb: true }).lead === 6);
   // the FC reports terrain as frame 11 (_INT) — still the same mission
   const stored = toStored(tv).map((e) => (e.frame === 10 ? Object.assign({}, e, { frame: 11 }) : e));
   const t = makeMissionVehicle(stored);

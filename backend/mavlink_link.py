@@ -104,7 +104,7 @@ def _humanize_reason(txt):
 
 
 def build_mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
-                        vio=False, terrain=False):
+                        vio=False, terrain=False, climb=True):
     """Build the ordered mission items for upload.
 
     Returns a list of dicts: {seq, frame, command, current, autocontinue,
@@ -121,7 +121,7 @@ def build_mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.
     from .mission import mission_items
     items = []
     for seq, (frame, command, p1, p2, p3, p4, lat, lon, alt) in enumerate(
-            mission_items(home, takeoff_alt, waypoints, wp_alt, rtl, speed, vio, terrain)):
+            mission_items(home, takeoff_alt, waypoints, wp_alt, rtl, speed, vio, terrain, climb)):
         # WP0 = home (absolute frame, current=1) — ArduPilot overwrites with the real
         # home at arm, same convention as the .waypoints export.
         items.append({

@@ -421,7 +421,7 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    def _mission_items(self, home_override=None, terrain=False, route=None):
+    def _mission_items(self, home_override=None, terrain=False, route=None, climb=True):
         """Build MAVLink mission items from the last-built route (or None).
 
         HOME = where the drone will arm: when connected, use ArduPilot's own home
@@ -441,7 +441,7 @@ class Api:
             return build_mission_items(
                 (float(home_override["lat"]), float(home_override["lng"]), 0.0),
                 s["takeoff_alt"], s["waypoints"], s["wp_alt"], s.get("rtl", True),
-                speed=s.get("speed", 0), vio=True, terrain=terrain)
+                speed=s.get("speed", 0), vio=True, terrain=terrain, climb=climb)
         try:
             st = LINK.status()
             if st.get("home_lat") is not None and st.get("home_lon") is not None:
@@ -477,8 +477,9 @@ class Api:
             err = self._terrain_blocker()
             if err:
                 return {"ok": False, "error": err}
+        # `vio_climb` False: no climb to 105 m — even without a crossing fix <= 40 m at the end (vio-mode.js climbNeeded)
         items = self._mission_items(p0.get("vio_home"), terrain=bool(p0.get("terrain")),
-                                    route=p0.get("route"))
+                                    route=p0.get("route"), climb=p0.get("vio_climb") is not False)
         if items is None:
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
         try:
@@ -671,7 +672,8 @@ class Api:
           vio_home {lat,lng} — GPS-denied: row 0 / takeoff on that home (as the upload
                     does, #52) and the VIO start/end profile (#54);
           terrain  — waypoint altitudes in the terrain frame (10);
-          flights  — [[[lat,lng],…],…] sorties to write one file each (#60)."""
+          flights  — [[[lat,lng],…],…] sorties to write one file each (#60);
+          climbs   — [bool per flight]: VIO climb to 105 m (False: <= 40 m at the end without fixes); missing = climb."""
         if not self._state:
             return {"ok": False, "error": "Спочатку побудуй маршрут."}
         opts = fmt if isinstance(fmt, dict) else {}
@@ -685,15 +687,16 @@ class Api:
             if fmt in ("waypoints", "plan"):
                 flights = ([[(float(p[0]), float(p[1])) for p in fl] for fl in opts["flights"] if fl]
                            if opts.get("flights") else None) or s.get("flights") or [s["waypoints"]]
-                files = []
+                files, climbs = [], list(opts.get("climbs") or [])
                 for i, fl in enumerate(flights, 1):
+                    climb = climbs[i - 1] is not False if i <= len(climbs) else True
                     if fmt == "waypoints":
                         content = to_waypoints(home, s["takeoff_alt"], fl, s["wp_alt"], s["rtl"],
-                                               speed=s["speed"], vio=vio, terrain=terrain)
+                                               speed=s["speed"], vio=vio, terrain=terrain, climb=climb)
                     else:
                         content = to_plan(home, s["takeoff_alt"], fl, s["wp_alt"], s["rtl"],
                                           cruise_speed=s["speed"], speed=s["speed"],
-                                          vio=vio, terrain=terrain)
+                                          vio=vio, terrain=terrain, climb=climb)
                     name = f"mission.{fmt}" if len(flights) == 1 else f"mission_f{i}.{fmt}"
                     files.append({"name": name, "content": content})
                 return {"ok": True, "files": files}

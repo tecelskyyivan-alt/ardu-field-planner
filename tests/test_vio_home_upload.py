@@ -101,6 +101,27 @@ fl = a.export_files({"fmt": "waypoints", "vio_home": pad,
 check("#60 sorties: one file each, each with the VIO profile",
       [x["name"] for x in fl["files"]] == ["mission_f1.waypoints", "mission_f2.waypoints"] and
       all([int(r[3]) for r in wpl_rows(x["content"])][-3:] == [16, 19, 21] for x in fl["files"]))
+# Ivan 07.11: no climb to 105 m when the forecast at the end is <= 40 m (vio-mode.js climbNeeded decides, per flight)
+fc = a.export_files({"fmt": "waypoints", "vio_home": pad, "climbs": [False, True],
+                     "flights": [[[49.501, 24.0], [49.502, 24.0]], [[49.503, 24.0], [49.504, 24.0]]]})
+f1, f2 = (wpl_rows(x["content"]) for x in fc["files"])
+check("climbs [False, True]: flight 1 without the climb (home, TAKEOFF, LOITER 5, SPEED, legs, ...), flight 2 with it",
+      [int(r[3]) for r in f1][:4] == [16, 22, 19, 178] and not any(float(r[10]) == 105.0 for r in f1) and
+      [float(r[10]) for r in f2][3] == 105.0)
+check("no climbs given -> every file climbs (the safe side)",
+      all(any(float(r[10]) == 105.0 for r in wpl_rows(x["content"])) for x in fl["files"]))
+pc = _json.loads(a.export_files({"fmt": "plan", "vio_home": pad, "climbs": [False]})["files"][0]["content"])
+check(".plan without the climb: the same command list as the file without it (minus row 0)",
+      [it["command"] for it in pc["mission"]["items"]] == [22, 19, 178, 16, 16, 16, 19, 21])
+ml.LINK = FakeLink({})
+a = state_api()
+a.mav_upload_mission({"vio_home": pad, "vio_climb": False, "verify": False})
+check("desktop upload with vio_climb False: no 105 m item; left out -> the climb",
+      not any(it["alt"] == 105.0 for it in ml.LINK.items) and [it["command"] for it in ml.LINK.items][:4] == [16, 22, 19, 178])
+ml.LINK = FakeLink({})
+a = state_api()
+a.mav_upload_mission({"vio_home": pad, "verify": False})
+check("desktop upload, vio_climb left out -> climbs to 105 m", any(it["alt"] == 105.0 for it in ml.LINK.items))
 ml.LINK = FakeLink({})
 a = state_api()
 a.mav_upload_mission({"vio_home": pad, "terrain": True, "verify": False})
