@@ -16,7 +16,7 @@ licenses apply to their respective files.
 
 ## Online services (attribution required when used)
 - **OpenStreetMap** map data — © OpenStreetMap contributors, **ODbL**.
-- **Esri** World Imagery, **Google** satellite, **CARTO**, **OpenTopoMap**,
+- **Esri** World Imagery, **Google** satellite and roadmap, **OpenTopoMap**,
   **Open-Meteo** (elevation) — used online only; subject to their terms.
 
 ## Notes
