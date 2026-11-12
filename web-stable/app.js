@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.111";
+  const APP_VERSION = "2.5.112";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -228,13 +228,13 @@
     esri: "/tiles/esri/{z}/{x}/{y}",
     esrilabels: "/tiles/esrilabels/{z}/{x}/{y}",
     google: "/tiles/google/{z}/{x}/{y}",
-    carto: "/tiles/carto/{z}/{x}/{y}",
+    gmap: "/tiles/gmap/{z}/{x}/{y}",
     topo: "/tiles/topo/{z}/{x}/{y}",
   } : {
     esri: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     esrilabels: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     google: "https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
-    carto: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    gmap: "https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
     topo: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
   };
   // Mobile-smoothness tile options on EVERY base layer: don't fetch+decode tiles
@@ -255,9 +255,10 @@
   const googleSat = L.tileLayer(TILE_URLS.google,
     { ...TP, subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: 21, maxNativeZoom: 20, noWrap: true, attribution: "© Google" }
   );
-  // Google-like labelled street map.
-  const streets = L.tileLayer(TILE_URLS.carto,
-    { ...TP, maxZoom: 21, maxNativeZoom: 19, noWrap: true, attribution: "© OpenStreetMap, © CARTO" }
+  // Labelled street map: Google roadmap. CARTO Voyager now answers every tile with an
+  // "API KEY REQUIRED" picture (HTTP 200), so the layer looked dead (owner, 12.11).
+  const streets = L.tileLayer(TILE_URLS.gmap,
+    { ...TP, subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: 21, maxNativeZoom: 20, noWrap: true, attribution: "© Google" }
   );
   // Relief / elevation basemap (OpenTopoMap): contour lines + hillshade — a real
   // «height map» selectable like the other bases (Ivan). maxNativeZoom 17 (upscales
@@ -1695,9 +1696,7 @@
       (res.refills > 0 ? row(t("Заправок бака"), res.refills) : "") +
       row(t("Довжина"), (res.length_m / 1000).toFixed(2) + " км") +
       row(t("Орієнт. час"), fmtDuration(res.duration_s)) +
-      (res.coverage_pct != null ? row(t("Покриття поля"), res.coverage_pct + "%") : "") +
       (res.gap_ha > 0.001 ? row(t("Прогалини"), res.gap_ha.toFixed(3) + " га") : "") +
-      (res.overlap_pct != null ? row(t("Перекриття"), res.overlap_pct + "%") : "") +
       row(t("Кут проходів"), res.angle_used + "°" + ($("auto_angle").checked ? " (авто)" : "")) +
       row(t("Відступ"), res.margin + " м") +
       (res.flights > 1 ? row(t("Секцій (рівні за площею)"), res.flights) : "") +

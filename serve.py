@@ -61,7 +61,7 @@ TILE_PROVIDERS = {
     "esri":       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "esrilabels": "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     "google":     "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
-    "carto":      "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    "gmap":       "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
     "topo":       "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
 }
 TILES_DIR = os.path.join(HERE, "tiles_cache")
