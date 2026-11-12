@@ -76,7 +76,7 @@ tank-refill planning — the route engine can do both, the app does not ask for 
 2. Draw your field, add cut-outs, set swath width and altitude — the route appears.
 3. **Export** the mission for Mission Planner / QGC, or **connect** and upload straight to the drone.
 
-Before driving to a field with no signal: press **"Save area map offline"**. Planning works
+Before driving to a field with no signal: browse the area on the map at the zoom you need — viewed tiles stay cached. Planning works
 without internet; the satellite map, terrain zones and automatic power-line search need it once.
 
 | needs internet | without it |
