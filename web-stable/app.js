@@ -317,10 +317,10 @@
         return a;
       };
       _locateBtn = mk("locate-btn", "Моє місце (наживо)",
-        '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
+        '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3.4"/><path d="M5 20.5v-1.2a5.3 5.3 0 0 1 5.3-5.3h3.4a5.3 5.3 0 0 1 5.3 5.3v1.2"/></svg>',
         function () { toggleMyLocation(); });
       _followBtn = mk("follow-btn", "Стежити за дроном",
-        '<svg class="ic" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2"/></svg>',
+        '<svg class="ic" viewBox="0 0 24 24"><circle cx="5.5" cy="5.5" r="2.8"/><circle cx="18.5" cy="5.5" r="2.8"/><circle cx="5.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="18.5" r="2.8"/><path d="M7.5 7.5L10 10M16.5 7.5L14 10M7.5 16.5L10 14M16.5 16.5L14 14"/><rect x="10" y="10" width="4" height="4" rx="1"/></svg>',
         function () { toggleFollow(); });
       _overlayBtn = mk("overlay-btn", t("Телеметрія на карті"),
         '<svg class="ic" viewBox="0 0 24 24"><path d="M3 5h18M3 12h13M3 19h9"/></svg>',
