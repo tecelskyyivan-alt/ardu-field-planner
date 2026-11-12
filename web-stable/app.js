@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.109";
+  const APP_VERSION = "2.5.110";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -4686,7 +4686,11 @@
   function vioAge(sec) { return sec < 60 ? tf(t("{0} с"), Math.round(sec)) : tf(t("{0} хв"), Math.round(sec / 60)); }
   function mavRenderHud(s, p) {
     const { rows } = mavHudEnsure();
-    hudSet(rows, "link", s.connected ? "● онлайн" : t("○ немає heartbeat"),
+    // Several drones on one link (elrs-mesh): FMP follows one — say which, and who else is there.
+    const others = s.others && s.others.length ? s.others.join(", ") : "";
+    hudSet(rows, "link", s.connected
+      ? (others ? tf(t("● онлайн · дрон {0}, ще на лінку: {1}"), s.sysid, others) : t("● онлайн"))
+      : (others ? tf(t("○ дрон {0} мовчить, на лінку: {1}"), s.sysid, others) : t("○ немає heartbeat")),
       s.connected ? "#5fd3a3" : "#ff7b72", true);
     hudSet(rows, "mode", s.mode || "—", null, true);
     hudSet(rows, "armed", s.armed === null ? "?" : (s.armed ? "ARMED" : "disarmed"),

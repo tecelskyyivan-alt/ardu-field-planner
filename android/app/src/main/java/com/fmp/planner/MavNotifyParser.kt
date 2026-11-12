@@ -24,6 +24,8 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
 
     companion object {
         const val PCT_FRESH_MS = 5000L   // #29: pushed % older than this is ignored
+        // Several drones on one link (elrs-mesh): follow one, like web-stable/mav/link.js TARGET_LOST_MS.
+        const val TARGET_LOST_MS = 5000L
         private const val NEED = -1
         private const val BAD = -2
         // crc_extra for the 5 modelled messages (verified exact, spec §6 / specs.json).
@@ -59,6 +61,12 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
     private var lastLat: Double? = null
     private var lastLon: Double? = null
     private var lastRxMs = 0L
+    // The drone this notification follows (first autopilot heartbeat), and the others heard alongside it.
+    // Same rule as link.js: one heard while ours was alive is another drone, never followed; one that appears
+    // only after ours went quiet 5 s is ours under a new MAV_SYSID (or a drone in its place) — follow it.
+    private var targetSys = -1
+    private val apLastMs = HashMap<Int, Long>()   // every autopilot sysid heard → its last heartbeat
+    private val otherDrones = HashSet<Int>()
 
     /** wp_total is trusted ONLY from JS (it uploaded the mission); MISSION_CURRENT.total is optional. */
     fun setMission(total: Int) { wpTotalPushed = if (total > 0) total else 0 }
@@ -131,6 +139,7 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
         val msgId: Int; val payStart: Int
         if (v2) { msgId = u8(a, off + 7) or (u8(a, off + 8) shl 8) or (u8(a, off + 9) shl 16); payStart = off + 10 }
         else { msgId = u8(a, off + 5); payStart = off + 6 }
+        val sysId = u8(a, off + (if (v2) 5 else 3))
         val extra = CRC_EXTRA[msgId] ?: return total          // not modelled → skip by self-describing length
         // CRC-16/MCRF4XX over header[from off+1] + payload, then crc_extra appended.
         var crc = 0xffff
@@ -139,22 +148,32 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
         acc(extra and 0xff)
         val wire = u16(a, payStart + len)
         if (crc != wire) return BAD
-        lastRxMs = nowMs()   // staleness fix: only CRC-verified, modeled frames count as "link alive"
-        ingest(msgId, a, payStart, len)
+        // staleness fix: only CRC-verified, modeled frames count as "link alive" — and only our drone's
+        if (ingest(msgId, sysId, a, payStart, len)) lastRxMs = nowMs()
         return total
     }
 
     // v2 drops TRAILING ZEROS, so a truncated payload's missing bytes are known-zero → zero-pad and
     // read. Only the battery fields must NOT be zero-padded-into (a fake 0% is dangerous): those are
     // gated on being fully present on the wire (`present`).
-    private fun ingest(msgId: Int, a: ByteArray, p: Int, len: Int) {
+    // false = another drone's frame (ignored)
+    private fun ingest(msgId: Int, sys: Int, a: ByteArray, p: Int, len: Int): Boolean {
         val pay = ByteArray(48)
         System.arraycopy(a, p, pay, 0, minOf(len, 48))       // zero-padded payload
         fun present(off: Int, size: Int) = off + size <= len
+        if (msgId != 0 && targetSys >= 0 && sys != targetSys && apLastMs.containsKey(sys)) return false
         when (msgId) {
             0 -> {   // HEARTBEAT: custom_mode+0 u32, type+4 u8, autopilot+5 u8, base_mode+6 u8
                 val type = u8(pay, 4); val autopilot = u8(pay, 5)
                 if (autopilot != 8 && type != 6) {           // adopt only a real vehicle, not a GCS/backpack HB
+                    val now = nowMs()
+                    if (targetSys >= 0 && sys != targetSys) {
+                        if (now - (apLastMs[targetSys] ?: 0L) < TARGET_LOST_MS) otherDrones.add(sys)
+                        apLastMs[sys] = now
+                        if (sys in otherDrones) return false
+                        forgetVehicle()
+                    }
+                    apLastMs[sys] = now; targetSys = sys
                     mode = u32(pay, 0).toInt(); vehicleType = type; modeName = modeName(mode, type)
                     val nowArmed = (u8(pay, 6) and 0x80) != 0
                     armed = nowArmed
@@ -191,6 +210,14 @@ class MavNotifyParser(private val nowMs: () -> Long = { System.currentTimeMillis
                 wpSeq = u16(pay, 0)
             }
         }
+        return true
+    }
+
+    // Following a new drone: nothing of the old one carries over (its flight, distance, battery).
+    private fun forgetVehicle() {
+        mode = -1; vehicleType = 0; modeName = "—"; armed = null
+        battV = null; battPct = null; altM = null; gsMs = null; wpSeq = null
+        flightStartMs = 0; flightAccumMs = 0; lastArmed = false; distM = 0.0; lastLat = null; lastLon = null
     }
 
     private fun equirectM(la1: Double, lo1: Double, la2: Double, lo2: Double): Double {

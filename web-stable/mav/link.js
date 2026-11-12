@@ -49,6 +49,11 @@
     "MISSION_COUNT", "MISSION_ITEM", "MISSION_ITEM_INT", "COMMAND_ACK", "PARAM_VALUE",
     "GPS_GLOBAL_ORIGIN"]);
 
+  // One link can carry several drones (one ELRS handset, a receiver on each — elrs-mesh); FMP follows one of them.
+  // Silent this long = gone: the HUD shows the link lost, and an autopilot that was NOT on the link alongside it may
+  // take over as the target (the same FC under a new MAV_SYSID after its reboot). Two heard together never swap.
+  const TARGET_LOST_MS = 5000;
+
   const ACM_MODES = { STABILIZE: 0, ALT_HOLD: 2, AUTO: 3, GUIDED: 4, LOITER: 5, RTL: 6, LAND: 9, BRAKE: 17, SMART_RTL: 21 };
   const ACM_REV = Object.fromEntries(Object.entries(ACM_MODES).map(([k, v]) => [v, k]));
   // ArduPlane mode numbers. INAV re-maps ITS OWN flight mode onto these numbers for
@@ -188,7 +193,7 @@
   }
 
   function blankTlm() {
-    return { connected: false, heartbeat_age: null, armed: null, mode: null, lat: null, lon: null,
+    return { connected: false, heartbeat_age: null, sysid: null, armed: null, mode: null, lat: null, lon: null,
       alt_rel: null, sats: null, fix_type: null, groundspeed: null, heading: null,
       battery_v: null, battery_pct: null, wp_current: null, wp_total: null, last_text: null,
       home_lat: null, home_lon: null,
@@ -230,6 +235,8 @@
       this._msgCounts = {};         // per-message-type received counters
       this._hbSrc = "";             // adopted autopilot source signature (for stats)
       this._hbSeen = new Set();     // heartbeat sources already logged (once each)
+      this._apLast = new Map();     // autopilot sysid → its last heartbeat (ms)
+      this._otherAps = new Set();   // autopilots heard while the target was alive: other vehicles, never the target
     }
 
     _log(s) { if (this.onLog) { try { this.onLog("[mav] " + s); } catch (e) {} } }
@@ -237,7 +244,7 @@
     // whether telemetry is flowing, and the target we locked onto.
     getStats() {
       return { msgCounts: Object.assign({}, this._msgCounts), streamsOk: this._streamsOk,
-        target: this._tsys + ":" + this._tcomp, hbSrc: this._hbSrc };
+        target: this._tsys + ":" + this._tcomp, hbSrc: this._hbSrc, others: [...this._otherAps] };
     }
 
     async connect(transport) {
@@ -249,6 +256,7 @@
       this._streamReqCount = 0; this._apSeen = false; this._hbAny = false;
       this._lastHomeReq = 0; this._lastHb = 0;
       this._pending = []; this._msgCounts = {}; this._hbSrc = ""; this._hbSeen = new Set();
+      this._apLast = new Map(); this._otherAps = new Set();
       this._log("connect: opening link");
       transport.ondata = (chunk) => {
         let msgs;
@@ -256,7 +264,7 @@
         for (const m of msgs) { this._ingest(m); this._dispatch(m); }
       };
       this._ageTimer = setInterval(() => {
-        if (this._lastHb && (Date.now() - this._lastHb) / 1000 > 5) this._tlm.connected = false;
+        if (this._lastHb && Date.now() - this._lastHb > TARGET_LOST_MS) this._tlm.connected = false;
         if (this._lastHb) this._tlm.heartbeat_age = Math.round((Date.now() - this._lastHb) / 100) / 10;
         // Streams died (e.g. FC reboot) → re-arm the re-request loop (fast again).
         if (this._streamsOk && this._lastPosTs && Date.now() - this._lastPosTs > 6000) {
@@ -307,7 +315,12 @@
       return { ok: true };
     }
 
-    status() { return Object.assign({}, this._tlm); }
+    // `others`: the other drones heard on this link just now (their sysids) — FMP shows whose HUD this is.
+    status() {
+      const now = Date.now();
+      const others = [...this._otherAps].filter((s) => now - (this._apLast.get(s) || 0) < TARGET_LOST_MS);
+      return Object.assign({}, this._tlm, { others });
+    }
 
     _send(name, fields) {
       const bytes = MAVLINK.encode(name, fields, { sys: GCS_SYS, comp: GCS_COMP, seq: this._seq & 0xff });
@@ -334,6 +347,9 @@
     }
 
     _dispatch(m) {
+      // Replies count only from the vehicle we talk to: another drone's COMMAND_ACK or MISSION_ACK on the same link
+      // must not answer our command or end our upload.
+      if (this._apSeen && m.sysid !== this._tsys && m.name !== "HEARTBEAT") return;
       for (let i = 0; i < this._waiters.length; i++) {
         if (this._waiters[i].set.has(m.name)) {
           const w = this._waiters.splice(i, 1)[0];
@@ -349,10 +365,40 @@
       }
     }
 
+    // A message from another vehicle: an autopilot sysid heard on this link that is not the one FMP follows. Unknown
+    // sysids are not that — the GPS-denied companion speaks as 255, and its texts must reach the VIO panel.
+    _otherVehicle(m) {
+      return this._apSeen && m.sysid !== this._tsys && this._apLast.has(m.sysid);
+    }
+
     _ingest(m) {
-      const tl = this._tlm, f = m.fields;
+      let tl = this._tlm;
+      const f = m.fields;
       this._msgCounts[m.name] = (this._msgCounts[m.name] || 0) + 1;
+      if (m.name !== "HEARTBEAT" && this._otherVehicle(m)) {
+        // Another drone's position, mode or battery must never land in this HUD (#72 shows them separately).
+        if (m.name === "STATUSTEXT") this._log("sys" + m.sysid + ": " + String(f.text || "").replace(/\0+$/, ""));
+        return;
+      }
       if (m.name === "HEARTBEAT") {
+        const isAp = f.autopilot !== 8 && f.type !== 6;
+        if (isAp && this._apSeen && m.sysid !== this._tsys) {
+          const now = Date.now(), silentMs = now - (this._apLast.get(this._tsys) || 0);
+          if (silentMs < TARGET_LOST_MS && !this._otherAps.has(m.sysid)) {
+            this._otherAps.add(m.sysid);
+            this._log("another vehicle on the link: sys" + m.sysid + " — FMP follows sys" + this._tsys);
+          }
+          this._apLast.set(m.sysid, now);
+          if (this._otherAps.has(m.sysid)) return;   // says nothing about OUR vehicle's link
+          // Ours went quiet and this one was never on the link alongside it: the same FC under a new MAV_SYSID, or
+          // another drone switched on in its place. Follow it as a new vehicle: drop what the old one reported and
+          // count a reboot, so the app re-verifies the mission (#58).
+          this._log("target sys" + this._tsys + " silent " + Math.round(silentMs / 1000) + " s → following sys" + m.sysid);
+          const old = this._tlm;
+          tl = this._tlm = Object.assign(blankTlm(), { msg_log: old.msg_log, boot_count: (old.boot_count || 0) + 1 });
+          this._lastBootMs = null; this._streamsOk = false; this._streamReqCount = 0; this._lastStreamReq = 0;
+          this._lastPosTs = 0; this._lastHomeReq = 0; this._lastOriginReq = 0;
+        }
         this._lastHb = Date.now();
         this._hbAny = true;
         tl.connected = true; tl.heartbeat_age = 0;
@@ -368,14 +414,14 @@
         // so it never asked, so the FC never streamed, so the FC's heartbeat never
         // arrived → telemetry stayed blank the whole flight. (v2.1 asked unconditionally
         // → backpack relayed it → FC streamed → its heartbeat appeared → worked.)
-        const isAp = f.autopilot !== 8 && f.type !== 6;
         const sig = `sys${m.sysid} comp${m.compid} ap${f.autopilot} type${f.type}`;
         if (!this._hbSeen.has(sig)) {   // log each distinct heartbeat source once
           this._hbSeen.add(sig);
           this._log("heartbeat src " + sig + (isAp ? " (autopilot ✓)" : " (bridge/GCS — not the target, streams still requested)"));
         }
         if (isAp) {
-          this._tsys = m.sysid; this._tcomp = m.compid; this._apSeen = true;
+          this._apLast.set(m.sysid, this._lastHb);
+          this._tsys = m.sysid; this._tcomp = m.compid; this._apSeen = true; tl.sysid = m.sysid;
           tl.autopilot = f.autopilot;   // 3 = ArduPilot, 0 = INAV/generic — drives dual-stack
           tl.vehicle_type = f.type;     // 1 = plane, 2 = quad… selects the mode table
           const armedNow = !!(f.base_mode & 0x80);   // MAV_MODE_FLAG_SAFETY_ARMED

@@ -134,4 +134,52 @@ class MavNotifyParserTest {
         val p = MavNotifyParser { 500L }
         assertNull(p.snapshot().ageMs)
     }
+
+    // Several drones on one link (elrs-mesh): frames from mavlink.js encode() with other sysids.
+    private val HB1_LOITER = byteArrayOf(-3, 9, 0, 0, 0, 1, 1, 0, 0, 0, 5, 0, 0, 0, 2, 3, 0, 3, 3, -12, -57)
+    private val HB2_ARMED_AUTO = byteArrayOf(-3, 9, 0, 0, 0, 2, 1, 0, 0, 0, 3, 0, 0, 0, 2, 3, -128, 4, 3, 51, 86)
+    private val HB7_GUIDED = byteArrayOf(-3, 9, 0, 0, 0, 7, 1, 0, 0, 0, 4, 0, 0, 0, 2, 3, 0, 3, 3, 62, 83)
+    private val GPI2 = byteArrayOf(-3, 28, 0, 0, 0, 2, 1, 33, 0, 0, 0, 0, 0, 0, 0, 101, -51, 29, -128, -78, -26, 14, 0, 0, 0, 0, 80, -61, 0, 0, 0, 0, 0, 0, 0, 0, 80, 70, -10, -125)
+    private val SYS2 = byteArrayOf(-3, 31, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -80, 54, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 86, 119)
+
+    @Test fun second_drone_on_the_link_never_reaches_the_notification() {
+        var t = 1000L                                 // 0 would read as "no frame yet" (lastRxMs > 0)
+        val p = MavNotifyParser { t }
+        var tracked = 0
+        p.onPosition = { _, _, _, _ -> tracked++ }
+        p.push(HB1_LOITER)                            // drone 1 first: followed
+        t = 1100L; p.push(HB2_ARMED_AUTO + GPI2 + SYS2)  // drone 2, armed in AUTO, 50 m up, 14 V
+        val s = p.snapshot()
+        assertEquals("LOITER", s.modeName)
+        assertEquals(false, s.armed)
+        assertNull(s.altM); assertNull(s.battV)
+        assertEquals(0, tracked)                      // its position never enters the background track
+        assertEquals(100L, s.ageMs)                   // and its frames do not keep OUR link "alive"
+    }
+
+    @Test fun our_drone_silent_another_one_on_the_link_is_not_followed() {
+        var t = 1000L
+        val p = MavNotifyParser { t }
+        p.push(HB1_LOITER)
+        t = 1100L; p.push(HB2_ARMED_AUTO)              // heard alongside drone 1 → another drone
+        t = 7000L; p.push(HB2_ARMED_AUTO + SYS2)       // drone 1 quiet for 6 s
+        val s = p.snapshot()
+        assertEquals("LOITER", s.modeName)
+        assertNull(s.battV)
+        assertEquals(6000L, s.ageMs)                  // shown stale, not swapped to drone 2
+    }
+
+    @Test fun new_sysid_after_silence_is_followed_from_scratch() {
+        var t = 0L
+        val p = MavNotifyParser { t }
+        p.push(HEARTBEAT)                             // drone 1 armed in AUTO: a flight starts
+        t = 3000L; p.push(SYS_STATUS)
+        t = 9000L; p.push(HB7_GUIDED)                 // sys 7 appears only after 6 s of silence
+        val s = p.snapshot()
+        assertEquals("GUIDED", s.modeName)
+        assertEquals(false, s.armed)
+        assertNull(s.battV)                           // drone 1's battery is not carried over
+        assertEquals(0L, s.flightSec)                 // nor its flight
+        assertEquals(0L, s.ageMs)
+    }
 }
