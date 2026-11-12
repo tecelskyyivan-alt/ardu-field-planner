@@ -6108,17 +6108,12 @@
         vioHomeMarker.setIcon(vioArrowIcon(hdg)); vioHomeMarker._hdg = hdg;
       }
     }
-    // Only what the pilot acts on: where the field is, what one pack flies, and problems.
+    // Only what the pilot acts on: problems, and which sortie is next when the field is split.
     // Everything else (profile, speed, sorties, checks) FMP does by itself (owner, 04.11).
-    const km = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + t(" км") : Math.round(m) + t(" м"));
     const lines = [];
     const ring = boundaryFromPolygon();
     const near = ring ? VIO.nearestOnRing(vioHome.lat, vioHome.lng, ring) : null;
     if (near) {
-      const fieldBrg = VIO.bearingDeg(vioHome.lat, vioHome.lng, near.lat, near.lng);
-      let f = t("Поле: ") + km(near.dist) + ", " + VIO.compass8(fieldBrg);
-      if (hdg != null) f += " · " + t(VIO.sideWord(VIO.relativeDeg(fieldBrg, hdg))) + t(" від носа");
-      lines.push(f);
       const pts = [ll, [near.lat, near.lng]];
       if (!vioLine) vioLine = L.polyline(pts, { color: "#1e88e5", weight: 2, dashArray: "4 6" }).addTo(map);
       else vioLine.setLatLngs(pts);
@@ -6132,28 +6127,18 @@
       lines.push("⚠️ " + t("Поле задалеко: на дорогу туди й назад не вистачить АКБ."));
     } else if (flyRoute && flyRoute.length) {
       const m = vioModel();
-      const mt = VIO.missionTime(vioHome, flyRoute, m), en = VIO.energy(mt.total_s, m.ahPerMin, m.packAh);
       const d = so && so.length > 1 ? vioSortieDone() : 0;
-      if (so && so.length > 1 && d >= so.length) lines.push("✅ " + tf(t("Усі {0} вильоти поля пройдено."), so.length));
-      else lines.push("✅ " + (cur ? tf(t("Виліт {0} з {1}"), cur.idx + 1, cur.n) : t("Політ")) + " · " +
-        fmtDuration(mt.total_s) + " · " + Math.round(en.pct) + t(" % АКБ"));
+      // No time / battery share / fix forecast here: the pack is a built-in assumption, not the pilot's
+      // data, and the lines were in the way (owner, 12.11). Only which sortie is next, and problems.
+      if (so && so.length > 1 && (cur || d >= so.length)) lines.push("✅ " + (d >= so.length ? tf(t("Усі {0} вильоти поля пройдено."), so.length)
+        : tf(t("Виліт {0} з {1}"), cur.idx + 1, cur.n)));
       if (plan) {
-        // ardu-gps-denied's forecast (fmp_check): fixes on the way, the error the home fix starts from; plan 3.1 gate 20 m
         const fc = plan.fc;
-        lines.push(tf(t("Поправок на перетинах: {0} · у кінці ~{1} м"), fc.fixes.length, Math.round(fc.end_m)) +
-          (plan.reversed ? t(" · маршрут навпаки") : "") +
-          (plan.closed ? tf(t(" · замикання +{0} м"), Math.round(plan.extraM)) : ""));
         if (fc.end_m > VIO.FORECAST_GATE_M)
           lines.push("⚠️ " + tf(t("У кінці ~{0} м — понад 20 м, дім може не знайтися."), Math.round(fc.end_m)));
-        lines.push(VIO.climbNeeded(fc) ? tf(t("Підйом над домом до 105 м: без поправок у кінці ~{0} м, понад {1} м."),
-          Math.round(fc.nofix_m), VIO.CLIMB_GATE_M)
-          : tf(t("Без підйому до 105 м: навіть без поправок у кінці ~{0} м, до {1} м."), Math.round(fc.nofix_m),
-            VIO.CLIMB_GATE_M));
         // the safe transit could not route round it, so a straight segment still crosses one (2.5.108)
         if (plan.blocked) lines.push("⚠️ " + t("Обійти виріз чи небезпеку не вдалося — переліт іде над ними напряму."));
-      } else if (legsRoute && legsRoute.length > 1) {
-        lines.push(t("Прогноз поправок на перетинах — рахую…"));    // the engine's safe transit is on its way
-      } else {
+      } else if (!(legsRoute && legsRoute.length > 1)) {
         const sp = VIO.routeSpan(vioHome, flyRoute);
         if (2 * sp.farthest + sp.length > VIO.measuredReachM(40).reach)
           lines.push("⚠️ " + t("Задовгий виліт — точність VIO не гарантована."));
