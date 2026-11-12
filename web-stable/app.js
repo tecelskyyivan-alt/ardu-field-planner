@@ -1696,9 +1696,7 @@
       (res.refills > 0 ? row(t("Заправок бака"), res.refills) : "") +
       row(t("Довжина"), (res.length_m / 1000).toFixed(2) + " км") +
       row(t("Орієнт. час"), fmtDuration(res.duration_s)) +
-      (res.coverage_pct != null ? row(t("Покриття поля"), res.coverage_pct + "%") : "") +
       (res.gap_ha > 0.001 ? row(t("Прогалини"), res.gap_ha.toFixed(3) + " га") : "") +
-      (res.overlap_pct != null ? row(t("Перекриття"), res.overlap_pct + "%") : "") +
       row(t("Кут проходів"), res.angle_used + "°" + ($("auto_angle").checked ? " (авто)" : "")) +
       row(t("Відступ"), res.margin + " м") +
       (res.flights > 1 ? row(t("Секцій (рівні за площею)"), res.flights) : "") +
