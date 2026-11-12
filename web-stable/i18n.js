@@ -390,6 +390,8 @@ Object.assign(window.FMP_TR, {
   // yes/no + online
   "так": "yes", "ні": "no",
   "● онлайн": "● online", "○ немає heartbeat": "○ no heartbeat",
+  "● онлайн · дрон {0}, ще на лінку: {1}": "● online · drone {0}, also on the link: {1}",
+  "○ дрон {0} мовчить, на лінку: {1}": "○ drone {0} silent, on the link: {1}",
   // ---- interpolated templates (used with tf(), {0}=value) ----
   "Місію залито в дрон ({0} пунктів).": "Mission uploaded to the drone ({0} items).",
   "У дроні поточна місія: {0} точок.": "Current mission on the drone: {0} waypoints.",

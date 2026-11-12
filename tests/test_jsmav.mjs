@@ -26,6 +26,7 @@ MAVLINK.setSpecs(JSON.parse(fs.readFileSync(path.join(MAVDIR, "specs.json"), "ut
 let failed = 0;
 const check = (name, cond) => { console.log((cond ? "  OK  " : " FAIL ") + name); if (!cond) failed++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const TARGET_LOST_WAIT = 5600;   // link.js TARGET_LOST_MS (5 s) + its 0.5 s age timer
 
 // Fake vehicle over a loopback transport.
 //   opts.itemDelay        ms before answering each item request (slow RF link)
@@ -436,6 +437,116 @@ console.log("\n== every STATUSTEXT kept, the newest 12, with its severity (2.5.1
   check("[log] severity kept, NUL padding trimmed", log[11].sev === 2 && !/\0/.test(log[11].text) && log[10].sev === 6);
   check("[log] timestamps in order", log.every((m, i) => i === 0 || m.ts >= log[i - 1].ts));
   clearInterval(hb); link.disconnect();
+}
+
+// Several autopilots on one transport — one ELRS handset, a receiver on each drone (elrs-mesh).
+//   drones: {sysid: {mode, armed, lat, lon, alt, volt}}; flip `t.alive[sysid] = false` to silence one.
+//   ARM: the drone it is addressed to refuses (4) 50 ms later; every OTHER drone instantly "accepts" (crosstalk).
+//   Drone 1 also takes a mission; drone 2 answers its first item with a stray MISSION_ACK 0.
+function makeSwarm(drones) {
+  const veh = MAVLINK.createParser();
+  const t = { ondata: null, close() {}, alive: {}, armTargets: [], stored: 0, countTo: [] };
+  const send = (sys, name, f) => { const b = MAVLINK.encode(name, f, { sys, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  t.send = send;
+  for (const s of Object.keys(drones)) t.alive[s] = true;
+  let n = 0, stray = false;
+  t.write = (bytes) => {
+    for (const m of veh.push(bytes)) {
+      const f = m.fields;
+      if (m.name === "COMMAND_LONG" && f.command === 400) {
+        t.armTargets.push(f.target_system);
+        for (const s of Object.keys(drones)) if (+s !== f.target_system) send(+s, "COMMAND_ACK", { command: 400, result: 0 });
+        setTimeout(() => send(f.target_system, "COMMAND_ACK", { command: 400, result: 4 }), 50);
+      } else if (m.name === "MISSION_COUNT") {
+        t.countTo.push(f.target_system);
+        if (f.target_system !== 1) continue;
+        n = f.count; t.stored = 0;
+        send(1, "MISSION_REQUEST", { target_system: 255, target_component: 0, seq: 0, mission_type: 0 });
+      } else if ((m.name === "MISSION_ITEM_INT" || m.name === "MISSION_ITEM") && f.target_system === 1) {
+        if (f.seq !== t.stored) continue;
+        t.stored++;
+        if (!stray && drones[2]) { stray = true; send(2, "MISSION_ACK", { target_system: 255, target_component: 0, type: 0, mission_type: 0 }); }
+        const next = () => t.stored < n
+          ? send(1, "MISSION_REQUEST", { target_system: 255, target_component: 0, seq: t.stored, mission_type: 0 })
+          : send(1, "MISSION_ACK", { target_system: 255, target_component: 0, type: 0, mission_type: 0 });
+        setTimeout(next, 20);
+      }
+    }
+  };
+  const hb = setInterval(() => {
+    for (const [s, d] of Object.entries(drones)) {
+      if (!t.alive[s]) continue;
+      send(+s, "HEARTBEAT", { type: 2, autopilot: 3, base_mode: d.armed ? 0x80 : 0, custom_mode: d.mode, system_status: 3, mavlink_version: 3 });
+      send(+s, "GLOBAL_POSITION_INT", { lat: d.lat * 1e7, lon: d.lon * 1e7, relative_alt: d.alt * 1000, hdg: 9000 });
+      send(+s, "SYS_STATUS", { voltage_battery: d.volt * 1000, battery_remaining: 50 });
+      if (d.home) send(+s, "HOME_POSITION", { latitude: d.lat * 1e7, longitude: d.lon * 1e7 });
+    }
+  }, 100);
+  t._stopHb = () => clearInterval(hb);
+  return t;
+}
+const D1 = { mode: 5, armed: false, lat: 49.49, lon: 24.01, alt: 10, volt: 16.8, home: true };   // LOITER, disarmed
+const D2 = { mode: 3, armed: true, lat: 50.0, lon: 25.0, alt: 50, volt: 14.0 };      // AUTO, armed
+
+console.log("\n== two drones on one link (elrs-mesh): FMP follows one, nothing of the other leaks ==");
+{
+  const t = makeSwarm({ 1: D1, 2: D2 });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  let leaked = 0;
+  for (let i = 0; i < 10; i++) {
+    await sleep(60);
+    const s = link.status();
+    if (s.lat !== 49.49 || s.mode !== "LOITER" || s.armed !== false || s.battery_v !== 16.8 || s.alt_rel !== 10) leaked++;
+  }
+  check("[swarm] target stays drone 1", link.getStats().target === "1:1");
+  check("[swarm] position / mode / armed / battery are drone 1's in 10 of 10 samples", leaked === 0);
+  check("[swarm] the HUD knows whose it is and who else is on the link",
+    link.status().sysid === 1 && JSON.stringify(link.status().others) === "[2]");
+  t.send(2, "STATUSTEXT", { severity: 4, text: "PreArm: drone two" });
+  t.send(255, "STATUSTEXT", { severity: 6, text: "VIO READY home 3 keys" });   // the companion Pi
+  await sleep(50);
+  const s = link.status();
+  check("[swarm] drone 2's text stays out of the HUD and the log",
+    !/drone two/.test(s.last_text || "") && !s.msg_log.some((x) => /drone two/.test(x.text)));
+  check("[swarm] the companion (sys 255) still reaches the VIO panel", !!(s.vio_msgs && s.vio_msgs.VIO) && s.last_text === "VIO READY home 3 keys");
+  const r = await link.arm(true);
+  check("[swarm] ARM goes to drone 1 only", t.armTargets.length > 0 && t.armTargets.every((x) => x === 1));
+  check("[swarm] drone 2's instant ACCEPT does not answer our ARM (drone 1 refused)", r.ok === false);
+  const its = MAV_LINK.buildMissionItems([49.49, 24.0, 0], 30, wps.slice(0, 10), 30, true, 7);
+  const up = await link.uploadMission(its, 20000);
+  check("[swarm] upload goes to drone 1 only", t.countTo.length > 0 && t.countTo.every((x) => x === 1));
+  check(`[swarm] drone 2's stray MISSION_ACK does not end it: drone 1 stored ${t.stored}/${its.length}`,
+    up.ok === true && t.stored === its.length);
+  // Drone 1 goes quiet: FMP must say so — never slide over to drone 2, which was there all along.
+  t.alive[1] = false;
+  await sleep(TARGET_LOST_WAIT);
+  const q = link.status();
+  check("[swarm] drone 1 silent → link shown lost, still drone 1", q.connected === false && link.getStats().target === "1:1");
+  check("[swarm] ... and drone 2's data never moved in", q.lat === 49.49 && q.mode === "LOITER" && JSON.stringify(q.others) === "[2]");
+  t.alive[2] = false; link._apLast.set(2, Date.now() - 6000);   // drone 2 gone 6 s ago
+  check("[swarm] a drone gone from the link drops out of «also on the link»", link.status().others.length === 0);
+  t._stopHb(); link.disconnect();
+}
+
+console.log("\n== the drone comes back under a new MAV_SYSID (rebooted for it): FMP follows ==");
+{
+  const t = makeSwarm({ 1: D1, 7: Object.assign({}, D1, { lat: 49.5, mode: 4, home: false }) });
+  t.alive[7] = false;                       // sys 7 appears only after sys 1 went quiet
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  await sleep(300);
+  check("[resysid] locked on drone 1", link.getStats().target === "1:1" && link.status().lat === 49.49);
+  t.alive[1] = false;
+  await sleep(TARGET_LOST_WAIT);
+  t.alive[7] = true;
+  await sleep(400);
+  const s = link.status();
+  check("[resysid] now follows sys 7", link.getStats().target === "7:1" && s.sysid === 7 && s.connected === true);
+  check("[resysid] its own telemetry, a reboot counted (the app re-verifies the mission)",
+    s.lat === 49.5 && s.mode === "GUIDED" && s.boot_count === 1 && s.others.length === 0);
+  check("[resysid] the old drone's home is not carried over", s.home_lat === null);
+  t._stopHb(); link.disconnect();
 }
 
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));

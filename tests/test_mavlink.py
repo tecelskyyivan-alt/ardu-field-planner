@@ -392,6 +392,85 @@ if lk:
           r.get("ok") is False and r.get("held") == (49.53, 24.01))
     lk.disconnect(); st.set(); th.join(timeout=2.0)
 
+# ---- several drones on one link (elrs-mesh) --------------------------------
+# One socket carries every drone's frames, like one ELRS handset. ARM: the drone it is addressed to refuses
+# (4) 50 ms later; every other drone instantly "accepts" (crosstalk). `alive[s] = False` silences one.
+def swarm_radio(stop, port, drones, alive, arm_to):
+    from pymavlink import mavutil
+    r = mavutil.mavlink_connection(f"udpout:127.0.0.1:{port}", source_system=1, source_component=1)
+
+    def as_(sysid, fn):
+        r.mav.srcSystem = sysid
+        fn()
+
+    last = 0.0
+    while not stop.is_set():
+        now = time.time()
+        if now - last >= 0.1:
+            last = now
+            for s, d in drones.items():
+                if not alive.get(s):
+                    continue
+                # base_mode bit 0 = CUSTOM_MODE_ENABLED (ArduPilot sets it; pymavlink names the mode by it)
+                as_(s, lambda: r.mav.heartbeat_send(2, 3, 0x81 if d["armed"] else 1, d["mode"], 3))
+                as_(s, lambda: r.mav.global_position_int_send(0, int(d["lat"] * 1e7), int(24.0 * 1e7), 0,
+                                                              d["alt"] * 1000, 0, 0, 0, 9000))
+                as_(s, lambda: r.mav.sys_status_send(0, 0, 0, 0, int(d["volt"] * 1000), 0, 50, 0, 0, 0, 0, 0, 0))
+        m = r.recv_match(blocking=True, timeout=0.02)
+        if m is not None and m.get_type() == "COMMAND_LONG" and m.command == 400:
+            arm_to.append(m.target_system)
+            for s in drones:
+                if s != m.target_system:
+                    as_(s, lambda: r.mav.command_ack_send(400, 0))
+            time.sleep(0.05)
+            as_(m.target_system, lambda: r.mav.command_ack_send(400, 4))
+
+
+print("\n== two drones on one link: the backend follows one, nothing of the other leaks ==")
+D1 = {"mode": 5, "armed": False, "lat": 49.49, "alt": 10, "volt": 16.8}    # LOITER, disarmed
+D2 = {"mode": 3, "armed": True, "lat": 50.0, "alt": 50, "volt": 14.0}      # AUTO, armed
+alive, arm_to, st = {1: True, 2: True}, [], threading.Event()
+th = threading.Thread(target=swarm_radio, args=(st, 14585, {1: D1, 2: D2}, alive, arm_to), daemon=True)
+th.start()
+lk = MavLink()
+lk.connect("udpin:127.0.0.1:14585")
+time.sleep(1.0)
+samples = []
+for _ in range(10):
+    time.sleep(0.06)
+    s = lk.status()
+    samples.append((s["lat"], s["mode"], s["armed"], s["battery_v"]))
+check("[swarm] position / mode / armed / battery are drone 1's in 10 of 10 samples",
+      all(x == (49.49, "LOITER", False, 16.8) for x in samples))
+check("[swarm] status says whose it is and who else is on the link",
+      lk.status()["sysid"] == 1 and lk.status()["others"] == [2])
+rc = lk.arm(True)
+check("[swarm] ARM goes to drone 1 only", arm_to and all(x == 1 for x in arm_to))
+check("[swarm] drone 2's instant ACCEPT does not answer our ARM (drone 1 refused)", rc.get("ok") is False)
+alive[1] = False
+time.sleep(5.6)
+s = lk.status()
+check("[swarm] drone 1 silent -> link shown lost, still drone 1, drone 2's data never moved in",
+      s["connected"] is False and s["sysid"] == 1 and s["lat"] == 49.49 and s["others"] == [2])
+lk.disconnect(); st.set(); th.join(timeout=2.0)
+
+print("\n== the drone comes back under a new MAV_SYSID: the backend follows it ==")
+alive, arm_to, st = {1: True, 7: False}, [], threading.Event()
+D7 = dict(D1, lat=49.5, mode=4)
+th = threading.Thread(target=swarm_radio, args=(st, 14586, {1: D1, 7: D7}, alive, arm_to), daemon=True)
+th.start()
+lk = MavLink()
+lk.connect("udpin:127.0.0.1:14586")
+time.sleep(0.8)
+alive[1] = False
+time.sleep(5.6)
+alive[7] = True
+time.sleep(0.8)
+s = lk.status()
+check("[resysid] follows sys 7 with its own telemetry",
+      s["sysid"] == 7 and s["connected"] is True and s["lat"] == 49.5 and s["mode"] == "GUIDED")
+lk.disconnect(); st.set(); th.join(timeout=2.0)
+
 print()
 if check.failed:
     print("RESULT: FAILURES PRESENT")

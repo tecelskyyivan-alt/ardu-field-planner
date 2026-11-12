@@ -164,6 +164,12 @@ def _pin_udp_peer(conn, hold=PEER_HOLD):
 
     conn.recv = recv
 
+# One link can carry several drones (one ELRS handset, a receiver on each — elrs-mesh); FMP follows one of
+# them, like web-stable/mav/link.js TARGET_LOST_MS. Silent this long = gone; an autopilot that was NOT on the
+# link alongside it may then take over (the same FC under a new MAV_SYSID). Two heard together never swap.
+TARGET_LOST_S = 5.0
+
+
 class MavLink:
     """Singleton-style live link. One instance shared by the API."""
 
@@ -191,6 +197,8 @@ class MavLink:
         self._last_pos_ts = 0.0           # last position/GPS message time (staleness re-arm)
         self._busy = False                # a mission/command transfer owns the link
         self._last_gcs_hb = 0.0           # when we last announced ourselves as a GCS
+        self._ap_last = {}                # autopilot sysid -> its last heartbeat (time.time())
+        self._other_aps = set()           # autopilots heard while the target was alive: other drones
 
     @staticmethod
     def _blank_tlm():
@@ -267,6 +275,8 @@ class MavLink:
         self._hb_any = False
         self._last_pos_ts = 0.0
         self._last_gcs_hb = 0.0
+        self._ap_last = {}
+        self._other_aps = set()
         with self._lock:
             self._tlm = self._blank_tlm()
         self._thread = threading.Thread(target=self._reader, daemon=True)
@@ -308,8 +318,17 @@ class MavLink:
         return {"ok": True}
 
     def status(self):
+        """`sysid` = the drone this link follows; `others` = other drones heard on it just now."""
         with self._lock:
-            return dict(self._tlm)
+            now = time.time()
+            others = sorted(s for s in self._other_aps if now - self._ap_last.get(s, 0) < TARGET_LOST_S)
+            return dict(self._tlm, sysid=self._target_sys if self._ap_seen else None, others=others)
+
+    def _other_vehicle(self, msg):
+        """Another drone: an autopilot sysid heard on this link that is not the one we follow. Unknown
+        sysids are not that — the GPS-denied companion speaks as 255 and its texts must still come through."""
+        sysid = msg.get_srcSystem()
+        return self._ap_seen and sysid != self._target_sys and sysid in self._ap_last
 
     # ----------------------------------------------------- transfer helpers
     def _targets(self):
@@ -342,7 +361,9 @@ class MavLink:
                 return None
             if msg is None:
                 continue
-            if msg.get_type() in types:
+            # a reply counts only from the drone we talk to: another one's COMMAND_ACK / MISSION_ACK on the
+            # same link must not answer our command or end our upload
+            if msg.get_type() in types and not (self._ap_seen and msg.get_srcSystem() != self._target_sys):
                 return msg
             self._ingest(conn, msg)   # telemetry + STATUSTEXT stay current
 
@@ -602,10 +623,11 @@ class MavLink:
                 msg = conn.recv_match(blocking=True, timeout=0.5)
             except Exception:
                 msg = None
-            if msg is None:
-                self._age_out()
-                continue
-            self._ingest(conn, msg)
+            if msg is not None:
+                self._ingest(conn, msg)
+            # every pass, not only when idle: another drone's traffic on the same link keeps the reader busy,
+            # and OUR drone falling silent must still show as a lost link
+            self._age_out()
 
     def _maybe_gcs_heartbeat(self, conn):
         """Announce ourselves as a GCS ~1 Hz, exactly like Mission Planner / QGC.
@@ -706,8 +728,27 @@ class MavLink:
             return
         with self._lock:
             tl = self._tlm
+            if t != "HEARTBEAT" and self._other_vehicle(msg):
+                return                    # another drone's telemetry never lands in this HUD (#72)
             if t == "HEARTBEAT":
                 from pymavlink import mavutil
+                is_ap = msg.autopilot != 8 and msg.type != 6
+                sysid, now = msg.get_srcSystem(), time.time()
+                if is_ap and self._ap_seen and sysid != self._target_sys:
+                    silent = now - self._ap_last.get(self._target_sys, 0)
+                    if silent < TARGET_LOST_S:
+                        self._other_aps.add(sysid)
+                    self._ap_last[sysid] = now
+                    if sysid in self._other_aps:
+                        return            # says nothing about OUR drone's link
+                    # ours went quiet and this one was never on the link alongside it: the same FC under
+                    # a new MAV_SYSID, or another drone in its place — follow it as a new vehicle
+                    tl = self._tlm = self._blank_tlm()
+                    self._streams_ok = False
+                    self._last_stream_req = 0.0
+                    self._stream_req_count = 0
+                    self._last_pos_ts = 0.0
+                    self._last_home_req = 0.0
                 self._last_hb_ts = time.time()
                 self._hb_any = True
                 tl["connected"] = True
@@ -720,7 +761,8 @@ class MavLink:
                 # REGRESSION FIX: gating the stream request on the autopilot heartbeat
                 # deadlocked a WiFi/UDP backpack — only the bridge heartbeat is seen, so
                 # the FC was never asked, never streamed, and its heartbeat never came.
-                if msg.autopilot != 8 and msg.type != 6:
+                if is_ap:
+                    self._ap_last[sysid] = now
                     self._target_sys = msg.get_srcSystem()
                     self._target_comp = msg.get_srcComponent()
                     self._ap_seen = True
