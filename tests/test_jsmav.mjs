@@ -419,6 +419,42 @@ console.log("\n== ArduPilot 4.7 over ELRS: plain MISSION_REQUEST, ~1 s round tri
   clearInterval(hb); link.disconnect();
 }
 
+console.log("\n== a STATUSTEXT over 50 characters: MAVLink 2 chunks joined (14.11, the aircraft's FC) ==");
+{
+  const veh = MAVLINK.createParser();
+  const t = { ondata: null, close() {}, write(b) { veh.push(b); } };
+  const send = (name, fields) => { const b = MAVLINK.encode(name, fields, { sys: 1, comp: 1, seq: 0 }); if (t.ondata) t.ondata(b); };
+  const link = new MAV_LINK.MavLink();
+  const hb = setInterval(() => {
+    send("HEARTBEAT", { type: 2, autopilot: 3, base_mode: 0, custom_mode: 4, system_status: 3, mavlink_version: 3 });
+  }, 100);
+  await link.connect(t);
+  await sleep(150);
+  // exactly as the FC sent it: id 3, chunk 0 of 50 characters, then the tail
+  send("STATUSTEXT", { severity: 4, text: "VIOFS: no VISION_POSITION_ESTIMATE flow yet (compa", id: 3, chunk_seq: 0 });
+  await sleep(100);
+  const mid = link.status();
+  check("[chunks] the first chunk alone is not a message yet", !(mid.msg_log || []).some((m) => /compa$/.test(m.text)));
+  send("STATUSTEXT", { severity: 4, text: "nion down?)", id: 3, chunk_seq: 1 });
+  send("STATUSTEXT", { severity: 6, text: "PreArm: RC not found", id: 0, chunk_seq: 0 });
+  await sleep(150);
+  const s = link.status(), log = s.msg_log;
+  const full = "VIOFS: no VISION_POSITION_ESTIMATE flow yet (companion down?)";
+  check("[chunks] joined in the log, severity of the message kept",
+    log.length === 2 && log[0].text === full && log[0].sev === 4 && log[1].text === "PreArm: RC not found");
+  check("[chunks] the VIO panel's VIOFS line is the whole text", s.vio_msgs.VIOFS && s.vio_msgs.VIOFS.text === full);
+  check("[chunks] the HUD's last message is the newest whole one", s.last_text === "PreArm: RC not found");
+  // a chunked message whose tail never comes is shown as it stands with the next STATUSTEXT 2 s on
+  send("STATUSTEXT", { severity: 4, text: "VIOFS: no VISION_POSITION_ESTIMATE flow yet (compa", id: 4, chunk_seq: 0 });
+  await sleep(2100);
+  send("STATUSTEXT", { severity: 6, text: "VIO ok", id: 0, chunk_seq: 0 });
+  await sleep(150);
+  const l2 = link.status().msg_log;
+  check("[chunks] a lost tail: the head is shown, then the next message",
+    l2[l2.length - 2].text === "VIOFS: no VISION_POSITION_ESTIMATE flow yet (compa" && l2[l2.length - 1].text === "VIO ok");
+  clearInterval(hb); link.disconnect();
+}
+
 console.log("\n== every STATUSTEXT kept, the newest 12, with its severity (2.5.106) ==");
 {
   const veh = MAVLINK.createParser();
