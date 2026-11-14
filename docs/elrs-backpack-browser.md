@@ -17,14 +17,14 @@ What the patch adds:
 
 ## Ready-made firmware
 
-In every FMP release since [v2.5.97](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/tag/v2.5.97) (next to the APK): `ESP_TX_Backpack-1.5.7-fmp-ws.bin` (ESP8285: RadioMaster Ranger / Ranger Micro / Ranger Nano, …) and `ESP32C3_TX_Backpack-1.5.7-fmp-ws.bin`, built from source with no Wi-Fi or personal data inside (source: [`fmp-ws`](https://github.com/tecelskyyivan-alt/Backpack/tree/fmp-ws), same as `firmware/elrs-backpack-1.5.7-fmp-ws.patch`). Flash it through the backpack's web page → Update; your saved Home WiFi stays. The files in v2.5.99 were replaced on 2026-10-31 with update 2 (rejoins a phone hotspot by itself). Upstream proposal: [ExpressLRS/Backpack#252](https://github.com/ExpressLRS/Backpack/issues/252).
+In every FMP release since [v2.5.97](https://github.com/tecelskyyivan-alt/ardu-field-planner/releases/tag/v2.5.97) (next to the APK): `ESP_TX_Backpack-1.5.7-fmp-ws.bin` (ESP8285: RadioMaster Ranger / Ranger Micro / Ranger Nano, …) and `ESP32C3_TX_Backpack-1.5.7-fmp-ws.bin`, built from source with no Wi-Fi or personal data inside (source: [`fmp-ws`](https://github.com/tecelskyyivan-alt/Backpack/tree/fmp-ws), same as `firmware/elrs-backpack-1.5.7-fmp-ws.patch`). Flash it through the backpack's web page → Update; your saved Home WiFi stays. The files in v2.5.99 were replaced on 2026-10-31 with update 2 (rejoins a phone hotspot by itself). Upstream: proposal [ExpressLRS/Backpack#252](https://github.com/ExpressLRS/Backpack/issues/252), pull request [ExpressLRS/Backpack#253](https://github.com/ExpressLRS/Backpack/pull/253).
 
 ## Build and flash (once)
 
+The fork [`tecelskyyivan-alt/Backpack`](https://github.com/tecelskyyivan-alt/Backpack), branch `fmp-ws`, is stock 1.5.7 plus these changes:
+
 ```sh
-git clone https://github.com/ExpressLRS/Backpack.git && cd Backpack
-git checkout 1.5.7
-git am /path/to/ardu-field-planner/firmware/elrs-backpack-1.5.7-fmp-ws.patch
+git clone -b fmp-ws https://github.com/tecelskyyivan-alt/Backpack.git && cd Backpack
 pip install platformio
 pio run -e ESP_TX_Backpack_via_WIFI        # ESP8285 TX backpacks (RadioMaster Ranger, ...)
 ```
@@ -32,6 +32,7 @@ pio run -e ESP_TX_Backpack_via_WIFI        # ESP8285 TX backpacks (RadioMaster R
 Flash `.pio/build/ESP_TX_Backpack_via_WIFI/firmware.bin` through the backpack's web page
 (`http://<backpack IP>` or `http://10.0.0.1` → Update), or the ELRS Configurator's local file option.
 ESP32-C3 backpacks: `ESP32C3_TX_Backpack_via_WIFI`. Back to stock: flash stock 1.5.7 the same way.
+On top of your own Backpack checkout instead: `git checkout 1.5.7 && git am firmware/elrs-backpack-1.5.7-fmp-ws.patch` (the same changes as one patch).
 
 ## Each flight
 
