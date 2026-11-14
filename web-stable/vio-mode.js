@@ -170,7 +170,10 @@
       passes++;
       if (d < need) short++;
     }
-    return { need, passes, short };
+    // `mostly`: the warning's case — most passes never reach the speed. A pass the boundary clips (passes tilted to
+    // the edge) is short by geometry while the rest fly at speed: on 14.11's test field 2 of 9 passes were 143 m at
+    // 17 m/s (need 144.5) and the panel said the legs were too short for a field of 762 m legs.
+    return { need, passes, short, mostly: passes > 0 && 2 * short > passes };
   }
 
   // ---- sorties (FMP #60, owner 02.11): a field over the pack budget is split by legs;

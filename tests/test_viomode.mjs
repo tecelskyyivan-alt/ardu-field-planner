@@ -96,6 +96,19 @@ const legs = [[49.5, 24], [49.5 + dN, 24], [49.5 + dN, 24 + dE], [49.5, 24 + dE]
 const sl22 = V.shortLegs(legs, 22, 20), sl10 = V.shortLegs(legs, 10, 20);
 check("115 m passes: short at 22 m/s (2 of 2), fine at 10 m/s; the 20 m connector is not a pass",
   sl22.passes === 2 && sl22.short === 2 && sl10.short === 0);
+check("115 m passes at 22 m/s: mostly short -> the panel warns", sl22.mostly === true && sl10.mostly === false);
+// 14.11's test field: 7 passes of 762 m and 2 edge passes the boundary clipped to 143 m, 80 m apart, at 17 m/s
+// as the engine laid them: the first pass runs north from mid-field to the common north line, the last one north from
+// the common south line to mid-field; the rest run between the two lines, 80 m connectors along them
+const d80 = 80 / (111195 * Math.cos(49.5 * Math.PI / 180)), N = (m) => 49.5 + m / 111195;
+const tilted = [];
+for (let k = 0; k < 9; k++) {
+  const e = 24 + k * d80, s = k === 0 ? 762 - 143 : 0, n = k === 8 ? 143 : 762;
+  tilted.push(...(k % 2 ? [[N(n), e], [N(s), e]] : [[N(s), e], [N(n), e]]));
+}
+const sl17 = V.shortLegs(tilted, 17, 80);
+check("2 clipped edge passes of 9 at 17 m/s: counted short, but not mostly -> no warning (14.11)",
+  near(sl17.need, 144.5, 1e-9) && sl17.passes === 9 && sl17.short === 2 && sl17.mostly === false);
 
 // ---- #60 sorties ----
 // 12 passes of 400 m, 20 m apart; budget 4 min at 10 m/s

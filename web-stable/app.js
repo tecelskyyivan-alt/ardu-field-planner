@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.112";
+  const APP_VERSION = "2.5.113";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -6142,7 +6142,7 @@
         if (2 * sp.farthest + sp.length > VIO.measuredReachM(40).reach)
           lines.push("⚠️ " + t("Задовгий виліт — точність VIO не гарантована."));
       }
-      if (VIO.shortLegs(legsRoute, m.speed, parseFloat($("spacing").value) || 20).short)
+      if (VIO.shortLegs(legsRoute, m.speed, parseFloat($("spacing").value) || 20).mostly)
         lines.push("⚠️ " + tf(t("Галси закороткі для {0} м/с."), m.speed));
     }
     if ($("vio-sortie-reset")) $("vio-sortie-reset").style.display = (so && so.length > 1 && vioSortieDone() > 0) ? "" : "none";

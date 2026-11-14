@@ -494,18 +494,38 @@
         // complete even when we didn't upload the mission this session (was X/null).
         if (f.total != null && f.total > 0) tl.wp_total = f.total;
       } else if (m.name === "STATUSTEXT") {
-        tl.last_text = f.text;
-        const fam = vioFamily(f.text);
-        if (fam) (tl.vio_msgs || (tl.vio_msgs = {}))[fam] = { text: String(f.text).replace(/\0+$/, ""), ts: Date.now() };
-        const log = tl.msg_log || (tl.msg_log = []);
-        log.push({ text: String(f.text).replace(/\0+$/, ""), sev: f.severity, ts: Date.now() });
-        if (log.length > 12) log.splice(0, log.length - 12);
-        const cf = /^VIO: crossing fix ([\d.]+) m \(/.exec(String(f.text || ""));
-        if (cf) {
-          const c = tl.crossing || { n: 0 };
-          tl.crossing = { n: c.n + 1, last_m: +cf[1], ts: Date.now() };
+        for (const { text, sev } of this._statusTexts(f)) {
+          tl.last_text = text;
+          const fam = vioFamily(text);
+          if (fam) (tl.vio_msgs || (tl.vio_msgs = {}))[fam] = { text, ts: Date.now() };
+          const log = tl.msg_log || (tl.msg_log = []);
+          log.push({ text, sev, ts: Date.now() });
+          if (log.length > 12) log.splice(0, log.length - 12);
+          const cf = /^VIO: crossing fix ([\d.]+) m \(/.exec(text);
+          if (cf) {
+            const c = tl.crossing || { n: 0 };
+            tl.crossing = { n: c.n + 1, last_m: +cf[1], ts: Date.now() };
+          }
         }
       }
+    }
+
+    // MAVLink 2: a STATUSTEXT over 50 characters arrives in chunks - the same non-zero `id`, `chunk_seq` from 0, the
+    // last chunk the one shorter than 50. The FC's Lua "VIOFS: no VISION_POSITION_ESTIMATE flow yet (companion down?)"
+    // came as two messages and the HUD showed only "nion down?)" (14.11, the aircraft's FC). Returns the texts complete
+    // now, each {text, sev}: an id-0 one at once, a chunked one with its last chunk; a chunked one whose last chunk
+    // never came is given as it stands with the next STATUSTEXT 2 s on (a lost tail, not a lost message).
+    _statusTexts(f) {
+      const out = [], now = Date.now(), parts = this._stParts || (this._stParts = new Map());
+      for (const [id, p] of parts) if (now - p.ts > 2000) { out.push({ text: p.chunks.join(""), sev: p.sev }); parts.delete(id); }
+      const text = String(f.text || "").replace(/\0[\s\S]*$/, "");
+      if (!f.id) { out.push({ text, sev: f.severity }); return out; }
+      const p = parts.get(f.id) || { chunks: [], sev: f.severity, ts: now };
+      p.chunks[f.chunk_seq || 0] = text; p.ts = now; parts.set(f.id, p);
+      if (text.length >= 50) return out;                // more to come
+      parts.delete(f.id);
+      out.push({ text: p.chunks.join(""), sev: p.sev });
+      return out;
     }
 
     // Re-request telemetry every 3 s until it actually flows. ArduCopter's SRx_*
