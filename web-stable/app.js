@@ -43,7 +43,7 @@
   try {
     const saved = localStorage.getItem("fmp_lang");
     LANG = saved === "en" || saved === "uk" ? saved
-         : ((navigator.language || "").toLowerCase().startsWith("uk") ? "uk" : "uk");
+         : (/^(uk|ru)\b/i.test(navigator.language || "") ? "uk" : "en");
   } catch (e) {}
   // Translate a dynamic (JS-built) user-facing string. UA in → EN out when LANG=en.
   function t(s) {
