@@ -751,6 +751,11 @@ Object.assign(window.FMP_TR, {
   "Координати дому: два числа «широта, довгота».": "Home coordinates: two numbers, \"lat, lon\".",
   "Клікни на мапі точку старту дрона.": "Click the drone's take-off point on the map.",
   "Дім поставлено.": "Home set.",
+  "Дім підтверджено.": "Home confirmed.",
+  "Дім «Д» відновлено з пам'яті поля. Торкнись його на мапі, якщо дрон стоїть там, і залий знову.":
+    "Home «D» was restored from the field's memory. Tap it on the map if the drone stands there, and upload again.",
+  "Увага: телефон за {0} м від «Д» (GPS телефона може брехати).":
+    "Warning: the phone is {0} m from «D» (the phone's GPS may lie).",
   "Скопійовано: два рядки для vio.args.": "Copied: two lines for vio.args.",
   "Скопіюй у vio.args:": "Copy into vio.args:",
   "Дім записано у FC як origin — Pi візьме його сам.": "Home written to the FC as the origin — the Pi takes it from there.",

@@ -4967,7 +4967,25 @@
     }
   }
 
+  // ardu-gps-denied PROMPT_AGENTS rule 11: refuse an upload with a home restored from memory and not confirmed.
+  function vioHomeGateOk() {
+    if (!vioOn() || !vioHome) return true;
+    const g = VIO.homeUploadGate(vioHome, { restored: vioHomeRestored, confirmed: vioHomeConfirmed, me: myPosition });
+    if (!g.ok) {
+      setMsg(t("Дім «Д» відновлено з пам'яті поля. Торкнись його на мапі, якщо дрон стоїть там, і залий знову."),
+             "error");
+      appLog("vio: upload refused — restored home not confirmed");
+      return false;
+    }
+    if (g.warnM) {
+      appLog("vio: phone GPS " + g.warnM + " m from home (warning only)");
+      setMsg(tf(t("Увага: телефон за {0} м від «Д» (GPS телефона може брехати)."), g.warnM), null);
+    }
+    return true;
+  }
+
   async function mavUpload() {
+    if (!vioHomeGateOk()) return;
     const a = mavApi();
     if (!a || !a.mav_upload_mission) { setMsg(t("API недоступний."), "error"); return; }
     // Fixed-wing: the arc geometry is baked at BUILD time, but we only know for sure this
@@ -5121,6 +5139,7 @@
   // заливка — з вертикальним зльотом на задану висоту на початку; далі оператор
   // стартує як завжди (мотори → «Старт місії»).
   async function resumeUploadRemainder(rem) {
+    if (!vioHomeGateOk()) return;
     const a = mavApi();
     if (!a || !a.mav_upload_mission) { setMsg(t("Немає звʼязку з дроном."), "error"); return; }
     appLog("[resume] заливаю залишок: " + rem.rest.length + " точок (пройдено " + rem.idx + "/" + rem.total + ")");
@@ -5892,6 +5911,8 @@
   let vioHome = null, vioHomeMarker = null, vioLine = null, vioPlanLine = null;
   let vioOriginResult = null;     // the last upload's origin write: {ok} / {ok:false, held}
   try { vioHome = JSON.parse(localStorage.getItem(VIO_KEY) || "null"); } catch (e) { vioHome = null; }
+  // A home from memory (this load or a field switch) is not where the drone is until a tap says so (homeUploadGate).
+  let vioHomeRestored = !!vioHome, vioHomeConfirmed = false;
   // Home per field: the operator sets it once for a field, it comes back with the field.
   const VIO_HOMES = "fmp_vio_homes";
   let vioLastField = null;
@@ -5902,8 +5923,9 @@
     const h = currentFieldName ? vioHomes()[currentFieldName] : null;
     if (h && h.lat != null) {
       vioHome = h; vioOriginResult = null;
+      vioHomeRestored = true; vioHomeConfirmed = false;
       try { localStorage.setItem(VIO_KEY, JSON.stringify(vioHome)); } catch (e) {}
-      appLog("vio: home restored for the field");
+      appLog("vio: home restored for the field — a tap on it confirms it before an upload");
     }
   }
   function vioOn() { return !!($("vio-mode") && $("vio-mode").checked); }
@@ -6049,6 +6071,7 @@
   function vioHomeForUpload() { return (vioOn() && vioHome) ? { lat: vioHome.lat, lng: vioHome.lng, alt: vioHome.alt || 0 } : null; }
   function vioSetHome(ll, why) {
     vioHome = { lat: +ll.lat, lng: +ll.lng, alt: 0 };
+    vioHomeRestored = false; vioHomeConfirmed = true;        // placed or dragged now: that is the confirmation
     vioOriginResult = null;          // a moved home has not been written yet
     // Ground elevation for the origin's altitude (AMSL). Best effort: offline it stays 0,
     // which shifts only the absolute altitude the FC reports, not the navigation.
@@ -6120,6 +6143,11 @@
       vioHomeMarker = L.marker(ll, { icon: vioArrowIcon(hdg), draggable: true, zIndexOffset: 1500 })
         .addTo(map).bindTooltip(t("Дім (старт без GPS)"));
       vioHomeMarker.on("dragend", (e) => vioSetHome(e.target.getLatLng(), "drag"));
+      vioHomeMarker.on("click", () => {                       // one tap = «the drone stands here»
+        vioHomeConfirmed = true;
+        appLog("vio: home confirmed by a tap");
+        setMsg(t("Дім підтверджено."), "ok");
+      });
       vioHomeMarker._hdg = hdg;
     } else {
       vioHomeMarker.setLatLng(ll);
