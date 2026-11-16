@@ -369,6 +369,12 @@ Object.assign(window.FMP_TR, {
   "Геозона залита: межа поля + {0} вирізів. Увімкни FENCE_ENABLE=1, коли будеш готовий.":
     "Geofence uploaded: field boundary + {0} cut-outs. Enable it yourself (FENCE_ENABLE=1) when ready.",
   "Геозону НЕ залито: {0}. Місія залита нормально.": "Geofence NOT uploaded: {0}. Mission uploaded fine.",
+  "Контур поля передано сторожу ({0} вершин); геозона FC вимкнена.":
+    "Field contour sent to the edge guard ({0} vertices); FC geofence is off.",
+  "Контур поля сторожу: підтвердження не прийшло — на борту може лишитися старий контур. Перезалий місію.":
+    "Field contour for the edge guard: no confirmation — the vehicle may still hold an old contour. Upload the mission again.",
+  "Контур поля сторожу НЕ передано: {0}. Місія залита нормально.":
+    "Field contour NOT sent to the edge guard: {0}. Mission uploaded fine.",
   "Дім поза межею поля — з увімкненим fence дрон не озброїться на цьому місці.":
     "Home is outside the field boundary — with the fence enabled, the drone will refuse to arm here.",
   "невідома помилка": "unknown error",

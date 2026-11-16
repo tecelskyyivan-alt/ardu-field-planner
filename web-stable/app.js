@@ -5107,7 +5107,18 @@
         // setMsg called from inside mav_upload_mission would be overwritten by this one
         // with zero paint frames in between, silently hiding a fence failure from the
         // pilot (review finding). Never downgrade an already-worse verdict (error > warn > ok).
-        if (r.fence) {
+        if (r.fence && r.fence.vio) {
+          // VIO: the contour is for the onboard edge guard, the FC fence stays OFF.
+          if (r.fence.ok && r.fence.warning) {
+            m += " " + t("Контур поля сторожу: підтвердження не прийшло — на борту може лишитися старий контур. Перезалий місію.");
+            if (kind === "ok") kind = "warn";
+          } else if (r.fence.ok) {
+            m += " " + tf(t("Контур поля передано сторожу ({0} вершин); геозона FC вимкнена."), r.fence.count);
+          } else {
+            m += " " + tf(t("Контур поля сторожу НЕ передано: {0}. Місія залита нормально."), r.fence.error || t("невідома помилка"));
+            if (kind === "ok") kind = "warn";
+          }
+        } else if (r.fence) {
           if (r.fence.ok && r.fence.warning) {
             // Lost-ACK "ok" (link.js:610): every fence item was SENT but the final ACK never
             // arrived. On the vehicle this can time out and discard the incomplete transfer,
