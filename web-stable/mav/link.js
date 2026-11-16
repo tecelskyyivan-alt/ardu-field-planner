@@ -18,7 +18,7 @@
   const CMD_LOITER_TIME = 19, CMD_LAND = 21, FRAME_TERRAIN = 10;
   // GPS-denied (VIO) profile holds, s — mirror backend/mission.py VIO_HOLD_START_S / _END_S.
   const VIO_HOLD_START_S = 5, VIO_HOLD_END_S = 25;
-  // Then up over home to 105 m and back down before the route (Ivan 05.11: always) — mirror VIO_KEY_TOP_M / _S.
+  // Then up over home to 105 m and on to the first waypoint, descending in motion (Ivan 16.11) — mirror VIO_KEY_TOP_M / _S.
   const VIO_KEY_TOP_M = 105, VIO_KEY_TOP_S = 3;
   // #12p3: ArduPilot geofence storage (MAV_MISSION_TYPE_FENCE = 1) — polygon vertices only.
   const CMD_FENCE_INCLUSION = 5001, CMD_FENCE_EXCLUSION = 5002;   // MAV_CMD_NAV_FENCE_POLYGON_VERTEX_*
@@ -103,7 +103,7 @@
   // Build the ordered mission items for upload — the SAME layout as backend/mission.py
   // mission_items (the .waypoints/.plan export and the desktop upload):
   //   GPS: 0 home(abs) · 1 takeoff · [do_change_speed] · waypoints… · [rtl]
-  //   VIO (opts.vio): 0 home · 1 takeoff · loiter 5 s · [loiter 3 s at 105 m · loiter 1 s back] · [do_change_speed] ·
+  //   VIO (opts.vio): 0 home · 1 takeoff · loiter 5 s · [loiter 3 s at 105 m] · [do_change_speed] ·
   //        waypoints… · wp home · loiter 25 s · land — `rtl` is ignored, the end is fixed (#54).
   // opts.terrain: waypoints + the end over home in frame 10 (above the ground under the drone).
   // opts.climb === false: no climb to 105 m — even without a crossing fix the forecast at the end is <= 40 m
@@ -119,8 +119,8 @@
     if (vio) {
       add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, VIO_HOLD_START_S);
       if (opts.climb !== false) {
-        add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], VIO_KEY_TOP_M, 0, VIO_KEY_TOP_S);   // home keys to 100 m
-        add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], takeoffAlt, 0, 1);             // the transit at mission height
+        // home keys to 100 m; the leg to the first waypoint then descends to wpAlt in motion (Ivan 16.11)
+        add(FRAME_GLOBAL_REL, CMD_LOITER_TIME, home[0], home[1], VIO_KEY_TOP_M, 0, VIO_KEY_TOP_S);
       }
     }
     if (speed && speed > 0) add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0, 0, 0, 0, 1.0, speed, -1.0);
@@ -136,7 +136,7 @@
   // the battery-swap resume index. Must match buildMissionItems.
   function missionShape(speed, rtl, opts) {
     const vio = !!(opts && opts.vio);
-    return { lead: 2 + (vio ? (opts.climb === false ? 1 : 3) : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
+    return { lead: 2 + (vio ? (opts.climb === false ? 1 : 2) : 0) + (speed > 0 ? 1 : 0), tail: vio ? 3 : (rtl ? 1 : 0) };
   }
 
   // INAV mission builder. INAV's MAVLink receiver (src/main/telemetry/mavlink.c,

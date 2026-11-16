@@ -2982,8 +2982,9 @@
   // caller can run (a later `let` would be in its dead zone for a boot-time call).
   let vioClimbUp = true;
   function missionLead() {
-    // + VIO: 5 s, then 105 m and back unless the last upload left the climb out (vioClimbUp, Ivan 07.11)
-    return 2 + (vioHomeForUpload() ? (vioClimbUp === false ? 1 : 3) : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);
+    // + VIO: 5 s, then 105 m (descended in motion on the first leg, Ivan 16.11) unless the last upload left the climb out
+    // (vioClimbUp, Ivan 07.11)
+    return 2 + (vioHomeForUpload() ? (vioClimbUp === false ? 1 : 2) : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);
   }
   // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
   // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).

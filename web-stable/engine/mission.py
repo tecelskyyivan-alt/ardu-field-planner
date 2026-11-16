@@ -30,7 +30,7 @@ CMD_DO_CHANGE_SPEED = 178
 # corrects the VIO (25 s; corrections of 1.2-8.4 m measured 2026-11-02). FMP issue #54.
 VIO_HOLD_START_S = 5.0
 VIO_HOLD_END_S = 25.0
-# Then up over home to VIO_KEY_TOP_M and back down to the mission height before the route: the companion keys
+# Then up over home to VIO_KEY_TOP_M, and from there straight on to the first route waypoint: the companion keys
 # 60 / 80 / 100 m on the way, and its 100 m retry stage finds home 50-90 m off (M17: 91 / 55 % of frames against
 # 10 / 0 % with keys to 40 m). 105, not 100: a key is the first frame AT or above its level. Ivan 07.11: only when the
 # companion may come back more than 50 m off even if no crossing fix registers (05.11 attempt 3: none, 83 m) — the
@@ -39,6 +39,9 @@ VIO_HOLD_END_S = 25.0
 # (ardu-gps-denied audits/climb-105-2026-11-07, SITL 4.7.0).
 VIO_KEY_TOP_M = 105.0
 VIO_KEY_TOP_S = 3.0
+# Ivan 16.11 (ardu-gps-denied TASKS_2026-11-16 item 10): no hover back at the mission height over home — the 105 -> wp_alt
+# descent happens in motion on the leg to the first waypoint. ArduCopter's S-curve caps the leg's along-track speed so its
+# vertical part stays within WP_SPD_DN (AP_Math kinematic_limit), so the descent is no faster than the vertical one was.
 
 
 def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
@@ -46,12 +49,13 @@ def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
     """Ordered mission rows (frame, command, p1, p2, p3, p4, lat, lon, alt); row 0 = home.
 
     GPS:  home · TAKEOFF · [DO_CHANGE_SPEED] · waypoints · [RTL]
-    VIO:  home · TAKEOFF · LOITER_TIME 5 · [LOITER_TIME 3 at 105 m · LOITER_TIME 1 back at takeoff_alt] ·
+    VIO:  home · TAKEOFF · LOITER_TIME 5 · [LOITER_TIME 3 at 105 m] ·
           [DO_CHANGE_SPEED] · waypoints · WP home · LOITER_TIME 25 · LAND (home)  — `rtl` is ignored: the end is fixed.
-    `climb` (VIO only): the two climb rows, home keys to 100 m — False when even without a crossing fix the forecast
+    After the 105 m hover the leg to the first waypoint descends to wp_alt in motion (Ivan 16.11).
+    `climb` (VIO only): the climb row, home keys to 100 m — False when even without a crossing fix the forecast
     at the end is <= 40 m.
     The climb is LOITER_TIME over home, not WAYPOINT: the route stays the only waypoints (ardu-gps-denied's loader
-    flies one altitude frame for the whole body), and the transit leaves at the mission height.
+    flies one altitude frame for the whole body).
     terrain=True puts the waypoints (and the VIO end over home) in frame 10, so the
     altitude is above the ground under the drone (the VIO stack holds it on the
     rangefinder); the takeoff stays relative to home."""
@@ -62,8 +66,7 @@ def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
     if vio:
         rows.append((FRAME_REL, CMD_LOITER_TIME, VIO_HOLD_START_S, 0, 0, 0, la0, lo0, float(takeoff_alt)))
         if climb:
-            rows += [(FRAME_REL, CMD_LOITER_TIME, VIO_KEY_TOP_S, 0, 0, 0, la0, lo0, VIO_KEY_TOP_M),
-                     (FRAME_REL, CMD_LOITER_TIME, 1.0, 0, 0, 0, la0, lo0, float(takeoff_alt))]
+            rows.append((FRAME_REL, CMD_LOITER_TIME, VIO_KEY_TOP_S, 0, 0, 0, la0, lo0, VIO_KEY_TOP_M))
     if speed and float(speed) > 0:
         # type 1 = groundspeed, m/s, throttle -1 = no change
         rows.append((FRAME_REL, CMD_DO_CHANGE_SPEED, 1.0, float(speed), -1.0, 0, 0.0, 0.0, 0.0))
