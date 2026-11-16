@@ -137,8 +137,10 @@ function makeFenceVehicle(opts = {}) {
     if (opts.strayCrossType) { reqInt(seq, 0); reqPlain(seq, 0); }   // cross-transaction noise, must be ignored
     if (opts.dialect === "ardupilot") reqPlain(seq, 1); else reqInt(seq, 1);
   };
+  t.names = [];   // every message name the vehicle got — (g) asserts no PARAM_SET among them
   t.write = (bytes) => {
     for (const m of veh.push(bytes)) {
+      t.names.push(m.name);
       if (m.name === "MISSION_COUNT") {
         if (m.fields.mission_type !== 1) continue;    // not the fence list — ignore (mirrors a real FC)
         n = m.fields.count;
@@ -244,6 +246,35 @@ console.log("\n== (e) fence upload (mission_type=1) must NOT clobber telemetry w
   check("[wp_total] telemetry wp_total untouched by the fence's own vertex count (" + fenceItems.length + ")",
     link._tlm.wp_total === 203);
   link.disconnect(); t._stopHb();
+}
+
+console.log("\n== (f) VIO mode: the contour goes up without the checkbox, never on a partial upload ==");
+{
+  vm.runInThisContext(fs.readFileSync(path.join(MAVDIR, "..", "vio-mode.js"), "utf8"));
+  const want = globalThis.VIO_MODE.fenceUploadWanted;   // (vio, optIn, partial, isInav)
+  check("[gate] VIO on, checkbox OFF, full upload -> fence", want(true, false, false, false) === true);
+  check("[gate] VIO off, checkbox OFF -> no fence (opt-in as before)", want(false, false, false, false) === false);
+  check("[gate] VIO off, checkbox ON -> fence (as before)", want(false, true, false, false) === true);
+  check("[gate] VIO on, partial (resume) upload -> no fence: no re-upload, no COUNT=0 clear",
+    want(true, false, true, false) === false && want(true, true, true, false) === false);
+  check("[gate] INAV -> never", want(true, true, false, true) === false);
+  const app = fs.readFileSync(path.join(MAVDIR, "..", "app.js"), "utf8");
+  check("[gate] app.js gates the fence upload on VIO_MODE.fenceUploadWanted(vioOn(), …)",
+    /const fenceVio = vioOn\(\);\s*if \(window\.VIO_MODE\.fenceUploadWanted\(fenceVio,/.test(app));
+}
+
+console.log("\n== (g) FENCE_ENABLE / FENCE_ACTION are never written ==");
+{
+  const fenceItems = MAV_LINK.buildFenceItems(boundary, [exclusion]);
+  const t = makeFenceVehicle({ dialect: "int" });
+  const link = new MAV_LINK.MavLink();
+  await link.connect(t);
+  const up = await link.uploadMission(fenceItems, undefined, undefined, 1);
+  check("[no-arm] fence upload ok", up.ok === true);
+  check("[no-arm] no PARAM_SET on the wire during the fence upload", up.ok && t.names.includes("MISSION_COUNT") && !t.names.includes("PARAM_SET"));
+  link.disconnect(); t._stopHb();
+  const src = ["app.js", "mav/link.js"].map((f) => fs.readFileSync(path.join(MAVDIR, "..", f), "utf8")).join("\n");
+  check("[no-arm] no setParam(\"FENCE_…\") anywhere in app.js / link.js", !/setParam\(\s*["'`]FENCE_/.test(src));
 }
 
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));

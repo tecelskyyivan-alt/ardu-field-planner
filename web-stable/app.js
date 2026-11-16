@@ -3462,7 +3462,11 @@
       // whatever it already is (true, since we're past the early `if (!res.ok) return res;`
       // above). The outcome is attached as res.fence — the CALLER composes the one message
       // actually painted to the pilot (a setMsg here would just be silently overwritten).
-      if (!isInav && !(p && p.route && p.route.length) && $("fence-upload") && $("fence-upload").checked) {
+      // GPS-denied (VIO) mode: the contour goes up on EVERY full upload, no checkbox — the
+      // onboard edge guard takes the field edge from it (Ivan 16.11); the guard only watches.
+      const fenceVio = vioOn();
+      if (window.VIO_MODE.fenceUploadWanted(fenceVio, !!($("fence-upload") && $("fence-upload").checked),
+                                            !!(p && p.route && p.route.length), isInav)) {
         try {
           const boundary = boundaryFromPolygon();
           const exclusions = collectExclusions();
@@ -3492,6 +3496,7 @@
         } catch (e) {
           res.fence = { ok: false, error: (e && e.message) || String(e) };
         }
+        if (res.fence) res.fence.vio = fenceVio;
       }
       return res;
     },

@@ -495,7 +495,15 @@
     return out;
   }
 
-  global.VIO_MODE = { haversineM, homeUploadGate, HOME_PHONE_WARN_M, bearingDeg, compass8, relativeDeg, sideWord, nearestOnRing,
+  // Field contour -> FC fence storage (MISSION_TYPE_FENCE) after a FULL mission upload:
+  // always in GPS-denied mode (the companion's edge guard reads it from the FC; FENCE_ENABLE
+  // is never written and stays 0), otherwise only when the pilot ticked the opt-in box.
+  // Never on a partial (resume) upload — that is not the moment to replace or clear it.
+  function fenceUploadWanted(vio, optIn, partial, isInav) {
+    return !isInav && !partial && !!(vio || optIn);
+  }
+
+  global.VIO_MODE = { fenceUploadWanted, haversineM, homeUploadGate, HOME_PHONE_WARN_M, bearingDeg, compass8, relativeDeg, sideWord, nearestOnRing,
     routeSpan, reachM, driftWithin, originArgs, parseLatLon, VIO_FAMILY, VIO_ALARM, vioWarnings, vioAlertDue,
     MEASURED, measuredShare, measuredMaxPath, measuredReachM, segPenaltyS, missionTime, energy,
     legNeedM, shortLegs, splitSorties,
