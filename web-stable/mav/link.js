@@ -100,6 +100,19 @@
     return "ArduPilot: " + txt;
   }
 
+  // Ivan 18.11 (field, 2.5.115): the 105 -> wpAlt descent spreads over the route waypoints instead of all of it over
+  // the first one (60 m from home, it looked like a hover). Mirror backend/mission.py _glide_alts / VIO_GLIDE_*.
+  const VIO_GLIDE_DN = 1.5, VIO_GLIDE_SPEED = 10;   // m/s: WP_SPD_DN; the speed when the mission sets none
+  function glideAlts(home, waypoints, wpAlt, speed) {
+    const slope = VIO_GLIDE_DN / (speed > 0 ? speed : VIO_GLIDE_SPEED);
+    let d = 0, pla = +home[0], plo = +home[1];
+    return waypoints.map(([la, lo]) => {
+      d += Math.hypot((la - pla) * 111320, (lo - plo) * 111320 * Math.cos((la + pla) / 2 * Math.PI / 180));
+      pla = la; plo = lo;
+      return Math.round(Math.max(wpAlt, VIO_KEY_TOP_M - d * slope) * 10) / 10;
+    });
+  }
+
   // Build the ordered mission items for upload — the SAME layout as backend/mission.py
   // mission_items (the .waypoints/.plan export and the desktop upload):
   //   GPS: 0 home(abs) · 1 takeoff · [do_change_speed] · waypoints… · [rtl]
@@ -124,7 +137,9 @@
       }
     }
     if (speed && speed > 0) add(FRAME_GLOBAL_REL, CMD_DO_CHANGE_SPEED, 0, 0, 0, 0, 1.0, speed, -1.0);
-    for (const [lat, lon] of waypoints) add(wf, CMD_WAYPOINT, lat, lon, wpAlt);
+    const alts = vio && opts.climb !== false && wpAlt < VIO_KEY_TOP_M ? glideAlts(home, waypoints, wpAlt, speed)
+      : waypoints.map(() => wpAlt);
+    waypoints.forEach(([lat, lon], i) => add(wf, CMD_WAYPOINT, lat, lon, alts[i]));
     if (vio) {
       add(wf, CMD_WAYPOINT, home[0], home[1], wpAlt);
       add(wf, CMD_LOITER_TIME, home[0], home[1], wpAlt, 0, VIO_HOLD_END_S);
