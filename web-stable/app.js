@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.113";
+  const APP_VERSION = "2.5.114";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -3189,22 +3189,32 @@
           // Empty address = find it: the last backpack that answered, its mDNS name (Home WiFi),
           // then its own access point, then every client address of an iPhone hotspot (iOS always
           // uses 172.20.10.0/28 there, the phone is .1). The one that answers is remembered.
+          // The backpack's relay pages to try: a typed host (not this computer) alone, else
+          // the remembered one, mDNS, its access point, the iPhone hotspot sweep.
+          const typedHost = conn.slice(4).replace(/:\d+$/, "").replace(/^(0\.0\.0\.0|127\.0\.0\.1|localhost)$/, "");
+          let saved = ""; try { saved = localStorage.getItem("fmp_backpack_host") || ""; } catch (e) {}
+          const hotspot = Array.from({ length: 13 }, (_, i) => "172.20.10." + (i + 2));
+          const bpHosts = typedHost ? [typedHost] : [...new Set([saved, "elrs_txbp.local", "10.0.0.1", ...hotspot].filter(Boolean))];
+          const bpUrls = bpHosts.map((h) => "http://" + h + "/fmp-relay.html");
+          const bpMs = typedHost ? bpHosts.map(() => 8000) : bpHosts.map((h) => (hotspot.includes(h) && h !== saved ? 3000 : 5000));
+          const bpRemember = (tr) => {
+            if (!/\/fmp-relay\.html$/.test(tr.url || "")) return;
+            try { localStorage.setItem("fmp_backpack_host", tr.url.split("/")[2]); } catch (e) {}
+            appLog("backpack relay: " + tr.url);
+          };
+          const bpFailed = (e) => {
+            // Can't tell a stock backpack from no backpack here (the relay is cross-origin):
+            // either way the fix is the FMP backpack firmware — show how, with the download.
+            const help = $("bp-fw-help"); if (help) { help.hidden = false; try { help.scrollIntoView({ block: "nearest" }); } catch (e2) {} }
+            appLog("backpack relay: " + ((e && e.message) || e) + " → показано підказку про прошивку бекпака");
+          };
           if (!BRIDGE_PAGE && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "")) {
-            const typed = conn.slice(4).replace(/:\d+$/, "").replace(/^0\.0\.0\.0$/, "");
-            let saved = ""; try { saved = localStorage.getItem("fmp_backpack_host") || ""; } catch (e) {}
-            const hotspot = Array.from({ length: 13 }, (_, i) => "172.20.10." + (i + 2));
-            const hosts = typed ? [typed] : [...new Set([saved, "elrs_txbp.local", "10.0.0.1", ...hotspot].filter(Boolean))];
             try {
-              transport = await MAV_TRANSPORT.openRelay(hosts.map((h) => "http://" + h + "/fmp-relay.html"),
-              typed ? 8000 : hosts.map((h) => (hotspot.includes(h) && h !== saved ? 3000 : 5000)));
-              try { localStorage.setItem("fmp_backpack_host", transport.url.split("/")[2]); } catch (e) {}
-              appLog("backpack relay: " + transport.url);
+              transport = await MAV_TRANSPORT.openRelay(bpUrls, typedHost ? 8000 : bpMs);
+              bpRemember(transport);
             }
             catch (e) {
-              // Can't tell a stock backpack from no backpack here (the relay is cross-origin):
-              // either way the fix is the FMP backpack firmware — show how, with the download.
-              const help = $("bp-fw-help"); if (help) { help.hidden = false; try { help.scrollIntoView({ block: "nearest" }); } catch (e2) {} }
-              appLog("backpack relay: " + ((e && e.message) || e) + " → показано підказку про прошивку бекпака");
+              bpFailed(e);
               return { ok: false, error: t("Бекпак не відповів. Онови його прошивкою FMP — кнопка й кроки під «Підключити». Якщо вже прошито — впиши IP бекпака в «Адреса».") };
             }
           } else {
@@ -3219,11 +3229,21 @@
               if (location.host === addr) throw e;
               const allowed = await fetch("http://" + addr + "/ping", { targetAddressSpace: "loopback" })
                 .then((r) => r.ok, () => false);
-              transport = allowed ? await MAV_TRANSPORT.openWebSocket("ws://" + addr)
-                : await MAV_TRANSPORT.openRelay("http://" + addr + "/relay.html");
+              if (allowed) transport = await MAV_TRANSPORT.openWebSocket("ws://" + addr);
+              else if (BRIDGE_PAGE) transport = await MAV_TRANSPORT.openRelay("http://" + addr + "/relay.html");
+              else {
+                // No bridge running is the usual field case (16.11): the same relay window then
+                // tries the backpack's own page, like a phone browser does. The bridge goes first
+                // when the address can be one (this computer, or host:port of a --lan bridge).
+                const bridgeToo = !typedHost || /:\d+$/.test(addr);
+                const urls = (bridgeToo ? ["http://" + addr + "/relay.html"] : []).concat(bpUrls);
+                transport = await MAV_TRANSPORT.openRelay(urls, (bridgeToo ? [4000] : []).concat(bpMs));
+                bpRemember(transport);
+              }
             }
           } catch (e) {
-            return { ok: false, error: "Немає зв'язку з мостом UDP: " + ((e && e.message) || e) + " Браузер не приймає UDP напряму — запусти на цьому комп'ютері міст: python3 scripts/udp_ws_bridge.py (з репозиторію FMP), тоді «Підключити» ще раз. Або під'єднайся кабелем." };
+            if (!BRIDGE_PAGE) bpFailed(e);
+            return { ok: false, error: "Немає зв'язку ні з мостом UDP, ні з бекпаком: " + ((e && e.message) || e) + " Бекпак із прошивкою FMP на тій самій WiFi знаходиться сам (або впиши його IP в «Адреса»); стоковий — лише через міст: python3 scripts/udp_ws_bridge.py (з репозиторію FMP) на цьому комп'ютері, тоді «Підключити» ще раз. Або під'єднайся кабелем." };
           }
           }
         } else if (conn.startsWith("tcp:")) {

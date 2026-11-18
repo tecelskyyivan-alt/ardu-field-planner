@@ -163,8 +163,33 @@ vm.runInNewContext(src, sandbox3, { filename: "app.js", timeout: 30000 });
 await REAL["mav-connect"].listeners.click();
 // Direct WebSocket first; Chrome blocks Pages -> 127.0.0.1, so then the bridge's relay popup.
 check("UDP with empty address tries the local bridge directly", wsUrls[0] === "ws://127.0.0.1:14550");
-check("blocked -> falls back to the bridge's relay window", wsUrls[1] === "http://127.0.0.1:14550/relay.html");
+check("blocked -> falls back to the bridge's relay window first", [].concat(wsUrls[1])[0] === "http://127.0.0.1:14550/relay.html");
+// 16.11 field: no bridge running on the Mac, backpack (FMP firmware) on the iPhone hotspot ->
+// the same relay window goes on to the backpack's own page instead of dead-ending on the bridge.
+check("no bridge -> the relay window then tries the backpack (mDNS, AP, hotspot)",
+  [].concat(wsUrls[1]).slice(1).join() === "http://elrs_txbp.local/fmp-relay.html,http://10.0.0.1/fmp-relay.html," +
+  Array.from({ length: 13 }, (_, i) => "http://172.20.10." + (i + 2) + "/fmp-relay.html").join());
 check("no bridge -> error names the bridge script", String(REAL["msg"].textContent || "").includes("udp_ws_bridge.py"));
+check("no bridge -> error says a FMP-firmware backpack is found by itself", String(REAL["msg"].textContent || "").includes("бекпак"));
+
+// Desktop, typed backpack IP (no port): straight to the backpack, no dead bridge popup; remembered.
+const deskUrls = [];
+for (const id of ["mav-connect", "mav-conn-type", "mav-address", "mav-baud", "msg"]) REAL[id] = realEl();
+REAL["mav-conn-type"].value = "udp"; REAL["mav-conn-type"].querySelector = () => null; REAL["mav-address"].value = "172.20.10.6"; REAL["mav-baud"].value = "auto";
+const sandbox3b = { ...sandbox3, MAV_TRANSPORT: { serialSupported: () => false,
+  openWebSocket: async (u) => { deskUrls.push(u); throw new Error("no"); },
+  openRelay: async (u) => { deskUrls.push(u); return { url: [].concat(u)[0], write() {}, close() {}, ondata: null }; } } };
+sandbox3b.window = sandbox3b; sandbox3b.globalThis = sandbox3b; sandbox3b.self = sandbox3b;
+vm.runInNewContext(src, sandbox3b, { filename: "app.js", timeout: 30000 });
+await REAL["mav-connect"].listeners.click();
+check("desktop: typed backpack IP -> only its fmp-relay page", [].concat(deskUrls[1]).join() === "http://172.20.10.6/fmp-relay.html");
+check("desktop: answering backpack is remembered", sandbox3b.localStorage.getItem("fmp_backpack_host") === "172.20.10.6");
+// A typed loopback address still means the bridge first, not a backpack on 127.0.0.1.
+deskUrls.length = 0; REAL["mav-address"].value = "127.0.0.1:14550";
+await REAL["mav-connect"].listeners.click();
+check("desktop: typed 127.0.0.1:14550 -> bridge relay first, then the remembered backpack",
+  [].concat(deskUrls[1]).slice(0, 2).join() === "http://127.0.0.1:14550/relay.html,http://172.20.10.6/fmp-relay.html");
+sandbox3b.localStorage.setItem("fmp_backpack_host", "");   // shared storage: the phone cases below start clean
 
 const phoneUrls = [];
 for (const id of ["mav-connect", "mav-conn-type", "mav-address", "mav-baud", "msg"]) REAL[id] = realEl();
