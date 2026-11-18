@@ -147,5 +147,27 @@ for rf, want_ok, label in ((0, False, "RNGFND1_TYPE 0 -> refused, nothing upload
     r = state_api().mav_upload_mission({"vio_home": pad, "terrain": True, "verify": False})
     check("terrain guard: " + label, bool(r.get("ok")) == want_ok and ((ml.LINK.items is None) != want_ok))
 
+# Ivan 18.11 (field, 2.5.115): the first waypoint 60 m from home took the whole 105 -> 40 m descent over it (looked
+# like a hover). The route waypoints now glide down at WP_SPD_DN 1.5 m/s along the route at the mission speed.
+import importlib.util as _ilu
+from backend import mission as _m
+_s = _ilu.spec_from_file_location("eng_mission", _root_os.path.join(ROOT_DIR, "web-stable", "engine", "mission.py"))
+_em = _ilu.module_from_spec(_s); _s.loader.exec_module(_em)
+GH = (49.72625, 29.61988, 0)
+GW = [(49.72679, 29.61988), (49.72679, 29.62600), (49.72715, 29.62600), (49.72715, 29.61988),
+      (49.72751, 29.61988), (49.72751, 29.62600)]
+GLIDE = [100.9, 70.9, 68.1, 40.0, 40.0, 40.0]   # = test_jsmav.mjs (the browser builder)
+ga = _m._glide_alts(GH, GW, 40, 22)
+check("glide: 105 -> 40 m over several waypoints, never below the mission height (Ivan 18.11)",
+      ga == GLIDE and ga == sorted(ga, reverse=True) and min(ga) == 40.0 and ga[0] < 105)
+check("glide: engine copy (browser Pyodide) = backend", _em._glide_alts(GH, GW, 40, 22) == ga)
+check("glide: no speed -> 10 m/s (steeper)", _m._glide_alts(GH, GW, 40, 0) == [96.0, 40.0, 40.0, 40.0, 40.0, 40.0])
+def _wp_alts(**kw):
+    rows = _m.mission_items(GH, 40, GW, 40, speed=22, **kw)
+    return [r[8] for r in rows if r[1] == 16][1:1 + len(GW)]   # skip row 0 (home)
+check("glide only in VIO with the climb: VIO climb -> glide", _wp_alts(vio=True, climb=True) == GLIDE)
+check("glide only in VIO with the climb: VIO without climb and GPS -> every waypoint at 40 m",
+      _wp_alts(vio=True, climb=False) == [40.0] * 6 and _wp_alts(vio=False) == [40.0] * 6)
+
 print("\nRESULT: " + (f"{failed} FAILURE(S)" if failed else "ALL CHECKS PASSED"))
 sys.exit(1 if failed else 0)

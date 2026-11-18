@@ -586,5 +586,18 @@ console.log("\n== the drone comes back under a new MAV_SYSID (rebooted for it): 
   t._stopHb(); link.disconnect();
 }
 
+console.log("\n== VIO glide: 105 m -> mission height over several waypoints (Ivan 18.11) ==");
+{
+  const GH = [49.72625, 29.61988, 0];
+  const GW = [[49.72679, 29.61988], [49.72679, 29.62600], [49.72715, 29.62600], [49.72715, 29.61988],
+    [49.72751, 29.61988], [49.72751, 29.62600]];
+  const GLIDE = [100.9, 70.9, 68.1, 40, 40, 40];   // = tests/test_vio_home_upload.py (backend/mission.py _glide_alts)
+  const alts = (opts) => MAV_LINK.buildMissionItems(GH, 40, GW, 40, true, 22, opts)
+    .filter((i) => i.command === 16).slice(1, 1 + GW.length).map((i) => i.alt);
+  check("[glide] VIO with the climb: the same altitudes as the backend", JSON.stringify(alts({ vio: true })) === JSON.stringify(GLIDE));
+  check("[glide] VIO without the climb and GPS: every waypoint at the mission height",
+    alts({ vio: true, climb: false }).every((a) => a === 40) && alts({}).every((a) => a === 40));
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

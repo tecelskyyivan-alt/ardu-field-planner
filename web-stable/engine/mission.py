@@ -21,6 +21,7 @@ MAVLink reference used here:
 file and an upload of the same plan carry the same home, speed and end (#52-#54).
 """
 import json
+import math
 
 FRAME_GLOBAL, FRAME_REL, FRAME_TERRAIN = 0, 3, 10
 CMD_WAYPOINT, CMD_LOITER_TIME, CMD_RTL, CMD_LAND, CMD_TAKEOFF = 16, 19, 20, 21, 22
@@ -42,6 +43,24 @@ VIO_KEY_TOP_S = 3.0
 # Ivan 16.11 (ardu-gps-denied TASKS_2026-11-16 item 10): no hover back at the mission height over home — the 105 -> wp_alt
 # descent happens in motion on the leg to the first waypoint. ArduCopter's S-curve caps the leg's along-track speed so its
 # vertical part stays within WP_SPD_DN (AP_Math kinematic_limit), so the descent is no faster than the vertical one was.
+# Ivan 18.11 (field, M 2.5.115): the first waypoint lay 60 m from home, so the whole 65 m descent happened over it and
+# looked like a hover. Now the route waypoints carry a glide: each one is VIO_KEY_TOP_M minus the route distance flown
+# from home times VIO_GLIDE_DN / speed, never below wp_alt — the descent spreads over as many waypoints as it needs.
+VIO_GLIDE_DN = 1.5          # m/s, WP_SPD_DN 150 cm/s (coverage.LAND_DESCENT_RATE)
+VIO_GLIDE_SPEED = 10.0      # m/s when the mission sets no speed (WPNAV_SPEED default)
+
+
+def _glide_alts(home, waypoints, wp_alt, speed):
+    """Altitude of each route waypoint after the 105 m hover: down at VIO_GLIDE_DN along the route at `speed`."""
+    la0, lo0 = float(home[0]), float(home[1])
+    slope = VIO_GLIDE_DN / (float(speed) if speed and float(speed) > 0 else VIO_GLIDE_SPEED)
+    out, d, pla, plo = [], 0.0, la0, lo0
+    for la, lo in waypoints:
+        la, lo = float(la), float(lo)
+        d += math.hypot((la - pla) * 111320.0, (lo - plo) * 111320.0 * math.cos(math.radians((la + pla) / 2)))
+        out.append(round(max(float(wp_alt), VIO_KEY_TOP_M - d * slope), 1))
+        pla, plo = la, lo
+    return out
 
 
 def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
@@ -51,7 +70,8 @@ def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
     GPS:  home · TAKEOFF · [DO_CHANGE_SPEED] · waypoints · [RTL]
     VIO:  home · TAKEOFF · LOITER_TIME 5 · [LOITER_TIME 3 at 105 m] ·
           [DO_CHANGE_SPEED] · waypoints · WP home · LOITER_TIME 25 · LAND (home)  — `rtl` is ignored: the end is fixed.
-    After the 105 m hover the leg to the first waypoint descends to wp_alt in motion (Ivan 16.11).
+    After the 105 m hover the route descends to wp_alt in motion, over as many waypoints as the glide needs (Ivan 16.11,
+    18.11: `_glide_alts`).
     `climb` (VIO only): the climb row, home keys to 100 m — False when even without a crossing fix the forecast
     at the end is <= 40 m.
     The climb is LOITER_TIME over home, not WAYPOINT: the route stays the only waypoints (ardu-gps-denied's loader
@@ -70,7 +90,9 @@ def mission_items(home, takeoff_alt, waypoints, wp_alt, rtl=True, speed=0.0,
     if speed and float(speed) > 0:
         # type 1 = groundspeed, m/s, throttle -1 = no change
         rows.append((FRAME_REL, CMD_DO_CHANGE_SPEED, 1.0, float(speed), -1.0, 0, 0.0, 0.0, 0.0))
-    rows += [(wf, CMD_WAYPOINT, 0, 0, 0, 0, float(la), float(lo), float(wp_alt)) for la, lo in waypoints]
+    alts = (_glide_alts(home, waypoints, wp_alt, speed) if vio and climb and float(wp_alt) < VIO_KEY_TOP_M
+            else [float(wp_alt)] * len(waypoints))
+    rows += [(wf, CMD_WAYPOINT, 0, 0, 0, 0, float(la), float(lo), a) for (la, lo), a in zip(waypoints, alts)]
     if vio:
         rows += [(wf, CMD_WAYPOINT, 0, 0, 0, 0, la0, lo0, float(wp_alt)),
                  (wf, CMD_LOITER_TIME, VIO_HOLD_END_S, 0, 0, 0, la0, lo0, float(wp_alt)),
