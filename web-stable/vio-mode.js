@@ -477,7 +477,33 @@
     return inside;
   }
 
-  global.VIO_MODE = { haversineM, bearingDeg, compass8, relativeDeg, sideWord, nearestOnRing,
+  // Ivan 15.11 (ardu-gps-denied PROMPT_AGENTS rule 11: a check that only forbids, on by default). A home RESTORED from
+  // the field's memory (fmp_vio_homes) may stand where the last take-off was, not where the drone is now — 15.11 T1V
+  // flew 27 m off its plan. It is uploaded only after one tap confirming it in this session; a home placed or dragged
+  // in this session is confirmed by that act. The phone's GPS (only when «Моє місце» is on) only WARNS, at tens of
+  // metres — under EW it may lie too, and «Д» is placed by eye anyway.
+  const HOME_PHONE_WARN_M = 30;
+  function homeUploadGate(home, st) {
+    if (!home) return { ok: true };
+    st = st || {};
+    if (st.restored && !st.confirmed) return { ok: false, why: "restored" };
+    const out = { ok: true };
+    if (st.me && st.me.lat != null && st.me.lng != null) {
+      const d = haversineM(home.lat, home.lng, st.me.lat, st.me.lng);
+      if (d > HOME_PHONE_WARN_M) out.warnM = Math.round(d);
+    }
+    return out;
+  }
+
+  // Field contour -> FC fence storage (MISSION_TYPE_FENCE) after a FULL mission upload:
+  // always in GPS-denied mode (the companion's edge guard reads it from the FC; FENCE_ENABLE
+  // is never written and stays 0), otherwise only when the pilot ticked the opt-in box.
+  // Never on a partial (resume) upload — that is not the moment to replace or clear it.
+  function fenceUploadWanted(vio, optIn, partial, isInav) {
+    return !isInav && !partial && !!(vio || optIn);
+  }
+
+  global.VIO_MODE = { fenceUploadWanted, haversineM, homeUploadGate, HOME_PHONE_WARN_M, bearingDeg, compass8, relativeDeg, sideWord, nearestOnRing,
     routeSpan, reachM, driftWithin, originArgs, parseLatLon, VIO_FAMILY, VIO_ALARM, vioWarnings, vioAlertDue,
     MEASURED, measuredShare, measuredMaxPath, measuredReachM, segPenaltyS, missionTime, energy,
     legNeedM, shortLegs, splitSorties,

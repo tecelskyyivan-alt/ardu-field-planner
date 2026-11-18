@@ -317,5 +317,20 @@ check("sorties: budget below one point -> null", V.splitSorties(home, field, 10,
     V.climbNeeded(fc16) && !V.climbNeeded(V.forecastNE([[0, 0], [1500, 0], [0, 0]], 13)));
 }
 
+// homeUploadGate (ardu-gps-denied rule 11, Ivan 15.11): a restored home is uploaded only after a tap this session
+{
+  const H = { lat: 49.5, lng: 24.0 };
+  check("gate: no home (GPS mission) -> upload as before", V.homeUploadGate(null, { restored: true }).ok === true);
+  check("gate: restored, not confirmed -> refused", V.homeUploadGate(H, { restored: true, confirmed: false }).ok === false);
+  check("gate: restored, tapped -> uploads", V.homeUploadGate(H, { restored: true, confirmed: true }).ok === true);
+  check("gate: placed this session -> uploads", V.homeUploadGate(H, { restored: false, confirmed: true }).ok === true);
+  const far = V.homeUploadGate(H, { restored: false, confirmed: true, me: { lat: 49.5005, lng: 24.0 } });   // ~55.6 m
+  check("gate: phone 56 m away only WARNS", far.ok === true && far.warnM >= 55 && far.warnM <= 57);
+  const near_ = V.homeUploadGate(H, { restored: false, confirmed: true, me: { lat: 49.5001, lng: 24.0 } });  // ~11 m
+  check("gate: phone 11 m away (by eye is fine) -> no warning", near_.ok === true && near_.warnM === undefined);
+  check("gate: the phone never unblocks a restored home",
+    V.homeUploadGate(H, { restored: true, confirmed: false, me: { lat: 49.5, lng: 24.0 } }).ok === false);
+}
+
 console.log("\nRESULT: " + (failed ? `${failed} FAILURE(S)` : "ALL CHECKS PASSED"));
 process.exit(failed ? 1 : 0);

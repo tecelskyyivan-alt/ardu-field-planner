@@ -18,7 +18,7 @@
      || /FMPiOS/.test(navigator.userAgent || ""));
   // Visible build tag so you can confirm an update actually landed (the APK does
   // NOT auto-update — you must reinstall it; the PWA updates on reopen).
-  const APP_VERSION = "2.5.114";
+  const APP_VERSION = "2.5.115";
   // The deployed app on the VPS — used by the APK (different origin, native fetch)
   // to check for / download updates. The PWA/desktop use same-origin paths.
   const VPS_BASE = "";  // self-host: optional external server for logs/updates; empty = same-origin only
@@ -2982,8 +2982,9 @@
   // caller can run (a later `let` would be in its dead zone for a boot-time call).
   let vioClimbUp = true;
   function missionLead() {
-    // + VIO: 5 s, then 105 m and back unless the last upload left the climb out (vioClimbUp, Ivan 07.11)
-    return 2 + (vioHomeForUpload() ? (vioClimbUp === false ? 1 : 3) : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);
+    // + VIO: 5 s, then 105 m (descended in motion on the first leg, Ivan 16.11) unless the last upload left the climb out
+    // (vioClimbUp, Ivan 07.11)
+    return 2 + (vioHomeForUpload() ? (vioClimbUp === false ? 1 : 2) : 0) + ((parseFloat($("speed").value) || 0) > 0 ? 1 : 0);
   }
   // splicePre: how many safe-transit INGRESS waypoints (#12) were spliced onto the FRONT
   // of `route` before it was uploaded (0 for INAV, resumes, or a plain/unspliced mission).
@@ -3461,7 +3462,11 @@
       // whatever it already is (true, since we're past the early `if (!res.ok) return res;`
       // above). The outcome is attached as res.fence — the CALLER composes the one message
       // actually painted to the pilot (a setMsg here would just be silently overwritten).
-      if (!isInav && !(p && p.route && p.route.length) && $("fence-upload") && $("fence-upload").checked) {
+      // GPS-denied (VIO) mode: the contour goes up on EVERY full upload, no checkbox — the
+      // onboard edge guard takes the field edge from it (Ivan 16.11); the guard only watches.
+      const fenceVio = vioOn();
+      if (window.VIO_MODE.fenceUploadWanted(fenceVio, !!($("fence-upload") && $("fence-upload").checked),
+                                            !!(p && p.route && p.route.length), isInav)) {
         try {
           const boundary = boundaryFromPolygon();
           const exclusions = collectExclusions();
@@ -3491,6 +3496,7 @@
         } catch (e) {
           res.fence = { ok: false, error: (e && e.message) || String(e) };
         }
+        if (res.fence) res.fence.vio = fenceVio;
       }
       return res;
     },
@@ -4967,7 +4973,25 @@
     }
   }
 
+  // ardu-gps-denied PROMPT_AGENTS rule 11: refuse an upload with a home restored from memory and not confirmed.
+  function vioHomeGateOk() {
+    if (!vioOn() || !vioHome) return true;
+    const g = VIO.homeUploadGate(vioHome, { restored: vioHomeRestored, confirmed: vioHomeConfirmed, me: myPosition });
+    if (!g.ok) {
+      setMsg(t("Дім «Д» відновлено з пам'яті поля. Торкнись його на мапі, якщо дрон стоїть там, і залий знову."),
+             "error");
+      appLog("vio: upload refused — restored home not confirmed");
+      return false;
+    }
+    if (g.warnM) {
+      appLog("vio: phone GPS " + g.warnM + " m from home (warning only)");
+      setMsg(tf(t("Увага: телефон за {0} м від «Д» (GPS телефона може брехати)."), g.warnM), null);
+    }
+    return true;
+  }
+
   async function mavUpload() {
+    if (!vioHomeGateOk()) return;
     const a = mavApi();
     if (!a || !a.mav_upload_mission) { setMsg(t("API недоступний."), "error"); return; }
     // Fixed-wing: the arc geometry is baked at BUILD time, but we only know for sure this
@@ -5083,7 +5107,18 @@
         // setMsg called from inside mav_upload_mission would be overwritten by this one
         // with zero paint frames in between, silently hiding a fence failure from the
         // pilot (review finding). Never downgrade an already-worse verdict (error > warn > ok).
-        if (r.fence) {
+        if (r.fence && r.fence.vio) {
+          // VIO: the contour is for the onboard edge guard, the FC fence stays OFF.
+          if (r.fence.ok && r.fence.warning) {
+            m += " " + t("Контур поля сторожу: підтвердження не прийшло — на борту може лишитися старий контур. Перезалий місію.");
+            if (kind === "ok") kind = "warn";
+          } else if (r.fence.ok) {
+            m += " " + tf(t("Контур поля передано сторожу ({0} вершин); геозона FC вимкнена."), r.fence.count);
+          } else {
+            m += " " + tf(t("Контур поля сторожу НЕ передано: {0}. Місія залита нормально."), r.fence.error || t("невідома помилка"));
+            if (kind === "ok") kind = "warn";
+          }
+        } else if (r.fence) {
           if (r.fence.ok && r.fence.warning) {
             // Lost-ACK "ok" (link.js:610): every fence item was SENT but the final ACK never
             // arrived. On the vehicle this can time out and discard the incomplete transfer,
@@ -5121,6 +5156,7 @@
   // заливка — з вертикальним зльотом на задану висоту на початку; далі оператор
   // стартує як завжди (мотори → «Старт місії»).
   async function resumeUploadRemainder(rem) {
+    if (!vioHomeGateOk()) return;
     const a = mavApi();
     if (!a || !a.mav_upload_mission) { setMsg(t("Немає звʼязку з дроном."), "error"); return; }
     appLog("[resume] заливаю залишок: " + rem.rest.length + " точок (пройдено " + rem.idx + "/" + rem.total + ")");
@@ -5892,6 +5928,8 @@
   let vioHome = null, vioHomeMarker = null, vioLine = null, vioPlanLine = null;
   let vioOriginResult = null;     // the last upload's origin write: {ok} / {ok:false, held}
   try { vioHome = JSON.parse(localStorage.getItem(VIO_KEY) || "null"); } catch (e) { vioHome = null; }
+  // A home from memory (this load or a field switch) is not where the drone is until a tap says so (homeUploadGate).
+  let vioHomeRestored = !!vioHome, vioHomeConfirmed = false;
   // Home per field: the operator sets it once for a field, it comes back with the field.
   const VIO_HOMES = "fmp_vio_homes";
   let vioLastField = null;
@@ -5902,8 +5940,9 @@
     const h = currentFieldName ? vioHomes()[currentFieldName] : null;
     if (h && h.lat != null) {
       vioHome = h; vioOriginResult = null;
+      vioHomeRestored = true; vioHomeConfirmed = false;
       try { localStorage.setItem(VIO_KEY, JSON.stringify(vioHome)); } catch (e) {}
-      appLog("vio: home restored for the field");
+      appLog("vio: home restored for the field — a tap on it confirms it before an upload");
     }
   }
   function vioOn() { return !!($("vio-mode") && $("vio-mode").checked); }
@@ -6049,6 +6088,7 @@
   function vioHomeForUpload() { return (vioOn() && vioHome) ? { lat: vioHome.lat, lng: vioHome.lng, alt: vioHome.alt || 0 } : null; }
   function vioSetHome(ll, why) {
     vioHome = { lat: +ll.lat, lng: +ll.lng, alt: 0 };
+    vioHomeRestored = false; vioHomeConfirmed = true;        // placed or dragged now: that is the confirmation
     vioOriginResult = null;          // a moved home has not been written yet
     // Ground elevation for the origin's altitude (AMSL). Best effort: offline it stays 0,
     // which shifts only the absolute altitude the FC reports, not the navigation.
@@ -6120,6 +6160,11 @@
       vioHomeMarker = L.marker(ll, { icon: vioArrowIcon(hdg), draggable: true, zIndexOffset: 1500 })
         .addTo(map).bindTooltip(t("Дім (старт без GPS)"));
       vioHomeMarker.on("dragend", (e) => vioSetHome(e.target.getLatLng(), "drag"));
+      vioHomeMarker.on("click", () => {                       // one tap = «the drone stands here»
+        vioHomeConfirmed = true;
+        appLog("vio: home confirmed by a tap");
+        setMsg(t("Дім підтверджено."), "ok");
+      });
       vioHomeMarker._hdg = hdg;
     } else {
       vioHomeMarker.setLatLng(ll);
