@@ -89,6 +89,11 @@ try:
         except socket.timeout:
             return b""
 
+    # Before any drone: FMP's heartbeat goes out as a broadcast, and the OS hands it back to the
+    # bridge's own socket. Learned as "the backpack", it fed FMP its own packets and held off the
+    # real backpack (15.11 field: auto-connect over UDP never found the drone).
+    ws_send(b"HB-0")
+    check("own broadcast is not fed back to FMP", b"HB-0" not in ws_recv_all(0.6))
     drone.sendto(b"DRONE-1", ("127.0.0.1", PORT))
     got = ws_recv_all()
     intruder.sendto(b"EVIL-1", ("127.0.0.1", PORT))

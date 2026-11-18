@@ -54,6 +54,8 @@ class Udp(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, addr):
         global peer, last_rx
+        if addr[1] == UDP_PORT and addr[0] in ("127.0.0.1", lan_ip()):   # IP re-read: WiFi may change
+            return  # our own broadcast echoed back: learning it as "the backpack" loops FMP onto itself
         now = time.monotonic()
         if peer and addr != peer and now - last_rx < PEER_HOLD:
             # Anyone on the WiFi could otherwise become "the drone" with one packet: get our
